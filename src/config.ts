@@ -8,6 +8,7 @@ export interface Config {
   venvPath: string;
   projectDir: string;
   defaultLocalPort: number;
+  vllmVersion: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".config", "ivllm");
@@ -19,6 +20,7 @@ const DEFAULTS: Config = {
   venvPath: "~/ivllm-venv/.venv",
   projectDir: "$PROJECTDIR",
   defaultLocalPort: 11434,
+  vllmVersion: "0.15.1",
 };
 
 export function loadConfig(): Config {
