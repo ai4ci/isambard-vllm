@@ -10,7 +10,7 @@ export interface Config {
   defaultLocalPort: number;
 }
 
-const CONFIG_DIR = join(homedir(), ".ivllm");
+const CONFIG_DIR = join(homedir(), ".config", "ivllm");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 const DEFAULTS: Config = {

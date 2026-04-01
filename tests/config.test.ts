@@ -4,7 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { loadConfig, saveConfig, assertConfigured } from "../src/config.ts";
 
-const REAL_CONFIG_PATH = join(homedir(), ".ivllm", "config.json");
+const REAL_CONFIG_PATH = join(homedir(), ".config", "ivllm", "config.json");
 
 beforeEach(() => {
   if (existsSync(REAL_CONFIG_PATH)) rmSync(REAL_CONFIG_PATH);
