@@ -6,12 +6,16 @@ import { loadConfig, saveConfig, assertConfigured } from "../src/config.ts";
 
 const REAL_CONFIG_PATH = join(homedir(), ".config", "ivllm", "config.json");
 
+let savedConfig: string | null = null;
+
 beforeEach(() => {
+  savedConfig = existsSync(REAL_CONFIG_PATH) ? readFileSync(REAL_CONFIG_PATH, "utf-8") : null;
   if (existsSync(REAL_CONFIG_PATH)) rmSync(REAL_CONFIG_PATH);
 });
 
 afterEach(() => {
   if (existsSync(REAL_CONFIG_PATH)) rmSync(REAL_CONFIG_PATH);
+  if (savedConfig !== null) writeFileSync(REAL_CONFIG_PATH, savedConfig, "utf-8");
 });
 
 describe("Config", () => {
