@@ -32,7 +32,8 @@ export async function cmdStart(args: string[]): Promise<void> {
   const { jobName, model, configFile, gpuCount, tensorParallelSize, timeLimit, serverPort } = startArgs;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
   const hfHome = `${config.projectDir}/hf`;
-  const remoteWorkDir = `$HOME/${jobName}`;
+  const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands and SLURM --output (SLURM expands $HOME)
+  const remoteWorkDirScp = `~/${jobName}`;      // for scp destinations (~ is reliably expanded by scp/sftp; $HOME is not)
   const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
 
   // Set up dry-run temp dir and RemoteOps
@@ -111,6 +112,8 @@ export async function cmdStart(args: string[]): Promise<void> {
   const cachePath = hfCachePath(hfHome, model);
   if (startArgs.dryRun) {
     console.log(`[dry-run] HF cache check skipped (would check: ${cachePath})`);
+  } else if (startArgs.mock) {
+    console.log(`[mock] Model download skipped`);
   } else {
     const { exitCode: cacheCheck } = await ops.runRemote(
       `test -d ${cachePath}`, { silent: true }
@@ -151,6 +154,9 @@ export async function cmdStart(args: string[]): Promise<void> {
   // ── Copy files and submit SLURM job ─────────────────────────────────────────
   const remoteConfigFile = configFile ? `${remoteWorkDir}/${basename(configFile)}` : undefined;
   const remoteScriptPath = `${remoteWorkDir}/${jobName}.slurm.sh`;
+  // Scp destinations use ~ (reliably expanded by scp/sftp; $HOME is not expanded without a shell)
+  const remoteConfigFileScp = configFile ? `${remoteWorkDirScp}/${basename(configFile)}` : undefined;
+  const remoteScriptPathScp = `${remoteWorkDirScp}/${jobName}.slurm.sh`;
 
   const script = startArgs.mock
     ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
@@ -166,10 +172,10 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   try {
     console.log("Copying files to login node...");
-    if (remoteConfigFile && configFile) {
-      await ops.copyFile(configFile, remoteConfigFile);
+    if (remoteConfigFileScp && configFile) {
+      await ops.copyFile(configFile, remoteConfigFileScp);
     }
-    await ops.copyFile(localScriptTmp, remoteScriptPath);
+    await ops.copyFile(localScriptTmp, remoteScriptPathScp);
     console.log("✓ Files copied");
 
     // ── Dry-run: show summary and exit ────────────────────────────────────────
