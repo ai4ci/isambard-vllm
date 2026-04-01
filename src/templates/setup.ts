@@ -3,21 +3,22 @@ import { dirname } from "path";
 export interface SetupScriptOptions {
   venvPath: string;
   vllmVersion: string;
-  outputFile: string;
 }
 
 export function renderSetupScript(opts: SetupScriptOptions): string {
   const venvParent = dirname(opts.venvPath);
-  const { venvPath, vllmVersion, outputFile } = opts;
+  const { venvPath, vllmVersion } = opts;
 
   return `#!/bin/bash
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --time=02:00:00
-#SBATCH --output=${outputFile}
 
 set -euo pipefail
+
+# Redirect all output to a known log file using $HOME (tilde does not expand in SBATCH directives)
+exec > "$HOME/.config/ivllm/setup.log" 2>&1
 
 module load cudatoolkit
 
@@ -42,7 +43,7 @@ srun \\
   --gpus=1 \\
   --ntasks=1 \\
   bash -c "
-    source ${venvPath}/bin/activate
+    source $VENV_PATH/bin/activate
     uv pip install -U vllm[flashinfer]==${vllmVersion} ray[default] \\
       --torch-backend=auto \\
       --extra-index-url https://wheels.vllm.ai/${vllmVersion}/vllm

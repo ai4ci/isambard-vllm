@@ -45,7 +45,6 @@ export async function cmdSetup(_args: string[]): Promise<void> {
   const script = renderSetupScript({
     venvPath: config.venvPath,
     vllmVersion: config.vllmVersion,
-    outputFile: REMOTE_LOG_PATH,
   });
 
   const localTmp = join(tmpdir(), "ivllm-setup.slurm.sh");

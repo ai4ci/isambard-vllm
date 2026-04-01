@@ -6,7 +6,6 @@ describe("renderSetupScript", () => {
   const base = {
     venvPath: "/home/user/ivllm-venv/.venv",
     vllmVersion: "0.15.1",
-    outputFile: "/home/user/ivllm-setup.log",
   };
 
   it("renders venv parent directory from venvPath", () => {
@@ -24,9 +23,10 @@ describe("renderSetupScript", () => {
     expect(script).toContain("vllm[flashinfer]==0.15.1");
   });
 
-  it("renders output file in SBATCH directive", () => {
+it("redirects output to log file via exec using $HOME (not SBATCH directive)", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("#SBATCH --output=/home/user/ivllm-setup.log");
+    expect(script).toContain('exec > "$HOME/.config/ivllm/setup.log" 2>&1');
+    expect(script).not.toContain("#SBATCH --output");
   });
 
   it("includes IVLLM_SETUP_SUCCESS marker", () => {
@@ -39,9 +39,9 @@ describe("renderSetupScript", () => {
     expect(script).not.toContain("--pty");
   });
 
-  it("activates the venv before installing", () => {
+  it("activates the venv using the $VENV_PATH variable (tilde-safe)", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("source /home/user/ivllm-venv/.venv/bin/activate");
+    expect(script).toContain("source $VENV_PATH/bin/activate");
   });
 });
 
