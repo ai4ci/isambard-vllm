@@ -1,14 +1,17 @@
 import { readFileSync, existsSync } from "fs";
-import { writeFileSync, unlinkSync } from "fs";
+import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createInterface } from "readline";
 import type { ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
-import { runRemote, copyFile, spawnTunnel } from "../ssh.ts";
+import { spawnTunnel } from "../ssh.ts";
+import { runRemote } from "../ssh.ts";
 import { submitJob, pollJobStatus } from "../slurm.ts";
 import { renderInferenceScript } from "../templates/inference.ts";
+import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
+import { makeRemoteOps } from "../remote-ops.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -32,6 +35,10 @@ export async function cmdStart(args: string[]): Promise<void> {
   const remoteWorkDir = `~/${jobName}`;
   const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
 
+  // Set up dry-run temp dir and RemoteOps
+  const dryRunDir = startArgs.dryRun ? mkdtempSync(join(tmpdir(), "ivllm-dryrun-")) : undefined;
+  const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
+
   // Session state for shutdown sequence
   let shuttingDown = false;
   let slurmJobId: string | null = null;
@@ -47,7 +54,7 @@ export async function cmdStart(args: string[]): Promise<void> {
 
     if (slurmJobId) {
       process.stdout.write("  Cancelling SLURM job...");
-      await runRemote(config, `scancel ${slurmJobId}`, { silent: true }).catch(() => {});
+      await ops.runRemote(`scancel ${slurmJobId}`, { silent: true }).catch(() => {});
       console.log(" done");
     }
 
@@ -58,7 +65,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
 
     process.stdout.write("  Removing lockfile...");
-    await runRemote(config, `rm -f ${remoteJobDetails}`, { silent: true }).catch(() => {});
+    await ops.runRemote(`rm -f ${remoteJobDetails}`, { silent: true }).catch(() => {});
     console.log(" done");
 
     console.log("✓ Session ended");
@@ -79,15 +86,15 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   // ── Pre-flight ──────────────────────────────────────────────────────────────
   console.log("Checking SSH connectivity...");
-  const { exitCode: sshCheck } = await runRemote(config, "echo ok", { silent: true });
+  const { exitCode: sshCheck } = await ops.runRemote("echo ok", { silent: true });
   if (sshCheck !== 0) {
     console.error("Error: Cannot connect to login node.");
     process.exit(1);
   }
 
   console.log("Checking venv...");
-  const { exitCode: venvCheck } = await runRemote(
-    config, `test -f ${config.venvPath}/bin/activate`, { silent: true }
+  const { exitCode: venvCheck } = await ops.runRemote(
+    `test -f ${config.venvPath}/bin/activate`, { silent: true }
   );
   if (venvCheck !== 0) {
     console.error(`Error: vLLM venv not found at ${config.venvPath}. Run 'ivllm setup' first.`);
@@ -97,8 +104,8 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   // ── Model download ───────────────────────────────────────────────────────────
   const cachePath = hfCachePath(hfHome, model);
-  const { exitCode: cacheCheck } = await runRemote(
-    config, `test -d ${cachePath}`, { silent: true }
+  const { exitCode: cacheCheck } = await ops.runRemote(
+    `test -d ${cachePath}`, { silent: true }
   );
   if (cacheCheck === 0) {
     console.log(`✓ Model cached at ${cachePath}`);
@@ -106,7 +113,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     console.log(`Downloading model ${model} to ${hfHome} on login node...`);
     const hfToken = process.env["HF_TOKEN"] ?? "";
     const downloadCmd = `source ${config.venvPath}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} huggingface-cli download ${model}`;
-    const { exitCode: dlCode } = await runRemote(config, downloadCmd);
+    const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
     if (dlCode !== 0) {
       console.error("Error: Model download failed.");
       process.exit(1);
@@ -116,11 +123,9 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   // ── Create lockfile ──────────────────────────────────────────────────────────
   console.log("Creating job working directory and lockfile...");
-  await runRemote(config, `mkdir -p ${remoteWorkDir}`, { silent: true });
+  await ops.runRemote(`mkdir -p ${remoteWorkDir}`, { silent: true });
   const pendingJson = JSON.stringify({ status: "pending", job_name: jobName });
-  const { exitCode: lockCode } = await runRemote(
-    config,
-    // Atomically create only if not existing
+  const { exitCode: lockCode } = await ops.runRemote(
     `set -C; echo '${pendingJson}' > ${remoteJobDetails}`,
     { silent: true }
   );
@@ -131,23 +136,39 @@ export async function cmdStart(args: string[]): Promise<void> {
   console.log("✓ Lockfile created");
 
   // ── Copy files and submit SLURM job ─────────────────────────────────────────
-  const remoteConfigFile = `${remoteWorkDir}/${configFile}`;
+  const remoteConfigFile = configFile ? `${remoteWorkDir}/${configFile}` : undefined;
   const remoteScriptPath = `${remoteWorkDir}/${jobName}.slurm.sh`;
 
-  const script = renderInferenceScript({
-    jobName, model, venvPath: config.venvPath, hfHome,
-    configFileName: configFile, workDir: remoteWorkDir,
-    serverPort, gpuCount, tensorParallelSize, timeLimit,
-  });
+  const script = startArgs.mock
+    ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
+    : renderInferenceScript({
+        jobName, model, venvPath: config.venvPath, hfHome,
+        configFileName: configFile!, workDir: remoteWorkDir,
+        serverPort, gpuCount, tensorParallelSize, timeLimit,
+      });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);
   writeFileSync(localScriptTmp, script, "utf-8");
 
   try {
     console.log("Copying files to login node...");
-    await copyFile(config, configFile, remoteConfigFile);
-    await copyFile(config, localScriptTmp, remoteScriptPath);
+    if (remoteConfigFile && configFile) {
+      await ops.copyFile(configFile, remoteConfigFile);
+    }
+    await ops.copyFile(localScriptTmp, remoteScriptPath);
     console.log("✓ Files copied");
+
+    // ── Dry-run: show summary and exit ────────────────────────────────────────
+    if (startArgs.dryRun) {
+      console.log(`\n=== Dry-run complete ===`);
+      console.log(`Generated files saved to: ${dryRunDir}`);
+      if (remoteConfigFile && configFile) {
+        console.log(`  ${configFile}  →  ${remoteConfigFile}`);
+      }
+      console.log(`  ${jobName}.slurm.sh  →  ${remoteScriptPath}`);
+      console.log(`\nTo run for real, omit --dry-run.`);
+      return;
+    }
 
     console.log("Submitting SLURM job...");
     slurmJobId = await submitJob(config, remoteScriptPath);
@@ -162,7 +183,7 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   while (!shuttingDown) {
     await sleep(POLL_INTERVAL_MS);
-    const { stdout } = await runRemote(config, `cat ${remoteJobDetails} 2>/dev/null`, { silent: true });
+    const { stdout } = await ops.runRemote(`cat ${remoteJobDetails} 2>/dev/null`, { silent: true });
     const details = parseJobDetails(stdout);
 
     if (!details) {
@@ -242,8 +263,6 @@ async function printSlurmLog(config: Parameters<typeof runRemote>[0], workDir: s
   if (stdout) console.error(stdout);
   console.error("--- end log ---\n");
 }
-
-function timestamp(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 

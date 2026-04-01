@@ -132,4 +132,40 @@ describe("parseStartArgs", () => {
   it("throws when --config is missing", () => {
     expect(() => parseStartArgs(["my-job", "--model", "m"])).toThrow(/--config/);
   });
+
+  it("--dry-run flag sets dryRun: true", () => {
+    const result = parseStartArgs([
+      "my-job", "--model", "m", "--config", "c.yaml", "--dry-run",
+    ]);
+    expect(result.dryRun).toBe(true);
+  });
+
+  it("dryRun defaults to false when flag absent", () => {
+    const result = parseStartArgs(["my-job", "--model", "m", "--config", "c.yaml"]);
+    expect(result.dryRun).toBe(false);
+  });
+
+  it("--mock flag sets mock: true", () => {
+    const result = parseStartArgs(["my-job", "--model", "m", "--mock"]);
+    expect(result.mock).toBe(true);
+  });
+
+  it("mock defaults to false when flag absent", () => {
+    const result = parseStartArgs(["my-job", "--model", "m", "--config", "c.yaml"]);
+    expect(result.mock).toBe(false);
+  });
+
+  it("--mock does not require --config", () => {
+    expect(() => parseStartArgs(["my-job", "--model", "m", "--mock"])).not.toThrow();
+  });
+
+  it("--mock with --dry-run sets both flags", () => {
+    const result = parseStartArgs(["my-job", "--model", "m", "--mock", "--dry-run"]);
+    expect(result.mock).toBe(true);
+    expect(result.dryRun).toBe(true);
+  });
+
+  it("--config is still required without --mock", () => {
+    expect(() => parseStartArgs(["my-job", "--model", "m"])).toThrow(/--config/);
+  });
 });

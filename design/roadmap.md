@@ -57,19 +57,32 @@
 - [x] `ivllm stop <job>`: recovery path — `scancel` by SLURM job ID from `job_details.json`, kill any lingering tunnel processes on LOCAL, remove `job_details.json`
 - [x] Commit
 
-## Phase 6 — End-to-end testing with mock vLLM
+## Phase 6 — Mock vLLM script and `ivllm start --dry-run`
 
-- [ ] Write a mock vLLM SLURM script (based on `design/old/tunnel-test.sh` mock HTTP server) that:
-  - Writes `job_details.json` correctly
-  - Serves `/health` and `/v1/models` on the COMPUTE node
-  - Simulates startup delay
+- [x] Write a mock vLLM SLURM script template (`src/templates/mock-inference.ts`) that:
+  - Uses the same template approach as `renderInferenceScript` — submitted as a SLURM batch job
+  - Writes `job_details.json` correctly (same schema as real inference script)
+  - Serves `/health` and `/v1/models` on the COMPUTE node via a lightweight bash HTTP server
+  - Simulates a configurable startup delay before marking status `"running"`
+- [x] Add `--mock` flag to `ivllm start`: substitutes `renderMockInferenceScript()` for `renderInferenceScript()`, otherwise identical flow
+- [x] Implement `--dry-run` flag on `ivllm start` only:
+  - SSH primitives are swapped for dry-run equivalents via a thin wrapper in `start.ts`
+  - File copies (`scp`) write to a local temp directory instead of the remote LOGIN node
+  - SSH remote commands are printed (with full command text) but not executed
+  - SLURM job is not submitted
+  - Key output for review: generated SLURM script and vLLM config file in local temp dir
+  - Works with both real and mock modes (i.e. `--mock --dry-run` reviews the mock script)
+- [ ] Run `ivllm start <job> ... --dry-run` and review real inference script + config
+- [ ] Run `ivllm start <job> ... --mock --dry-run` and review mock SLURM script
+
+## Phase 7 - Mock vLLM remote testing
 - [ ] End-to-end test: `ivllm start` against mock script, verify tunnel, heartbeat, clean shutdown
 - [ ] Test heartbeat failure path (mock server exits; verify LOCAL detects and shuts down cleanly)
 - [ ] Test lockfile behaviour (start same job twice)
 - [ ] Test `ivllm stop` recovery (simulate unclean exit, verify stop cleans up)
 - [ ] Commit
 
-## Phase 7 — End-to-end test with real vLLM
+## Phase 8 — End-to-end test with real vLLM
 
 - [ ] Test `ivllm setup` on Isambard AI (resolve ADR-005 venv path question)
 - [ ] Validate COMPUTE node internet access (resolve Unknown — determines whether LOGIN pre-download is mandatory or a nice-to-have)
