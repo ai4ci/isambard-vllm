@@ -2,25 +2,25 @@
 
 ## Phase 1 — Project scaffold and tooling
 
-- [ ] Initialise bun/Node.js project (`bun init`, `package.json`, TypeScript config)
-- [ ] CLI entry point with sub-command routing (`ivllm setup | start | status | stop`)
-- [ ] Configuration file (`~/.ivllm/config.json`): HPC login host, HPC username, venv path, default local port
-- [ ] SSH helper module: run a remote command on LOGIN, copy a file to LOGIN (wraps `ssh`/`scp` child processes)
-- [ ] Commit
+- [x] Initialise bun/Node.js project (`bun init`, `package.json`, TypeScript config)
+- [x] CLI entry point with sub-command routing (`ivllm setup | start | status | stop`)
+- [x] Configuration file (`~/.config/ivllm/config.json`): HPC login host, HPC username, venv path, default local port
+- [x] SSH helper module: run a remote command on LOGIN, copy a file to LOGIN (wraps `ssh`/`scp` child processes)
+- [x] Commit
 
 ## Phase 2 — `ivllm setup`
 
-- [ ] Generate setup SLURM script from template (based on `design/old/setup-vllm.sh`)
-- [ ] Copy script to LOGIN and submit via `sbatch`
-- [ ] Poll SLURM job status until complete or failed
-- [ ] Stream SLURM output log back to LOCAL in real time
-- [ ] Report success (vLLM version) or failure with log excerpt
-- [ ] Validate venv exists on HPC after setup
-- [ ] Commit
+- [x] Generate setup SLURM script from template (based on `design/old/setup-vllm.sh`)
+- [x] Copy script to LOGIN and submit via `sbatch`
+- [x] Poll SLURM job status until complete or failed
+- [x] Stream SLURM output log back to LOCAL in real time
+- [x] Report success (vLLM version) or failure with log excerpt
+- [x] Validate venv exists on HPC after setup
+- [x] Commit
 
 ## Phase 3 — SLURM inference script
 
-- [ ] Write SLURM bash template for single-node vLLM inference
+- [x] Write SLURM bash template for single-node vLLM inference
   - Activate venv
   - Write initial `job_details.json` (`status: "initialising"`, node hostname, SLURM job ID)
   - Start vLLM with config file, model, port
@@ -28,34 +28,34 @@
   - On failure/timeout: update `job_details.json` (`status: "failed"` / `"timeout"`)
   - Log to file in job working directory
   - No SSH tunnel logic in SLURM script
-- [ ] Unit-testable template rendering (job name, config path, model, port substitution)
-- [ ] Commit
+- [x] Unit-testable template rendering (job name, config path, model, port substitution)
+- [x] Commit
 
 ## Phase 4 — `ivllm start` — core session owner
 
-- [ ] Pre-flight: check venv exists on HPC; fail early if not
-- [ ] Model pre-download on LOGIN:
-  - [ ] Check HuggingFace cache at `$PROJECTDIR/hf` for the requested model
-  - [ ] If not cached: run `huggingface-cli download <model>` on LOGIN via SSH with `HF_HOME=$PROJECTDIR/hf` and `HF_TOKEN` forwarded; stream progress to user
-- [ ] Create `job_details.json` on HPC (`status: "pending"`); fail if already exists (lockfile)
-- [ ] Copy vllm config file and generated SLURM script to LOGIN
-- [ ] Submit SLURM job via `sbatch`; record SLURM job ID
-- [ ] Poll `job_details.json` on LOGIN; display status transitions to user
-- [ ] On `status: "running"`: spawn forward SSH tunnel child process
-- [ ] Print connection URL to user: `http://localhost:<port>/v1`
-- [ ] Heartbeat loop: poll `/health` through tunnel on configurable interval
-- [ ] Shutdown sequence (Ctrl+C, "exit" input, heartbeat failure, or SLURM failure):
+- [x] Pre-flight: check venv exists on HPC; fail early if not
+- [x] Model pre-download on LOGIN:
+  - [x] Check HuggingFace cache at `$PROJECTDIR/hf` for the requested model
+  - [x] If not cached: run `huggingface-cli download <model>` on LOGIN via SSH with `HF_HOME=$PROJECTDIR/hf` and `HF_TOKEN` forwarded; stream progress to user
+- [x] Create `job_details.json` on HPC (`status: "pending"`); fail if already exists (lockfile)
+- [x] Copy vllm config file and generated SLURM script to LOGIN
+- [x] Submit SLURM job via `sbatch`; record SLURM job ID
+- [x] Poll `job_details.json` on LOGIN; display status transitions to user
+- [x] On `status: "running"`: spawn forward SSH tunnel child process
+- [x] Print connection URL to user: `http://localhost:<port>/v1`
+- [x] Heartbeat loop: poll `/health` through tunnel on configurable interval
+- [x] Shutdown sequence (Ctrl+C, "exit" input, heartbeat failure, or SLURM failure):
   1. `scancel` SLURM job via SSH
-  2. Kill tunnel child process
+  2. Terminate tunnel child process
   3. Remove `job_details.json` from HPC
-- [ ] Handle SIGINT/SIGTERM to trigger shutdown sequence
-- [ ] Commit
+- [x] Handle SIGINT/SIGTERM to trigger shutdown sequence
+- [x] Commit
 
 ## Phase 5 — `ivllm status` and `ivllm stop`
 
-- [ ] `ivllm status [job]`: SSH to LOGIN, read `job_details.json` for named job (or all job working directories); display status table
-- [ ] `ivllm stop <job>`: recovery path — `scancel` by SLURM job ID from `job_details.json`, kill any lingering tunnel processes on LOCAL, remove `job_details.json`
-- [ ] Commit
+- [x] `ivllm status [job]`: SSH to LOGIN, read `job_details.json` for named job (or all job working directories); display status table
+- [x] `ivllm stop <job>`: recovery path — `scancel` by SLURM job ID from `job_details.json`, kill any lingering tunnel processes on LOCAL, remove `job_details.json`
+- [x] Commit
 
 ## Phase 6 — End-to-end testing with mock vLLM
 
