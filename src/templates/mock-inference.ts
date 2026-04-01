@@ -18,11 +18,11 @@ export function renderMockInferenceScript(opts: MockInferenceScriptOptions): str
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --time=${timeLimit}
-#SBATCH --output=${workDir}/${jobName}.slurm.log
 
 set -euo pipefail
 
 WORK_DIR="${workDir}"
+exec > "$WORK_DIR/${jobName}.slurm.log" 2>&1
 JOB_DETAILS="$WORK_DIR/job_details.json"
 SERVER_PORT=${serverPort}
 MODEL="${model}"

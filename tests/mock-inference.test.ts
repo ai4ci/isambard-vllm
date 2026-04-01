@@ -18,8 +18,8 @@ describe("renderMockInferenceScript", () => {
     expect(renderMockInferenceScript(base)).toContain("#SBATCH --time=1:00:00");
   });
 
-  it("sets SBATCH output to log file in workDir", () => {
-    expect(renderMockInferenceScript(base)).toContain("#SBATCH --output=/home/user/mock-job/");
+  it("redirects stdout/stderr to log file in workDir via exec", () => {
+    expect(renderMockInferenceScript(base)).toContain('exec > "$WORK_DIR/mock-job.slurm.log" 2>&1');
   });
 
   it("does not request GPUs (mock needs no GPU)", () => {

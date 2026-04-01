@@ -23,7 +23,8 @@ export function renderInferenceScript(opts: InferenceScriptOptions): string {
 #SBATCH --gpus=${gpuCount}
 #SBATCH --time=${timeLimit}
 #SBATCH --exclusive
-#SBATCH --output=${workDir}/${jobName}.slurm.log
+
+exec > "${workDir}/${jobName}.slurm.log" 2>&1
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"

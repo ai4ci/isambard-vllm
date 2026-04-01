@@ -27,8 +27,8 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain("#SBATCH --time=4:00:00");
   });
 
-  it("sets SBATCH output to log file in workDir", () => {
-    expect(renderInferenceScript(base)).toContain("#SBATCH --output=/home/user/my-job/");
+  it("redirects stdout/stderr to log file in workDir via exec", () => {
+    expect(renderInferenceScript(base)).toContain('exec > "/home/user/my-job/my-job.slurm.log" 2>&1');
   });
 
   it("activates the venv", () => {
