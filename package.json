@@ -9,11 +9,16 @@
   },
   "scripts": {
     "start": "bun run src/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "prepare": "skills-npm"
   },
+  "files": [
+    "skills"
+  ],
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/js-yaml": "^4.0.9"
+    "@types/js-yaml": "^4.0.9",
+    "skills-npm": "^1.1.1"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -115,12 +115,39 @@ This cancels the SLURM job, kills any lingering tunnel process, and removes the 
 
 ## vLLM config file
 
-Pass any vLLM server options via a YAML config file (see the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)). Example `vllm.yaml`:
+Pass any vLLM server options via a YAML config file (see the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)). The config file specifies the model and all serving parameters. Example `vllm.yaml`:
 
 ```yaml
-max_model_len: 8192
-gpu_memory_utilization: 0.90
+model: Qwen/Qwen2.5-7B-Instruct
+tensor-parallel-size: 1
+max-model-len: 32768
+gpu-memory-utilization: 0.90
+dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: hermes
+enable-prefix-caching: true
 ```
+
+### Generating a config with AI
+
+`ivllm` ships an [Agent Skill](https://agentskills.io) for generating `vllm.yaml` files. If you are using an AI coding agent (Cursor, Claude, Windsurf, etc.), the skill will help the agent generate an optimised config for any HuggingFace model on Isambard AI hardware.
+
+**Install the skill** using [skills-npm](https://github.com/antfu/skills-npm). Add `isambard-vllm` as a dependency in your project and run `skills-npm`:
+
+```bash
+# In your project directory (where isambard-vllm is a dependency)
+bun add isambard-vllm
+bunx skills-npm
+```
+
+Or if you have cloned this repo and used `bun link`:
+
+```bash
+cd /path/to/isambard-vllm && bun link
+cd /your/project && bun add isambard-vllm && bunx skills-npm
+```
+
+Once installed, ask your AI agent: *"Generate a vllm.yaml config for `Qwen/Qwen2.5-72B-Instruct`"*
 
 ---
 
