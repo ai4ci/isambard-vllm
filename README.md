@@ -89,6 +89,8 @@ This will:
 5. Establish a forward SSH tunnel once vLLM is healthy
 6. Print the local endpoint and run a heartbeat monitor
 
+**N.B. Starting up even a simple model can take a few minutes.**
+
 ```
 🚀 OpenAI API endpoint: http://localhost:11434/v1
    Model: Qwen/Qwen2.5-0.5B-Instruct
@@ -109,7 +111,40 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 | `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
 
-### 4. Check job status
+### 4. Configure opencode to use Isambard
+
+Add a configuration to your agent harness (example here for opencode) as `opencode.json` in your project directory:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "isambard-vllm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Isambard vLLM Server",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": "EMPTY"
+      },
+      "models": {
+        "Qwen/Qwen2.5-0.5B-Instruct": {
+          "name": "Qwen2.5-0.5B-Instruct (Isambard)",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Start up opencode and select the Qwen model from the `Isambard vLLM Server provider`.
+
+When you have finished type "exit" at the terminal you started `ivllm` in and the isambard job will finish.
+
+### 5. Check job status
 
 Not generally necessary as the local session from `ivllm start` will display the current
 status.
@@ -119,7 +154,7 @@ ivllm status           # all known jobs
 ivllm status my-job    # specific job
 ```
 
-### 4. Stop a job (recovery)
+### 6. Stop a job (recovery)
 
 If `ivllm start` exits uncleanly (e.g. terminal closed), use:
 
