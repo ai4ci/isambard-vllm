@@ -40,7 +40,7 @@ ivllm config --username <hpc-username>   # e.g. YYYY.XXXX
 ivllm config --venv-path <path>          # default: /home/XXXX/YYYY.XXXX/ivllm-venv/.venv
 ivllm config --project-dir <path>        # HPC project dir, e.g. /projects/XXXX
 ivllm config --local-port <port>         # default: 11434
-ivllm config --vllm-version <version>    # default: 0.15.1 (higher versions not yet supported on Isambard)
+ivllm config --vllm-version <version>    # default: 0.15.1
 ```
 
 Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no arguments to view current settings.
@@ -60,14 +60,12 @@ This submits a SLURM job on a compute node to install vLLM via `uv` into a virtu
 ### 2. Start an inference session
 
 ```bash
-ivllm start my-job \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
-  --config vllm.yaml
+ivllm start my-job --config vllm.yaml
 ```
 
 This will:
 1. Check SSH connectivity and that the venv exists
-2. Download the model to the shared HF cache on the login node (if not already cached)
+2. Read the model name from `vllm.yaml` and download it to the shared HF cache on the login node (if not already cached)
 3. Copy the SLURM script and vLLM config to the HPC
 4. Submit the SLURM job and monitor startup
 5. Establish a forward SSH tunnel once vLLM is healthy
@@ -86,12 +84,11 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--model <name>` | HuggingFace model ID | required |
-| `--config <file>` | vLLM config YAML to copy to HPC | required (unless `--mock`) |
-| `--local-port <n>` | Local port to expose the API on | `defaultLocalPort` from config |
-| `--gpus <n>` | Number of GPUs to request | `4` |
+| `--config <file>` | vLLM config YAML (contains model, parallelism and all serving options) | required |
+| `--local-port <n>` | Local port to expose the API on | from `ivllm config` |
+| `--gpus <n>` | GPUs to request (overrides `tensor-parallel-size × pipeline-parallel-size` from YAML) | derived from YAML |
 | `--time <hh:mm:ss>` | SLURM time limit | `4:00:00` |
-| `--mock` | Use mock vLLM (Python HTTP server, no GPU needed — for testing) | off |
+| `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
 
 ### 3. Check job status
@@ -157,7 +154,7 @@ For gated models, export your token before running `ivllm start`:
 
 ```bash
 export HF_TOKEN=hf_...
-ivllm start my-job --model meta-llama/Llama-3.1-8B-Instruct --config vllm.yaml
+ivllm start my-job --config vllm.yaml
 ```
 
 The token is forwarded to the login node only for the download step; it is not written to disk or embedded in any generated script.
@@ -193,7 +190,7 @@ ivllm start
 Preview what `ivllm start` would do without connecting to the HPC:
 
 ```bash
-ivllm start my-job --model Qwen/Qwen2.5-0.5B-Instruct --config vllm.yaml --dry-run
+ivllm start my-job --config vllm.yaml --dry-run
 ```
 
 The generated SLURM script and config file are saved to a local temp directory for inspection. All SSH and scp commands are printed but not executed.
