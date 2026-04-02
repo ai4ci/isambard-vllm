@@ -85,9 +85,31 @@ H100 has native fp8 tensor cores — minimal accuracy loss, ~2× throughput impr
 
 ## MoE-specific: expert parallelism
 
-For MoE models on a single node with tp < 4, consider `enable-expert-parallel: true`.
-This distributes experts across GPUs rather than sharding each expert across GPUs — better utilization.
-Only useful when `tensor-parallel-size < num_experts`.
+For MoE models (Qwen3-MoE, Mixtral, DeepSeek, etc.) with `tensor-parallel-size >= 2`, use `enable-expert-parallel: true`.
+
+vLLM uses expert parallelism **for the MoE expert layers** instead of tensor parallelism. Dense layers (attention, etc.) are still tensor-parallelized. Expert parallelism assigns different experts to different GPUs (all-to-all comms) rather than sharding each expert across GPUs (all-reduce comms) — far more efficient for MoE workloads.
+
+The vLLM official recipes (DeepSeek-R1, Qwen3.5) consistently recommend this pattern: `tp=N --enable-expert-parallel`.
+
+```yaml
+# MoE model example (Qwen3-30B-A3B on 1 GPU)
+model: Qwen/Qwen3-30B-A3B
+tensor-parallel-size: 1
+# enable-expert-parallel not needed for tp=1 (only 1 GPU)
+```
+
+```yaml
+# Large MoE on full node (tp=4 + expert parallel)
+model: deepseek-ai/DeepSeek-R1
+tensor-parallel-size: 4
+enable-expert-parallel: true
+quantization: fp8
+max-model-len: 32768
+gpu-memory-utilization: 0.90
+dtype: bfloat16
+reasoning-parser: deepseek_r1
+enable-reasoning: true
+```
 
 ## Reasoning models (Qwen3, DeepSeek-R1, etc.)
 
@@ -95,8 +117,38 @@ Some models support a "thinking" mode that generates chain-of-thought reasoning.
 If the model card mentions reasoning/thinking, add:
 ```yaml
 enable-reasoning: true
-reasoning-parser: deepseek_r1  # or qwen3 for Qwen3 models
+reasoning-parser: deepseek_r1  # DeepSeek-R1, DeepSeek-V3, and most reasoning models
+# reasoning-parser: qwen3      # Qwen3 series specifically
 ```
+
+**Parser names by model family:**
+| Model family | reasoning-parser value |
+|-------------|------------------------|
+| Qwen3 series | `qwen3` |
+| DeepSeek-R1, DeepSeek-V3 | `deepseek_r1` |
+| QwQ | `deepseek_r1` |
+| Others | Check vLLM recipes page or model card |
+
+## FP8 quantization — Hopper-optimised
+
+H100 (Hopper architecture, as on Isambard AI) has native FP8 tensor cores. The vLLM Llama recipe explicitly notes: *"For Hopper, FP8 offers the best performance for most workloads."*
+
+FP8 halves weight memory vs bfloat16 (`params_B × 1 GB` instead of `× 2 GB`) with minimal accuracy loss and typically ~2× throughput improvement.
+
+Use if: model is borderline for memory, or throughput is important:
+```yaml
+quantization: fp8
+```
+
+Many models have pre-quantized FP8 variants on HuggingFace (look for `-FP8` suffix) — these are preferable to runtime quantization.
+
+## Prefix caching
+
+For use cases with repeated system prompts or shared context (chatbots, agents), add:
+```yaml
+enable-prefix-caching: true
+```
+This is recommended in the official vLLM recipes for throughput-focused serving. It has no cost if prefixes don't repeat.
 
 ## max-model-len guidance
 
@@ -114,6 +166,7 @@ tensor-parallel-size: 1
 max-model-len: 32768
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+enable-prefix-caching: true
 ```
 
 ### Large dense model, 2 GPUs
@@ -123,9 +176,20 @@ tensor-parallel-size: 2
 max-model-len: 32768
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+enable-prefix-caching: true
 ```
 
-### MoE model, single GPU
+### Large dense model, 2 GPUs, FP8 (Hopper-optimised, ~2x throughput)
+```yaml
+model: meta-llama/Llama-3.3-70B-Instruct
+tensor-parallel-size: 1       # FP8 halves memory; 70B fits on 1x96GB at FP8
+max-model-len: 32768
+gpu-memory-utilization: 0.90
+quantization: fp8
+enable-prefix-caching: true
+```
+
+### MoE reasoning model, single GPU
 ```yaml
 model: Qwen/Qwen3-30B-A3B
 tensor-parallel-size: 1
@@ -133,15 +197,22 @@ max-model-len: 32768
 gpu-memory-utilization: 0.90
 dtype: bfloat16
 enable-reasoning: true
-reasoning-parser: deepseek_r1
+reasoning-parser: qwen3
+enable-prefix-caching: true
 ```
 
-### Full 4-GPU node
+### Large MoE, full node (4 GPUs) with expert parallelism + FP8
 ```yaml
-model: meta-llama/Llama-3.1-405B-Instruct
+# ~670B total params; FP8 ~670 GB → needs multi-node even at FP8
+# Example shown for 4 GPUs — would need pipeline-parallel-size for real deployment
+model: deepseek-ai/DeepSeek-R1
 tensor-parallel-size: 4
-pipeline-parallel-size: 3   # 12 GPUs total, 3 nodes
+# pipeline-parallel-size: 2   # uncomment for multi-node (not yet supported by ivllm)
 max-model-len: 32768
 gpu-memory-utilization: 0.90
-dtype: bfloat16
+quantization: fp8
+enable-expert-parallel: true
+enable-reasoning: true
+reasoning-parser: deepseek_r1
+enable-prefix-caching: true
 ```

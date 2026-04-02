@@ -35,7 +35,17 @@ If the model ID was not provided as an argument, ask the user:
 - Which HuggingFace model they want to use
 - What filename to write to (default: `vllm.yaml`)
 
-### 2. Fetch the model card
+### 2. Look up the official vLLM recipe (if available)
+
+Before calculating from scratch, check `https://docs.vllm.ai/projects/recipes/en/latest/` for a model-specific recipe. The recipes page lists community-maintained guides for common models. If a recipe exists:
+- Note the recommended `tensor-parallel-size`, quantization, and any special flags
+- Note whether `--enable-expert-parallel` is recommended (always the case for large MoE models)
+- Note the `reasoning-parser` name if applicable
+- Adapt the recipe's recommendations to Isambard AI's 4 × H100 96 GB topology
+
+The recipes are written for various hardware; translate GPU counts to Isambard AI node counts using: `nodes = ceil(recipe_gpus / 4)`.
+
+### 3. Fetch the model card
 
 Fetch `https://huggingface.co/<model-id>` and extract:
 
@@ -50,7 +60,7 @@ Fetch `https://huggingface.co/<model-id>` and extract:
 
 If the model card is not accessible or the parameter count cannot be determined, ask the user to provide it.
 
-### 3. Calculate memory and parallelism
+### 4. Calculate memory and parallelism
 
 Use the rules in [references/vllm-config-guide.md](references/vllm-config-guide.md):
 
@@ -69,19 +79,20 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 - `pipeline-parallel-size` = ceil(needed_gpus / 4)
 - ⚠️ **Warn the user**: multi-node is not yet supported by `ivllm`. They will need to run `ivllm start` with a manually set `--gpus` override and the multi-node SLURM support is planned for a future phase. Still generate the config so it is ready.
 
-### 4. Choose max-model-len
+### 5. Choose max-model-len
 
 - Start with the model's native context length
 - If the model supports >64K tokens natively, suggest 32768 as a practical default (KV cache for very long contexts consumes significant GPU memory)
 - Note the native context length in a YAML comment so the user knows what they are giving up
 
-### 5. Check for special options
+### 6. Check for special options
 
-- **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add `enable-reasoning: true` and the appropriate `reasoning-parser` (see model card vLLM quickstart for the parser name)
-- **MoE models with small tp**: if `tensor-parallel-size < 4` and the model is MoE, consider suggesting `enable-expert-parallel: true` in a comment
-- **Quantization**: if the model is borderline (fits with ≤10% margin), suggest `quantization: fp8` as an alternative in a comment
+- **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add `enable-reasoning: true` and the `reasoning-parser`. Use `qwen3` for Qwen3 series; `deepseek_r1` for DeepSeek-R1/V3 and most others. Check the model card vLLM quickstart snippet for the exact name.
+- **MoE models with `tensor-parallel-size >= 2`**: add `enable-expert-parallel: true`. The official vLLM recipes (DeepSeek-R1, Qwen3.5) consistently recommend this — it uses expert parallelism for the MoE layers (all-to-all comms, more efficient) while dense layers remain tensor-parallelized. No benefit when tp=1.
+- **FP8 quantization**: H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
+- **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
 
-### 6. Write the YAML file
+### 7. Write the YAML file
 
 Write the config to the requested filename. Include comments to explain the key choices:
 
@@ -104,7 +115,7 @@ dtype: bfloat16
 
 Only include keys that are non-default or important — keep the config minimal and readable.
 
-### 7. Report to the user
+### 8. Report to the user
 
 After writing the file, tell the user:
 - The filename written
@@ -155,11 +166,14 @@ Before writing the file, verify:
 | Parameter count ambiguous | Use total parameters (not non-embedding, not active) for memory calculation |
 | Model fits on paper but OOM in practice | Reduce `max-model-len` by half; or suggest `quantization: fp8` |
 | User insists on a context length that won't fit | Explain the trade-off and suggest the maximum feasible context given the GPU budget |
-| Reasoning parser name unknown | Check the model card vLLM quickstart snippet — it usually names the parser explicitly |
+| Reasoning parser name unknown | Check the model card vLLM quickstart snippet — it usually names the parser explicitly; or check the recipes page |
+| MoE model shows poor throughput | Add `enable-expert-parallel: true` with `tensor-parallel-size >= 2` |
+| Memory borderline | Try `quantization: fp8` — halves weight memory with minimal accuracy loss on Hopper (H100) |
 
 ## References
 
 - [Isambard AI hardware specs](references/isambard-specs.md)
 - [vLLM config options and memory guide](references/vllm-config-guide.md)
+- [vLLM model-specific recipes](https://docs.vllm.ai/projects/recipes/en/latest/)
 - [vLLM serve help text](../../references/help.txt)
 - [Isambard AI specs online](https://docs.isambard.ac.uk/specs/#system-specifications-isambard-ai-phase-2)
