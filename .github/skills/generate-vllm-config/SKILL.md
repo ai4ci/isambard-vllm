@@ -90,6 +90,7 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 - **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add `enable-reasoning: true` and the `reasoning-parser`. Use `qwen3` for Qwen3 series; `deepseek_r1` for DeepSeek-R1/V3 and most others. Check the model card vLLM quickstart snippet for the exact name.
 - **MoE models with `tensor-parallel-size >= 2`**: add `enable-expert-parallel: true`. The official vLLM recipes (DeepSeek-R1, Qwen3.5) consistently recommend this — it uses expert parallelism for the MoE layers (all-to-all comms, more efficient) while dense layers remain tensor-parallelized. No benefit when tp=1.
 - **FP8 quantization**: H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
+- **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
 
 ### 7. Write the YAML file
@@ -111,6 +112,9 @@ max-model-len: <context_length>
 # Native context: <native_context> — reduced to save KV cache memory
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: <parser>      # see vllm-config-guide.md for parser names
+enable-prefix-caching: true
 ```
 
 Only include keys that are non-default or important — keep the config minimal and readable.
@@ -175,5 +179,5 @@ Before writing the file, verify:
 - [Isambard AI hardware specs](references/isambard-specs.md)
 - [vLLM config options and memory guide](references/vllm-config-guide.md)
 - [vLLM model-specific recipes](https://docs.vllm.ai/projects/recipes/en/latest/)
-- [vLLM serve help text](../../references/help.txt)
+- [vLLM serve help text](references/help.txt)
 - [Isambard AI specs online](https://docs.isambard.ac.uk/specs/#system-specifications-isambard-ai-phase-2)

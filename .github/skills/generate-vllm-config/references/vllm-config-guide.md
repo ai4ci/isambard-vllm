@@ -12,7 +12,37 @@ gpu-memory-utilization: 0.90
 dtype: bfloat16
 ```
 
-## Essential options
+## Tool calling
+
+Tool calling requires two YAML keys (in addition to the model's chat template, which is bundled with the tokenizer):
+
+```yaml
+enable-auto-tool-choice: true
+tool-call-parser: <parser>
+```
+
+Without `tool-call-parser`, the model's raw text response is returned — structured `tool_calls` objects in the API response won't be populated.
+
+### Tool-call parser by model family
+
+| Model family | `tool-call-parser` value |
+|-------------|--------------------------|
+| Qwen3 series (Qwen3-*, Qwen3-MoE) | `qwen3_coder` |
+| Qwen2.5 Instruct series | `hermes` |
+| Llama 3.x (3.1, 3.2, 3.3) | `llama3_json` |
+| Llama 4 series | `llama4_json` |
+| DeepSeek-V3 | `deepseek_v3` |
+| DeepSeek-V3-0324 / newer | `deepseek_v31` |
+| Mistral / Mixtral | `mistral` |
+| InternLM | `internlm` |
+| IBM Granite | `granite` |
+| Generic OpenAI-compatible | `openai` |
+
+If the model family isn't listed, check the model card for a vLLM quickstart — it usually names the parser. If still unsure, try `hermes` (widely supported) or check `--tool-call-parser` in the vLLM help for the full list.
+
+**When to omit tool calling:** Base/pretrain checkpoints and pure reasoning models (e.g. DeepSeek-R1 without tool fine-tuning) don't support tool calls. If the model card says "Instruct" or "Chat", assume tool calling is intended.
+
+
 
 | YAML key | Description | Typical value |
 |----------|-------------|---------------|
@@ -166,6 +196,8 @@ tensor-parallel-size: 1
 max-model-len: 32768
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: hermes
 enable-prefix-caching: true
 ```
 
@@ -176,16 +208,20 @@ tensor-parallel-size: 2
 max-model-len: 32768
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: hermes
 enable-prefix-caching: true
 ```
 
-### Large dense model, 2 GPUs, FP8 (Hopper-optimised, ~2x throughput)
+### Large dense model, FP8 (Hopper-optimised, ~2x throughput)
 ```yaml
 model: meta-llama/Llama-3.3-70B-Instruct
 tensor-parallel-size: 1       # FP8 halves memory; 70B fits on 1x96GB at FP8
 max-model-len: 32768
 gpu-memory-utilization: 0.90
 quantization: fp8
+enable-auto-tool-choice: true
+tool-call-parser: llama3_json
 enable-prefix-caching: true
 ```
 
@@ -198,6 +234,8 @@ gpu-memory-utilization: 0.90
 dtype: bfloat16
 enable-reasoning: true
 reasoning-parser: qwen3
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_coder
 enable-prefix-caching: true
 ```
 
@@ -214,5 +252,6 @@ quantization: fp8
 enable-expert-parallel: true
 enable-reasoning: true
 reasoning-parser: deepseek_r1
+# Note: DeepSeek-R1 is a reasoning model; tool calling requires fine-tuned variant
 enable-prefix-caching: true
 ```
