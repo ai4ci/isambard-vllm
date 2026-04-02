@@ -12,11 +12,10 @@ export interface JobDetails {
 
 export interface StartArgs {
   jobName: string;
-  model: string;
+  model?: string;       // only populated for --mock mode; non-mock reads model from YAML
   configFile?: string;  // required unless mock: true
   localPort?: number;
-  gpuCount: number;
-  tensorParallelSize: number;
+  gpuCount?: number;    // if unset, derived from tensor-parallel-size in YAML in start.ts
   timeLimit: string;
   serverPort: number;
   mock: boolean;
@@ -65,21 +64,17 @@ export function parseStartArgs(args: string[]): StartArgs {
   const mock = boolFlags.has("mock");
   const dryRun = boolFlags.has("dry-run");
 
-  if (!flags["model"]) throw new Error("--model <model> is required");
+  if (mock && !flags["model"]) throw new Error("--model <model> is required in mock mode");
   if (!mock && !flags["config"]) throw new Error("--config <file> is required");
 
-  const gpuCount = flags["gpus"] ? parseInt(flags["gpus"], 10) : 4;
-  const tensorParallelSize = flags["tensor-parallel-size"]
-    ? parseInt(flags["tensor-parallel-size"], 10)
-    : gpuCount;
+  const gpuCount = flags["gpus"] ? parseInt(flags["gpus"], 10) : undefined;
 
   return {
     jobName,
-    model: flags["model"]!,
+    model: flags["model"],
     configFile: flags["config"],
     localPort: flags["local-port"] ? parseInt(flags["local-port"], 10) : undefined,
     gpuCount,
-    tensorParallelSize,
     timeLimit: flags["time"] ?? "4:00:00",
     serverPort: flags["server-port"] ? parseInt(flags["server-port"], 10) : 8000,
     mock,

@@ -7,14 +7,13 @@ export interface InferenceScriptOptions {
   workDir: string;
   serverPort: number;
   gpuCount: number;
-  tensorParallelSize: number;
   timeLimit: string;
 }
 
 export function renderInferenceScript(opts: InferenceScriptOptions): string {
   const {
     jobName, model, venvPath, hfHome, configFileName,
-    workDir, serverPort, gpuCount, tensorParallelSize, timeLimit,
+    workDir, serverPort, gpuCount, timeLimit,
   } = opts;
 
   return `#!/bin/bash
@@ -49,17 +48,16 @@ module load cudatoolkit
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 
-# Start vLLM in the background
+# Start vLLM in the background — model, tensor-parallel-size, and all tuning
+# options come from the config file; host and port are infrastructure overrides.
 srun \\
   --nodes=1 \\
   --gpus=${gpuCount} \\
   --ntasks=1 \\
-  vllm serve ${model} \\
-  --served-model-name ${model} \\
+  vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${serverPort} \\
-  --tensor-parallel-size ${tensorParallelSize} \\
   &
 VLLM_PID=$!
 

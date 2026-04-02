@@ -10,7 +10,6 @@ const base = {
   workDir: "/home/user/my-job",
   serverPort: 8000,
   gpuCount: 4,
-  tensorParallelSize: 4,
   timeLimit: "4:00:00",
 };
 
@@ -51,8 +50,20 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain("--port 8000");
   });
 
-  it("sets tensor parallel size", () => {
-    expect(renderInferenceScript(base)).toContain("--tensor-parallel-size 4");
+  it("uses vllm serve --config (no model positional arg on command line)", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("vllm serve");
+    expect(script).toContain('--config "$VLLM_CONFIG"');
+    // model positional on the vllm CLI would conflict with YAML; not present
+    expect(script).not.toContain("vllm serve Qwen");
+  });
+
+  it("does not pass --tensor-parallel-size on command line (comes from YAML config)", () => {
+    expect(renderInferenceScript(base)).not.toContain("--tensor-parallel-size");
+  });
+
+  it("does not pass --served-model-name on command line", () => {
+    expect(renderInferenceScript(base)).not.toContain("--served-model-name");
   });
 
   it("references the vllm config file from workDir", () => {
@@ -104,9 +115,8 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("localhost:9000/health");
   });
 
-  it("respects a different tensor parallel size", () => {
-    const script = renderInferenceScript({ ...base, gpuCount: 8, tensorParallelSize: 8 });
-    expect(script).toContain("--tensor-parallel-size 8");
+  it("respects a different gpu count in SBATCH directive", () => {
+    const script = renderInferenceScript({ ...base, gpuCount: 8 });
     expect(script).toContain("#SBATCH --gpus=8");
   });
 });

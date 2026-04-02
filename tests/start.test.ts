@@ -67,81 +67,50 @@ describe("hfCachePath", () => {
 });
 
 describe("parseStartArgs", () => {
-  it("parses required args", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--config", "vllm.yaml",
-    ]);
+  it("parses required args (non-mock: --config only, model comes from YAML)", () => {
+    const result = parseStartArgs(["my-job", "--config", "vllm.yaml"]);
     expect(result.jobName).toBe("my-job");
-    expect(result.model).toBe("Qwen/Qwen2.5-0.5B-Instruct");
     expect(result.configFile).toBe("vllm.yaml");
+    expect(result.model).toBeUndefined();
   });
 
   it("applies defaults for optional args", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--config", "vllm.yaml",
-    ]);
-    expect(result.gpuCount).toBe(4);
+    const result = parseStartArgs(["my-job", "--config", "vllm.yaml"]);
+    expect(result.gpuCount).toBeUndefined();
     expect(result.timeLimit).toBe("4:00:00");
     expect(result.serverPort).toBe(8000);
   });
 
-  it("tensorParallelSize defaults to gpuCount", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml",
-    ]);
-    expect(result.tensorParallelSize).toBe(result.gpuCount);
-  });
-
   it("parses optional --local-port", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml", "--local-port", "11435",
-    ]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml", "--local-port", "11435"]);
     expect(result.localPort).toBe(11435);
   });
 
   it("parses optional --gpus", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml", "--gpus", "8",
-    ]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml", "--gpus", "8"]);
     expect(result.gpuCount).toBe(8);
   });
 
-  it("parses optional --tensor-parallel-size override", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml",
-      "--gpus", "8", "--tensor-parallel-size", "4",
-    ]);
-    expect(result.tensorParallelSize).toBe(4);
-  });
-
   it("parses optional --time", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml", "--time", "8:00:00",
-    ]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml", "--time", "8:00:00"]);
     expect(result.timeLimit).toBe("8:00:00");
   });
 
   it("throws when job name is missing", () => {
-    expect(() => parseStartArgs(["--model", "m", "--config", "c.yaml"])).toThrow(/job name/i);
+    expect(() => parseStartArgs(["--config", "c.yaml"])).toThrow(/job name/i);
   });
 
-  it("throws when --model is missing", () => {
-    expect(() => parseStartArgs(["my-job", "--config", "c.yaml"])).toThrow(/--model/);
-  });
-
-  it("throws when --config is missing", () => {
-    expect(() => parseStartArgs(["my-job", "--model", "m"])).toThrow(/--config/);
+  it("throws when --config is missing (non-mock)", () => {
+    expect(() => parseStartArgs(["my-job"])).toThrow(/--config/);
   });
 
   it("--dry-run flag sets dryRun: true", () => {
-    const result = parseStartArgs([
-      "my-job", "--model", "m", "--config", "c.yaml", "--dry-run",
-    ]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml", "--dry-run"]);
     expect(result.dryRun).toBe(true);
   });
 
   it("dryRun defaults to false when flag absent", () => {
-    const result = parseStartArgs(["my-job", "--model", "m", "--config", "c.yaml"]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml"]);
     expect(result.dryRun).toBe(false);
   });
 
@@ -151,8 +120,12 @@ describe("parseStartArgs", () => {
   });
 
   it("mock defaults to false when flag absent", () => {
-    const result = parseStartArgs(["my-job", "--model", "m", "--config", "c.yaml"]);
+    const result = parseStartArgs(["my-job", "--config", "c.yaml"]);
     expect(result.mock).toBe(false);
+  });
+
+  it("--mock requires --model", () => {
+    expect(() => parseStartArgs(["my-job", "--mock"])).toThrow(/--model/);
   });
 
   it("--mock does not require --config", () => {
@@ -166,6 +139,12 @@ describe("parseStartArgs", () => {
   });
 
   it("--config is still required without --mock", () => {
-    expect(() => parseStartArgs(["my-job", "--model", "m"])).toThrow(/--config/);
+    expect(() => parseStartArgs(["my-job"])).toThrow(/--config/);
+  });
+
+  it("--tensor-parallel-size is not accepted (use YAML config)", () => {
+    // Should not error — unknown flags are silently ignored — but the field is not on StartArgs
+    const result = parseStartArgs(["my-job", "--config", "c.yaml", "--tensor-parallel-size", "4"]);
+    expect((result as Record<string, unknown>)["tensorParallelSize"]).toBeUndefined();
   });
 });

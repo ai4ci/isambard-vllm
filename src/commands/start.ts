@@ -12,6 +12,7 @@ import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
+import { parseVllmConfig } from "../vllm-config.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -25,14 +26,39 @@ export async function cmdStart(args: string[]): Promise<void> {
     startArgs = parseStartArgs(args);
   } catch (e) {
     console.error("Error:", (e as Error).message);
-    console.error("Usage: ivllm start <job> --model <model> --config <file> [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]");
+    console.error("Usage: ivllm start <job> --config <file> [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]");
+    console.error("       ivllm start <job> --mock --model <model> [--local-port <port>] [--time <hh:mm:ss>]");
     process.exit(1);
   }
 
-  const { jobName, model, configFile, gpuCount, tensorParallelSize, timeLimit, serverPort } = startArgs;
+  const { jobName, configFile, timeLimit, serverPort } = startArgs;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
   const hfHome = `${config.projectDir}/hf`;
-  const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands and SLURM --output (SLURM expands $HOME)
+
+  // Resolve model and gpuCount: for real mode, read from the vLLM config YAML.
+  // For mock mode, model comes from --model CLI flag.
+  let model: string;
+  let gpuCount: number;
+  if (startArgs.mock) {
+    model = startArgs.model!;
+    gpuCount = startArgs.gpuCount ?? 1;
+  } else {
+    let yamlConfig;
+    try {
+      yamlConfig = parseVllmConfig(configFile!);
+    } catch (e) {
+      console.error(`Error reading config file '${configFile}': ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (!yamlConfig.model) {
+      console.error(`Error: 'model' is required in the vLLM config file '${configFile}'.`);
+      process.exit(1);
+    }
+    model = yamlConfig.model;
+    gpuCount = startArgs.gpuCount ?? yamlConfig.tensorParallelSize ?? 4;
+  }
+
+  const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands (remote shell expands $HOME)
   const remoteWorkDirScp = `~/${jobName}`;      // for scp destinations (~ is reliably expanded by scp/sftp; $HOME is not)
   const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
 
@@ -81,7 +107,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
   console.log(`Config     : ${configFile ?? "(N/A — mock mode)"}`);
-  console.log(`GPUs       : ${gpuCount}  |  TP size: ${tensorParallelSize}`);
+  console.log(`GPUs       : ${gpuCount}`);
   console.log(`Local port : ${localPort}  |  Server port: ${serverPort}`);
   console.log("");
 
@@ -164,7 +190,7 @@ export async function cmdStart(args: string[]): Promise<void> {
         jobName, model, venvPath: config.venvPath, hfHome,
         configFileName: configFile ? basename(configFile) : "",
         workDir: remoteWorkDir,
-        serverPort, gpuCount, tensorParallelSize, timeLimit,
+        serverPort, gpuCount, timeLimit,
       });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);
