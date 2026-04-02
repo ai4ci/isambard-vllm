@@ -10,7 +10,8 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 
 ## Prerequisites
 
-- **Bun** ≥ 1.3 installed locally (`curl -fsSL https://bun.sh/install | bash`)
+- **Bun** ≥ 1.3 installed locally (`curl -fsSL https://bun.sh/install | bash` or `brew tap oven-sh/bun;
+brew install bun` on macOS with homebrew installed)
 - A working SSH connection to the Isambard AI login node, with credentials cached in an SSH agent (key-based auth, no interactive password prompts)
 - SLURM and `jq` available on the HPC
 - A HuggingFace account and access token (`HF_TOKEN`) for gated models
