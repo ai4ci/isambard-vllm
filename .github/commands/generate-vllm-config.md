@@ -1,0 +1,1 @@
+../skills/generate-vllm-config/SKILL.md
