@@ -136,3 +136,37 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 - `HF_TOKEN` is read from the LOCAL environment and forwarded via the SSH command.
 
 **Consequences**: `ivllm start` requires a `--model` argument (the HuggingFace model ID). The `HF_TOKEN` environment variable must be set on LOCAL for private or gated models. Cache check is a simple directory existence test (`$PROJECTDIR/hf/hub/models--<org>--<name>`); a failed check falls through to `huggingface-cli download`.
+
+---
+
+## ADR-008: vLLM config YAML as single source of truth for model and parallelism options
+
+**Status**: Accepted
+
+**Context**: `ivllm start` originally accepted `--model` and `--tensor-parallel-size` as CLI flags, which duplicated options that can also appear in the vLLM `--config` YAML. Passing conflicting values on both the CLI and in the YAML creates undefined behaviour.
+
+**Decision**: All vLLM serving options (model, tensor-parallel-size, pipeline-parallel-size, max-model-len, etc.) are expressed exclusively in the vLLM config YAML. The `--model` and `--tensor-parallel-size` flags are removed from `ivllm start`. `ivllm start` parses the YAML locally (using `js-yaml`) to extract `model` (for the HuggingFace pre-download) and the parallelism sizes (to set `#SBATCH --gpus`). The SLURM script runs `vllm serve --config <file> --host 0.0.0.0 --port <port>` — the `host` and `port` flags are retained as explicit CLI overrides because they are infrastructure concerns (required for the SSH tunnel to work) rather than model configuration.
+
+**Rationale**:
+- A single config file is easier to audit, version, and share than a mix of CLI flags and YAML.
+- Eliminates risk of conflicting values (e.g. `--tensor-parallel-size 4` on CLI vs `tensor-parallel-size: 2` in YAML).
+- The vLLM YAML format already supports all options; users familiar with vLLM docs can use it directly.
+
+**Consequences**: Users must include `model:` in their YAML config. `tensor-parallel-size` (and `pipeline-parallel-size`) in the YAML are used to derive the SLURM GPU allocation; `--gpus` remains as an explicit CLI override. The `--mock` mode retains `--model` as a CLI flag since it does not use a vLLM config file.
+
+---
+
+## ADR-009: Chat template support out of scope for MVP
+
+**Status**: Accepted
+
+**Context**: vLLM's `--chat-template` option accepts either a file path (a Jinja2 template file) or an inline single-line string. Some older models do not embed a chat template in their `tokenizer_config.json` and require one to be supplied explicitly.
+
+**Decision**: Chat template file copying is out of scope for MVP. The single-line inline form is already supported at no cost (it is a plain YAML value in the config file). File-based templates are not supported — users who need them must copy the file to the HPC manually and reference its remote path in the YAML.
+
+**Rationale**:
+- Modern models (Llama 3, Qwen 2.5, Mistral, etc.) embed their chat template in the tokeniser config; vLLM picks it up automatically from the HuggingFace cache.
+- The inline single-line form covers the remaining cases without requiring any additional file-copy logic.
+- Adding file detection (is the `chat-template:` value a local path?) and an extra `scp` call adds complexity for an edge case that is unlikely to arise in practice on Isambard AI.
+
+**Consequences**: If a user needs a file-based chat template, they must `scp` it to the HPC themselves and set `chat-template: /remote/path/template.jinja` in their YAML. This can be revisited if it becomes a recurring pain point during E2E testing.
