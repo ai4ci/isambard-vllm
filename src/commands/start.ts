@@ -12,7 +12,7 @@ import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
-import { parseVllmConfig } from "../vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount } from "../vllm-config.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -55,7 +55,13 @@ export async function cmdStart(args: string[]): Promise<void> {
       process.exit(1);
     }
     model = yamlConfig.model;
-    gpuCount = startArgs.gpuCount ?? yamlConfig.tensorParallelSize ?? 4;
+    const { gpuCount: resolved, error: gpuError } = resolveGpuCount(startArgs.gpuCount, yamlConfig);
+    if (gpuError) {
+      // TODO: implement multi-node support
+      console.error(`Error: ${gpuError}`);
+      process.exit(1);
+    }
+    gpuCount = resolved;
   }
 
   const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands (remote shell expands $HOME)

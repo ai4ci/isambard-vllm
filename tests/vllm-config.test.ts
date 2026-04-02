@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseVllmConfig } from "../src/vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount } from "../src/vllm-config.ts";
 
 function writeTmp(content: string): string {
   const path = join(tmpdir(), `ivllm-test-${Date.now()}.yaml`);
@@ -29,6 +29,27 @@ describe("parseVllmConfig", () => {
     const path = writeTmp("tensor_parallel_size: 8\n");
     try {
       expect(parseVllmConfig(path).tensorParallelSize).toBe(8);
+    } finally { unlinkSync(path); }
+  });
+
+  it("extracts pipeline-parallel-size (kebab-case) from YAML", () => {
+    const path = writeTmp("pipeline-parallel-size: 2\n");
+    try {
+      expect(parseVllmConfig(path).pipelineParallelSize).toBe(2);
+    } finally { unlinkSync(path); }
+  });
+
+  it("extracts pipeline_parallel_size (underscore) from YAML", () => {
+    const path = writeTmp("pipeline_parallel_size: 2\n");
+    try {
+      expect(parseVllmConfig(path).pipelineParallelSize).toBe(2);
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns undefined pipelineParallelSize when not present", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).pipelineParallelSize).toBeUndefined();
     } finally { unlinkSync(path); }
   });
 
@@ -69,5 +90,46 @@ describe("parseVllmConfig", () => {
     try {
       expect(() => parseVllmConfig(path)).toThrow();
     } finally { unlinkSync(path); }
+  });
+});
+
+describe("resolveGpuCount", () => {
+  it("returns CLI value when explicitly set, ignoring YAML", () => {
+    expect(resolveGpuCount(2, { tensorParallelSize: 4, pipelineParallelSize: 2 }).gpuCount).toBe(2);
+  });
+
+  it("uses tensor-parallel-size from YAML when no CLI value", () => {
+    expect(resolveGpuCount(undefined, { tensorParallelSize: 4 }).gpuCount).toBe(4);
+  });
+
+  it("multiplies tp and pp from YAML", () => {
+    expect(resolveGpuCount(undefined, { tensorParallelSize: 2, pipelineParallelSize: 2 }).gpuCount).toBe(4);
+  });
+
+  it("defaults tp to 4 and pp to 1 when neither is in YAML", () => {
+    expect(resolveGpuCount(undefined, {}).gpuCount).toBe(4);
+  });
+
+  it("returns no error when gpuCount is within single-node limit", () => {
+    expect(resolveGpuCount(undefined, { tensorParallelSize: 4 }).error).toBeUndefined();
+  });
+
+  it("returns an error when tp * pp exceeds single-node GPU count", () => {
+    const result = resolveGpuCount(undefined, { tensorParallelSize: 4, pipelineParallelSize: 2 });
+    expect(result.error).toMatch(/multi-node/i);
+    expect(result.gpuCount).toBe(8);
+  });
+
+  it("does not error when CLI --gpus overrides an over-limit YAML product", () => {
+    // User explicitly overrides with a valid count — their problem to reconcile
+    const result = resolveGpuCount(4, { tensorParallelSize: 4, pipelineParallelSize: 2 });
+    expect(result.gpuCount).toBe(4);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("respects a custom maxSingleNodeGpus", () => {
+    const result = resolveGpuCount(undefined, { tensorParallelSize: 8 }, 8);
+    expect(result.error).toBeUndefined();
+    expect(result.gpuCount).toBe(8);
   });
 });
