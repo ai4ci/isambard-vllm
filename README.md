@@ -57,7 +57,25 @@ ivllm setup
 
 This submits a SLURM job on a compute node to install vLLM via `uv` into a virtual environment at `venvPath`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if the venv already exists.
 
-### 2. Start an inference session
+### 2. vLLM config file
+
+The LLM server is configured via a YAML config file (see the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)). The config file specifies the model and all serving parameters. Example `vllm.yaml`:
+
+```yaml
+model: Qwen/Qwen2.5-7B-Instruct
+tensor-parallel-size: 1
+max-model-len: 32768
+gpu-memory-utilization: 0.90
+dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: hermes
+enable-prefix-caching: true
+```
+
+This file needs to be saved locally, and passed in the `--config` parameter. See later
+for details on how to create this file.
+
+### 3. Start an inference session
 
 ```bash
 ivllm start my-job --config vllm.yaml
@@ -91,7 +109,10 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 | `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
 
-### 3. Check job status
+### 4. Check job status
+
+Not generally necessary as the local session from `ivllm start` will display the current
+status.
 
 ```bash
 ivllm status           # all known jobs
@@ -110,22 +131,7 @@ This cancels the SLURM job, kills any lingering tunnel process, and removes the 
 
 ---
 
-## vLLM config file
-
-Pass any vLLM server options via a YAML config file (see the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)). The config file specifies the model and all serving parameters. Example `vllm.yaml`:
-
-```yaml
-model: Qwen/Qwen2.5-7B-Instruct
-tensor-parallel-size: 1
-max-model-len: 32768
-gpu-memory-utilization: 0.90
-dtype: bfloat16
-enable-auto-tool-choice: true
-tool-call-parser: hermes
-enable-prefix-caching: true
-```
-
-### Generating a config with AI
+## Generating a config with AI
 
 `ivllm` ships an [Agent Skill](https://agentskills.io) for generating `vllm.yaml` files. If you are using an AI coding agent (Cursor, Claude, Windsurf, etc.), the skill will help the agent generate an optimised config for any HuggingFace model on Isambard AI hardware.
 
