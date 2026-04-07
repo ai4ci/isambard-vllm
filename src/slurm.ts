@@ -2,6 +2,7 @@ import type { Config } from "./config.ts";
 import { runRemote } from "./ssh.ts";
 
 export type JobState = "running" | "completed" | "failed";
+export type SlurmQueueState = { state: string; reason: string };
 
 export function parseJobId(sbatchOutput: string): string | null {
   const match = sbatchOutput.match(/Submitted batch job (\d+)/);
@@ -36,4 +37,22 @@ export async function pollJobStatus(config: Config, jobId: string): Promise<JobS
 export async function getJobLog(config: Config, logPath: string): Promise<string> {
   const { stdout } = await runRemote(config, `cat ${logPath}`, { silent: true });
   return stdout;
+}
+
+export function parseSlurmQueueState(squeueOutput: string): SlurmQueueState | null {
+  const line = squeueOutput.trim();
+  if (!line) return null;
+  const parts = line.split(/\s+/);
+  const state = parts[0] ?? "";
+  const reason = parts.slice(1).join(" ") || "";
+  return state ? { state, reason } : null;
+}
+
+export async function getSlurmQueueState(config: Config, jobId: string): Promise<SlurmQueueState | null> {
+  const { stdout } = await runRemote(
+    config,
+    `squeue -j ${jobId} --format="%T %R" --noheader 2>/dev/null`,
+    { silent: true }
+  );
+  return parseSlurmQueueState(stdout);
 }

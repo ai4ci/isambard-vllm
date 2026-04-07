@@ -7,7 +7,7 @@ import type { ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
 import { spawnTunnel } from "../ssh.ts";
 import { runRemote } from "../ssh.ts";
-import { submitJob, pollJobStatus } from "../slurm.ts";
+import { submitJob, pollJobStatus, getSlurmQueueState } from "../slurm.ts";
 import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
@@ -231,7 +231,19 @@ export async function cmdStart(args: string[]): Promise<void> {
 
   // ── Monitor loop ─────────────────────────────────────────────────────────────
   console.log("\nMonitoring job status (Ctrl+C or type 'exit' to stop)...\n");
+
+  // Issue #1: accept "exit" from stdin immediately (before job is even running)
+  const rl = createInterface({ input: process.stdin, terminal: false });
+  rl.on("line", (line) => {
+    if (line.trim().toLowerCase() === "exit") {
+      rl.close();
+      shutdown("user requested exit");
+    }
+  });
+
   let lastStatus = "pending";
+  let lastSlurmQueueState = "";
+  let logLineOffset = 0;
 
   while (!shuttingDown) {
     await sleep(POLL_INTERVAL_MS);
@@ -248,9 +260,43 @@ export async function cmdStart(args: string[]): Promise<void> {
       continue;
     }
 
+    // Issue #2a: while our lockfile shows "pending", report actual SLURM queue state
+    if (details.status === "pending") {
+      const queueState = await getSlurmQueueState(config, slurmJobId!);
+      if (queueState) {
+        const msg = queueState.state === "PENDING"
+          ? `  [${timestamp()}] Waiting in SLURM queue (${queueState.reason})`
+          : `  [${timestamp()}] SLURM state: ${queueState.state}`;
+        if (msg !== lastSlurmQueueState) {
+          console.log(msg);
+          lastSlurmQueueState = msg;
+        }
+      }
+    }
+
     if (details.status !== lastStatus) {
-      console.log(`  [${timestamp()}] Status: ${details.status}`);
+      if (details.status === "initialising") {
+        console.log(`  [${timestamp()}] Job allocated — vLLM is starting up...`);
+      } else if (details.status !== "pending") {
+        console.log(`  [${timestamp()}] Status: ${details.status}`);
+      }
       lastStatus = details.status;
+    }
+
+    // Issue #2b: stream SLURM log incrementally during startup
+    if (details.status === "initialising") {
+      const slurmLogPath = `${remoteWorkDir}/${jobName}.slurm.log`;
+      const { stdout: newLines } = await ops.runRemote(
+        `tail -n +${logLineOffset + 1} ${slurmLogPath} 2>/dev/null`,
+        { silent: true }
+      );
+      if (newLines.trim()) {
+        const lines = newLines.split("\n").filter(l => l.trim());
+        for (const line of lines) {
+          console.log(`  | ${line}`);
+        }
+        logLineOffset += lines.length;
+      }
     }
 
     if (details.status === "failed" || details.status === "timeout") {
@@ -261,6 +307,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
 
     if (details.status === "running") {
+      rl.close();
       await onRunning(details);
       return;
     }
@@ -284,11 +331,11 @@ export async function cmdStart(args: string[]): Promise<void> {
     console.log(`   Model: ${details.model ?? model}`);
     console.log("\nType 'exit' + Enter to stop, or press Ctrl+C\n");
 
-    // Accept user "exit" command from stdin
-    const rl = createInterface({ input: process.stdin, terminal: false });
-    rl.on("line", (line) => {
+    // Re-register "exit" handler on the same readline interface for the running phase
+    const rl2 = createInterface({ input: process.stdin, terminal: false });
+    rl2.on("line", (line) => {
       if (line.trim().toLowerCase() === "exit") {
-        rl.close();
+        rl2.close();
         shutdown("user requested exit");
       }
     });
