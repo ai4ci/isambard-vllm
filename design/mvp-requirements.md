@@ -1,4 +1,4 @@
-# isambard-vllm
+# MVP: isambard-vllm
 
 Using HPC resources to run inferencing for public large language models. 
 
@@ -90,18 +90,6 @@ The scripts in `design/old/` that use reverse tunnels (`vllm-slurm.sh`, `tunnel-
 * LOCAL CLI is implemented in Node.js + bun. LOGIN and COMPUTE scripts are bash.
 * vLLM startup is slow. We need a connection test that mocks the vLLM server, so we can end-to-end test the monitoring workflow. The mock HTTP server pattern in [design/old/tunnel-test.sh] is a useful reference, repurposed for a forward-tunnel test.
 * Testing end to end with vLLM will need to be done with a lighter weight LLM like Qwen/Qwen2.5-0.5B-Instruct
-
-## Unknowns
-
-* Do COMPUTE nodes have outbound internet access? If yes, vLLM could fall back to downloading on COMPUTE. If no, the LOGIN pre-download is mandatory. To be validated on first HPC test.
-
-## Future Considerations
-
-* **Multiple concurrent jobs**: support multiple independent `ivllm start` processes each controlling a separate vLLM server. Requires a local registry (`~/.ivllm/registry.json`) mapping job names to auto-assigned local ports (e.g. range 11434–11534), and `ivllm status` reporting all running jobs with their `localhost:<port>` endpoints.
-* **OpenCode / agent harness integration**: after the tunnel is up, automatically update the local OpenCode (or other agent harness) configuration to point at the new `localhost:<port>` provider endpoint.
-* **Multi-node inference**: extend SLURM script and config for multi-node vLLM jobs.
-* **Model routing server**: this tool may morph into or become part of a lightweight OpenAI-compatible routing server on LOCAL.
-* The LOCAL machine is likely to be Linux or macOS, but could in theory be Windows.
 
 ## References
 

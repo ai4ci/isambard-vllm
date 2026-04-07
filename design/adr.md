@@ -125,7 +125,7 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 
 **Status**: Accepted
 
-**Context**: vLLM will automatically download a model from HuggingFace if not cached, but this would occur during the SLURM job on a COMPUTE node. This wastes expensive GPU allocation time during download and may fail if COMPUTE nodes lack outbound internet access (unknown for Isambard AI).
+**Context**: vLLM will automatically download a model from HuggingFace if not cached, but this would occur during the SLURM job on a COMPUTE node. This wastes expensive GPU allocation time during download. COMPUTE nodes do have internet access.
 
 **Decision**: `ivllm start` checks the shared HuggingFace cache (`$PROJECTDIR/hf`) on LOGIN before submitting the SLURM job. If the model is not cached, it runs `huggingface-cli download <model>` on LOGIN via SSH, streaming progress to the user. The SLURM script sets `HF_HOME=$PROJECTDIR/hf` so vLLM uses the pre-populated cache.
 

@@ -1,112 +1,23 @@
-# Roadmap — isambard-vllm
-
-## Phase 1 — Project scaffold and tooling
-
-- [x] Initialise bun/Node.js project (`bun init`, `package.json`, TypeScript config)
-- [x] CLI entry point with sub-command routing (`ivllm setup | start | status | stop`)
-- [x] Configuration file (`~/.config/ivllm/config.json`): HPC login host, HPC username, venv path, default local port
-- [x] SSH helper module: run a remote command on LOGIN, copy a file to LOGIN (wraps `ssh`/`scp` child processes)
-- [x] Commit
-
-## Phase 2 — `ivllm setup`
-
-- [x] Generate setup SLURM script from template (based on `design/old/setup-vllm.sh`)
-- [x] Copy script to LOGIN and submit via `sbatch`
-- [x] Poll SLURM job status until complete or failed
-- [x] Stream SLURM output log back to LOCAL in real time
-- [x] Report success (vLLM version) or failure with log excerpt
-- [x] Validate venv exists on HPC after setup
-- [x] Commit
-
-## Phase 3 — SLURM inference script
-
-- [x] Write SLURM bash template for single-node vLLM inference
-  - Activate venv
-  - Write initial `job_details.json` (`status: "initialising"`, node hostname, SLURM job ID)
-  - Start vLLM with config file, model, port
-  - Poll `/health` until ready; update `job_details.json` (`status: "running"`, server port, model name)
-  - On failure/timeout: update `job_details.json` (`status: "failed"` / `"timeout"`)
-  - Log to file in job working directory
-  - No SSH tunnel logic in SLURM script
-- [x] Unit-testable template rendering (job name, config path, model, port substitution)
-- [x] Commit
-
-## Phase 4 — `ivllm start` — core session owner
-
-- [x] Pre-flight: check venv exists on HPC; fail early if not
-- [x] Model pre-download on LOGIN:
-  - [x] Check HuggingFace cache at `$PROJECTDIR/hf` for the requested model
-  - [x] If not cached: run `huggingface-cli download <model>` on LOGIN via SSH with `HF_HOME=$PROJECTDIR/hf` and `HF_TOKEN` forwarded; stream progress to user
-- [x] Create `job_details.json` on HPC (`status: "pending"`); fail if already exists (lockfile)
-- [x] Copy vllm config file and generated SLURM script to LOGIN
-- [x] Submit SLURM job via `sbatch`; record SLURM job ID
-- [x] Poll `job_details.json` on LOGIN; display status transitions to user
-- [x] On `status: "running"`: spawn forward SSH tunnel child process
-- [x] Print connection URL to user: `http://localhost:<port>/v1`
-- [x] Heartbeat loop: poll `/health` through tunnel on configurable interval
-- [x] Shutdown sequence (Ctrl+C, "exit" input, heartbeat failure, or SLURM failure):
-  1. `scancel` SLURM job via SSH
-  2. Terminate tunnel child process
-  3. Remove `job_details.json` from HPC
-- [x] Handle SIGINT/SIGTERM to trigger shutdown sequence
-- [x] Commit
-
-## Phase 5 — `ivllm status` and `ivllm stop`
-
-- [x] `ivllm status [job]`: SSH to LOGIN, read `job_details.json` for named job (or all job working directories); display status table
-- [x] `ivllm stop <job>`: recovery path — `scancel` by SLURM job ID from `job_details.json`, kill any lingering tunnel processes on LOCAL, remove `job_details.json`
-- [x] Commit
-
-## Phase 6 — Mock vLLM script and `ivllm start --dry-run`
-
-- [x] Write a mock vLLM SLURM script template (`src/templates/mock-inference.ts`) that:
-  - Uses the same template approach as `renderInferenceScript` — submitted as a SLURM batch job
-  - Writes `job_details.json` correctly (same schema as real inference script)
-  - Serves `/health` and `/v1/models` on the COMPUTE node via a lightweight bash HTTP server
-  - Simulates a configurable startup delay before marking status `"running"`
-- [x] Add `--mock` flag to `ivllm start`: substitutes `renderMockInferenceScript()` for `renderInferenceScript()`, otherwise identical flow
-- [x] Implement `--dry-run` flag on `ivllm start` only:
-  - SSH primitives are swapped for dry-run equivalents via a thin wrapper in `start.ts`
-  - File copies (`scp`) write to a local temp directory instead of the remote LOGIN node
-  - SSH remote commands are printed (with full command text) but not executed
-  - SLURM job is not submitted
-  - Key output for review: generated SLURM script and vLLM config file in local temp dir
-  - Works with both real and mock modes (i.e. `--mock --dry-run` reviews the mock script)
-- [ ] Run `ivllm start <job> ... --dry-run` and review real inference script + config
-- [ ] Run `ivllm start <job> ... --mock --dry-run` and review mock SLURM script
-
-## Phase 7 - Mock vLLM remote testing
-- [ ] End-to-end test: `ivllm start` against mock script, verify tunnel, heartbeat, clean shutdown
-- [ ] Test heartbeat failure path (mock server exits; verify LOCAL detects and shuts down cleanly)
-- [ ] Test lockfile behaviour (start same job twice)
-- [ ] Test `ivllm stop` recovery (simulate unclean exit, verify stop cleans up)
-- [ ] Commit
-
-## Phase 8 — End-to-end test with real vLLM
-
-- [ ] Test `ivllm setup` on Isambard AI (resolve ADR-005 venv path question)
-- [ ] Validate COMPUTE node internet access (resolve Unknown — determines whether LOGIN pre-download is mandatory or a nice-to-have)
-- [ ] Test `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct` (lightweight model)
-- [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel
-- [ ] Resolve Unknowns: HuggingFace token, model cache location (`$HF_HOME` in `$PROJECTDIR`?)
-- [ ] Commit
-
----
-
 ## Future Phases (post-MVP)
 
-### Phase F1 — Multiple concurrent jobs
-- Local registry (`~/.ivllm/registry.json`) mapping job name → local port + tunnel PID
-- Auto port assignment from configurable range (default 11434–11534)
-- `ivllm status` reports all running jobs with endpoints
+### MVP
+- as described in [design/mvp-requirements.md]
 
-### Phase F2 — OpenCode / agent harness integration
-- On tunnel up: auto-update OpenCode config to add/update the provider endpoint
-- On shutdown: remove or disable the provider entry
+### Phase F1 — MVP Open issues
+- Address github issues
 
-### Phase F3 — Multi-node inference
-- Extend SLURM template for multi-node (`--nodes=N`, `srun` across nodes)
-- Update `job_details.json` schema for multi-node details
-
-### Phase F4 — Model routing server
-- Lightweight OpenAI-compatible proxy on LOCAL routing across multiple running jobs
+### Phase F2 — Model routing server
+- Concept: Run a model router on LOGIN, rather than tunnel each `ivllm` instance to LOCAL.
+- Support multiple concurrently running `ivllm` instances on COMPUTE nodes.
+- Auto port assignment from configurable range (default 11435–11534) allowing connection to COMPUTE from LOGIN
+- LOGIN model router is be a lightweight openai API compatible proxy server listening on e.g. port 11434.
+- LOGIN model router port forwarded from LOCAL over ssh. Agent harness connects to LOCAL:11434.
+- LOGIN model router maintains registry of `vllm.json` configured models available on isambard and port mapping to COMPUTE nodes if running.
+- LOGIN model router provides custom `/model/add`, `/model/delete`, `/model/status`, `/model/start`, `/model/stop`, `/model/log`  endpoints which provides details of configured models, current running status, options to add models with `vllm.json` configuration, or delete model configurations, and ability to start and stop a named model, and ability to inspect vllm logs.
+- LOGIN model router provides custom `/provider` endpoint which returns opencode compatible provider configuration based on name of models available
+- LOGIN model router provides pass through (routing) implementations of all other vllm supported openai API endpoints based on name of model.
+- LOGIN model router maintains heartbeat to running models (not LOCAL)
+- LOGIN model router shutdown (Ctrl+C / `exit` on LOGIN node process) closes all COMPUTE nodes.
+- LOGIN model router automatically shuts down unused models after (e.g. 15 minute) timeout to free up COMPUTE nodes.
+- LOGIN model router automatically starts up models when requested (through model parameter of openai api calls) using cached `vllm.json` config.
+- requests to model router during model startup sequence returns a "Starting up <modelname>, please try again in a few minutes"
