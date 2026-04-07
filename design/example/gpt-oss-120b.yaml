@@ -9,12 +9,8 @@
 # tp=2 is recommended for reasonable KV-cache headroom at 131K context
 # and higher throughput on long reasoning chains.
 #
-# NOTE: requires a vLLM build with GPT-OSS support.
-# Use the official vLLM gpt-oss wheels during setup:
-#   uv pip install --pre "vllm==0.10.1+gptoss" \
-#       --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
-#       --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
-#       --index-strategy unsafe-best-match
+# GPT-OSS support is integrated into mainline vLLM since ≥0.15.1.
+# No special wheels needed — the standard ivllm setup venv is sufficient.
 #
 # Usage: ivllm start <job-name> --config design/example/gpt-oss-120b.yaml
 #
