@@ -39,9 +39,11 @@ export async function cmdStart(args: string[]): Promise<void> {
   // For mock mode, model comes from --model CLI flag.
   let model: string;
   let gpuCount: number;
+  let nodeCount: number;
   if (startArgs.mock) {
     model = startArgs.model!;
     gpuCount = startArgs.gpuCount ?? 1;
+    nodeCount = 1;
   } else {
     let yamlConfig;
     try {
@@ -55,13 +57,9 @@ export async function cmdStart(args: string[]): Promise<void> {
       process.exit(1);
     }
     model = yamlConfig.model;
-    const { gpuCount: resolved, error: gpuError } = resolveGpuCount(startArgs.gpuCount, yamlConfig);
-    if (gpuError) {
-      // TODO: implement multi-node support
-      console.error(`Error: ${gpuError}`);
-      process.exit(1);
-    }
-    gpuCount = resolved;
+    const resolved = resolveGpuCount(startArgs.gpuCount, yamlConfig);
+    gpuCount = resolved.gpuCount;
+    nodeCount = resolved.nodeCount;
   }
 
   const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands (remote shell expands $HOME)
@@ -113,7 +111,10 @@ export async function cmdStart(args: string[]): Promise<void> {
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
   console.log(`Config     : ${configFile ?? "(N/A — mock mode)"}`);
-  console.log(`GPUs       : ${gpuCount}`);
+  console.log(`GPUs       : ${gpuCount}${nodeCount > 1 ? ` (${nodeCount} nodes × ${gpuCount / nodeCount} GPUs each)` : ""}`);
+  if (nodeCount > 1) {
+    console.log(`⚠ Multi-node job: ${nodeCount} nodes requested`);
+  }
   console.log(`Local port : ${localPort}  |  Server port: ${serverPort}`);
   console.log("");
 
@@ -196,7 +197,7 @@ export async function cmdStart(args: string[]): Promise<void> {
         jobName, model, venvPath: config.venvPath, hfHome,
         configFileName: configFile ? basename(configFile) : "",
         workDir: remoteWorkDir,
-        serverPort, gpuCount, timeLimit,
+        serverPort, gpuCount, nodeCount, timeLimit,
       });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);

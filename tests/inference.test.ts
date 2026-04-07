@@ -10,6 +10,7 @@ const base = {
   workDir: "/home/user/my-job",
   serverPort: 8000,
   gpuCount: 4,
+  nodeCount: 1,
   timeLimit: "4:00:00",
 };
 
@@ -118,5 +119,60 @@ describe("renderInferenceScript", () => {
   it("respects a different gpu count in SBATCH directive", () => {
     const script = renderInferenceScript({ ...base, gpuCount: 8 });
     expect(script).toContain("#SBATCH --gpus=8");
+  });
+});
+
+const multiNodeBase = {
+  ...base,
+  gpuCount: 8,
+  nodeCount: 2,
+};
+
+describe("renderInferenceScript (multi-node)", () => {
+  it("sets --nodes=2 in SBATCH for 2-node job", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --nodes=2");
+  });
+
+  it("sets total GPU count in SBATCH --gpus", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --gpus=8");
+  });
+
+  it("starts Ray head node", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("ray start --block --head");
+  });
+
+  it("starts Ray worker nodes via srun", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("ray start --block --address");
+  });
+
+  it("runs vllm serve with --distributed-executor-backend ray", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("--distributed-executor-backend ray");
+  });
+
+  it("runs vllm serve via srun --overlap on the head node", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("srun --overlap");
+  });
+
+  it("uses HEAD_NODE as the compute_hostname", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("HEAD_NODE");
+    expect(script).toContain("compute_hostname");
+  });
+
+  it("loads the brics/nccl module", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("module load brics/nccl");
+  });
+
+  it("sets required Ray vLLM env vars", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("VLLM_USE_RAY_SPMD_WORKER");
+    expect(script).toContain("VLLM_USE_RAY_COMPILED_DAG");
+  });
+
+  it("single-node template is unchanged for nodeCount=1", () => {
+    const script = renderInferenceScript(base);
+    expect(script).not.toContain("ray start");
+    expect(script).not.toContain("--distributed-executor-backend");
   });
 });

@@ -114,22 +114,35 @@ describe("resolveGpuCount", () => {
     expect(resolveGpuCount(undefined, { tensorParallelSize: 4 }).error).toBeUndefined();
   });
 
-  it("returns an error when tp * pp exceeds single-node GPU count", () => {
-    const result = resolveGpuCount(undefined, { tensorParallelSize: 4, pipelineParallelSize: 2 });
-    expect(result.error).toMatch(/multi-node/i);
-    expect(result.gpuCount).toBe(8);
+  it("returns nodeCount=1 for single-node config (tp=4, pp=1)", () => {
+    const result = resolveGpuCount(undefined, { tensorParallelSize: 4 });
+    expect(result.nodeCount).toBe(1);
   });
 
-  it("does not error when CLI --gpus overrides an over-limit YAML product", () => {
-    // User explicitly overrides with a valid count — their problem to reconcile
-    const result = resolveGpuCount(4, { tensorParallelSize: 4, pipelineParallelSize: 2 });
-    expect(result.gpuCount).toBe(4);
+  it("returns nodeCount=2 when tp * pp = 8 (two nodes)", () => {
+    const result = resolveGpuCount(undefined, { tensorParallelSize: 4, pipelineParallelSize: 2 });
+    expect(result.gpuCount).toBe(8);
+    expect(result.nodeCount).toBe(2);
     expect(result.error).toBeUndefined();
   });
 
-  it("respects a custom maxSingleNodeGpus", () => {
+  it("returns nodeCount=3 when tp * pp = 12 (three nodes)", () => {
+    const result = resolveGpuCount(undefined, { tensorParallelSize: 4, pipelineParallelSize: 3 });
+    expect(result.gpuCount).toBe(12);
+    expect(result.nodeCount).toBe(3);
+  });
+
+  it("CLI --gpus determines nodeCount when overriding YAML", () => {
+    const result = resolveGpuCount(4, { tensorParallelSize: 4, pipelineParallelSize: 2 });
+    expect(result.gpuCount).toBe(4);
+    expect(result.nodeCount).toBe(1);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("respects a custom gpusPerNode when computing nodeCount", () => {
     const result = resolveGpuCount(undefined, { tensorParallelSize: 8 }, 8);
     expect(result.error).toBeUndefined();
     expect(result.gpuCount).toBe(8);
+    expect(result.nodeCount).toBe(1);
   });
 });

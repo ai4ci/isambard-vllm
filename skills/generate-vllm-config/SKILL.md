@@ -77,7 +77,7 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 **Multi-node** (needed_gpus > 4):
 - `tensor-parallel-size` = 4
 - `pipeline-parallel-size` = ceil(needed_gpus / 4)
-- ⚠️ **Warn the user**: multi-node is not yet supported by `ivllm`. They will need to run `ivllm start` with a manually set `--gpus` override and the multi-node SLURM support is planned for a future phase. Still generate the config so it is ready.
+- ⚠️ **Warn the user**: multi-node jobs require more GPUs and resources. Confirm they need multi-node before proceeding. `ivllm start` supports multi-node via Ray — it will automatically request the required number of nodes.
 
 ### 5. Choose max-model-len
 
@@ -107,7 +107,7 @@ Write the config to the requested filename. Include comments to explain the key 
 
 model: <model-id>
 tensor-parallel-size: <N>
-# pipeline-parallel-size: <M>   # uncomment for multi-node (not yet supported by ivllm)
+# pipeline-parallel-size: <M>   # for multi-node: each pipeline stage = 1 node (tp=4)
 max-model-len: <context_length>
 # Native context: <native_context> — reduced to save KV cache memory
 gpu-memory-utilization: 0.90
@@ -151,7 +151,9 @@ The KV cache for a 128K context can be larger than the model weights for small m
 
 ### Multi-node warning
 
-`ivllm` does not yet support multi-node SLURM jobs (tracked as a future roadmap item). Generate the config correctly so it is ready, but clearly warn the user that they cannot currently run this with `ivllm start` and will need manual SLURM setup for multi-node jobs.
+## Multi-node
+
+`ivllm start` supports multi-node SLURM jobs via Ray. When `pipeline-parallel-size > 1`, it automatically sets `--nodes=N` and bootstraps a Ray cluster across those nodes before starting vLLM with `--distributed-executor-backend ray`. No manual SLURM setup required.
 
 ## Validation
 
@@ -160,7 +162,7 @@ Before writing the file, verify:
 - [ ] `tensor-parallel-size` is 1, 2, or 4
 - [ ] `max-model-len` is a positive integer ≤ native context length
 - [ ] `model` field exactly matches the HuggingFace model ID (case-sensitive)
-- [ ] If multi-node: user has been warned that `ivllm` does not yet support it
+- [ ] If multi-node: user has been warned about resource requirements (multi-node is supported by `ivllm`)
 
 ## Troubleshooting
 
