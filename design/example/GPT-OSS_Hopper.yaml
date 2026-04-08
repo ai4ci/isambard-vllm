@@ -1,8 +1,0 @@
-model: 'openai/gpt-oss-120b'
-tensor_parallel_size: 4
-compilation-config: '{"cudagraph_mode":"PIECEWISE"}'
-no-enable-prefix-caching: true
-max-cudagraph-capture-size: 2048
-max-num-batched-tokens: 8192
-max-model-len: 10240
-# async-scheduling: true
