@@ -16,9 +16,18 @@
 #   To increase, set max-model-len up to 262144; the hybrid attention keeps
 #   KV cache small even at long contexts due to unified KV heads on global layers.
 #
-# ⚠ Gemma 4 requires a recent vLLM nightly build — the gemma4 reasoning-parser
-#   and tool-call-parser are not present in stable vLLM 0.15.1. Install via:
-#     pip install vllm --pre --extra-index-url https://wheels.vllm.ai/nightly/cu129
+# ⚠ Gemma 4 support is NOT currently available on Isambard AI via native pip install:
+#   - vLLM Gemma 4 support requires nightly wheels compiled against CUDA 12.9 or 13.0
+#   - Isambard AI's highest available CUDA toolkit module is 12.6
+#   - The stable vLLM 0.15.1 release (used by `ivllm setup`) does not include Gemma 4 support
+#
+#   Possible workaround: Apptainer container (brics/apptainer-multi-node is available)
+#     apptainer pull docker://vllm/vllm-openai:gemma4  # pulls CUDA 12.9 variant
+#   The container ships its own CUDA runtime; host driver >= ~575 is required.
+#   Check driver with: nvidia-smi (look for "CUDA Version:" in the output header)
+#
+#   Once Gemma 4 support lands in a stable vLLM release built for CUDA 12.6,
+#   this config will work with `ivllm start` as-is.
 #
 # Usage: ivllm start <job-name> --config design/example/gemma-4-31B-it.yaml
 
