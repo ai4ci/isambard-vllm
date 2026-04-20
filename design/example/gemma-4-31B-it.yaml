@@ -57,7 +57,6 @@ enable-prefix-caching: true
 # and avoid multimodal profiling overhead.
 # limit-mm-per-prompt: "image=0,audio=0"
 
-min-vllm-version: "0.9.1"
-# min-vllm-version: Gemma 4 support is NOT in vLLM 0.15.1 (current stable); a nightly
-# build built against cu130 is required. Update this once Gemma 4 lands in a stable
-# vLLM release. ivllm checks this before submitting; stripped before passing to vLLM.
+min-vllm-version: "0.19.1"
+# min-vllm-version: Gemma 4 support is present in vLLM 0.19.1 (current stable).
+# ivllm checks this before submitting; stripped before passing to vLLM.

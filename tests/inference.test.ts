@@ -4,7 +4,7 @@ import { renderInferenceScript } from "../src/templates/inference.ts";
 const base = {
   jobName: "my-job",
   model: "Qwen/Qwen2.5-0.5B-Instruct",
-  vllmVersion: "0.9.1",
+  vllmVersion: "0.19.1",
   hfHome: "/projects/myproject/hf",
   configFileName: "vllm.yaml",
   workDir: "/home/user/my-job",
@@ -33,7 +33,7 @@ describe("renderInferenceScript", () => {
 
   it("activates the versioned venv from $PROJECTDIR", () => {
     expect(renderInferenceScript(base)).toContain(
-      "source $PROJECTDIR/ivllm/0.9.1/bin/activate"
+      "source $PROJECTDIR/ivllm/0.19.1/bin/activate"
     );
   });
 

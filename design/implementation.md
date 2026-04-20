@@ -150,7 +150,7 @@ Enables CUDA 13.1 forward compatibility on Isambard AI (driver 565.57.01). See A
 
 Path layout (derived from `vllmVersion` config, not separately configurable):
 - `$PROJECTDIR/ivllm/nvhpc/` — HPC SDK install (shared, installed once)
-- `$PROJECTDIR/ivllm/<vllmVersion>/` — versioned vLLM venv (e.g. `0.9.1/`)
+- `$PROJECTDIR/ivllm/<vllmVersion>/` — versioned vLLM venv (e.g. `0.19.1/`)
 
 ### F2.1 — Config changes
 
@@ -189,7 +189,7 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
   - Script contains `nvhpc_2026_263_Linux_aarch64_cuda_13.1`
   - Script contains `gcc-native/14.2`
   - Script contains `$PROJECTDIR/ivllm/nvhpc`
-  - Script contains the versioned venv path (e.g. `$PROJECTDIR/ivllm/0.9.1`)
+  - Script contains the versioned venv path (e.g. `$PROJECTDIR/ivllm/0.19.1`)
   - Script contains `NVHPC_ROOT` and the compat `LD_LIBRARY_PATH`
   - Script contains `uv pip install vllm==` and `wheels.vllm.ai/cu130`
   - Script does NOT contain `singularity` or `cu129`

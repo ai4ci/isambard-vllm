@@ -44,6 +44,6 @@ tool-call-parser: qwen3_coder
 # document context is cached across requests, amortising the prefill cost.
 enable-prefix-caching: true
 
-min-vllm-version: "0.9.1"
-# min-vllm-version: Qwen3.5 support requires vLLM >= 0.9.1 with the qwen3_coder parser.
+min-vllm-version: "0.19.1"
+# min-vllm-version: Qwen3.5 support requires vLLM >= 0.19.1 with the qwen3_coder parser.
 # ivllm checks this before submitting; stripped before passing to vLLM.

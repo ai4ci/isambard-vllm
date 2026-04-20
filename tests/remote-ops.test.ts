@@ -10,7 +10,7 @@ const mockConfig: Config = {
   username: "testuser",
   projectDir: "/projects/myproject",
   defaultLocalPort: 11434,
-  vllmVersion: "0.9.1",
+  vllmVersion: "0.19.1",
 };
 
 describe("makeRemoteOps — dry-run mode", () => {

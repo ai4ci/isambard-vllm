@@ -228,7 +228,7 @@ The Isambard AI documentation now explicitly documents the HPC SDK approach with
 ```
 $PROJECTDIR/ivllm/
   nvhpc/          ← NVIDIA HPC SDK 26.3 (shared, installed once)
-  0.9.1/          ← uv venv with vLLM 0.9.1 (cu130)
+  0.19.1/         ← uv venv with vLLM 0.19.1 (cu130)
   0.10.0/         ← uv venv with vLLM 0.10.0 (cu130)  ← active if vllmVersion = "0.10.0"
 ```
 

@@ -189,3 +189,13 @@ Before writing the file, verify:
 - [vLLM model-specific recipes](https://docs.vllm.ai/projects/recipes/en/latest/)
 - [vLLM serve help text](references/help.txt)
 - [Isambard AI specs online](https://docs.isambard.ac.uk/specs/#system-specifications-isambard-ai-phase-2)
+
+### vLLM versioned documentation
+
+vLLM CLI options and config keys vary between releases. Always consult the documentation for the specific version being deployed:
+
+- **All versions index**: https://app.readthedocs.org/projects/vllm/
+- **Versioned serve CLI docs**: `https://docs.vllm.ai/en/v<version>/cli/serve/`  
+  e.g. https://docs.vllm.ai/en/v0.19.1/cli/serve/
+
+When checking whether a feature, parser, or config key exists, verify it in the docs for the version specified by `min-vllm-version` in the config (or the user's configured `vllm-version`). Avoid referencing `/en/latest/` when the deployed version is fixed.

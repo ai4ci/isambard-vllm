@@ -18,7 +18,7 @@ const DEFAULTS: Config = {
   username: "",
   projectDir: "$PROJECTDIR",
   defaultLocalPort: 11434,
-  vllmVersion: "0.9.1",
+  vllmVersion: "0.19.1",
 };
 
 export function loadConfig(): Config {

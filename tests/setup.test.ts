@@ -3,7 +3,7 @@ import { renderSetupScript } from "../src/templates/setup.ts";
 import { parseJobId, parseJobState } from "../src/slurm.ts";
 
 describe("renderSetupScript", () => {
-  const base = { vllmVersion: "0.9.1" };
+  const base = { vllmVersion: "0.19.1" };
 
   it("is a CPU-only SLURM job (no --gpus directive)", () => {
     const script = renderSetupScript(base);
@@ -40,12 +40,12 @@ describe("renderSetupScript", () => {
 
   it("creates versioned venv at $PROJECTDIR/ivllm/<version>", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("$PROJECTDIR/ivllm/0.9.1");
+    expect(script).toContain("$PROJECTDIR/ivllm/0.19.1");
   });
 
   it("skips venv install if versioned dir already exists", () => {
     const script = renderSetupScript(base);
-    expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.9\.1/);
+    expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.19\.1/);
   });
 
   it("installs vllm using cu130 wheels", () => {
@@ -56,7 +56,7 @@ describe("renderSetupScript", () => {
 
   it("installs exact vllm version", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("vllm==0.9.1");
+    expect(script).toContain("vllm==0.19.1");
   });
 
   it("does not reference singularity", () => {
@@ -84,7 +84,7 @@ describe("renderSetupScript", () => {
     const script = renderSetupScript({ vllmVersion: "0.10.0" });
     expect(script).toContain("$PROJECTDIR/ivllm/0.10.0");
     expect(script).toContain("vllm==0.10.0");
-    expect(script).not.toContain("0.9.1");
+    expect(script).not.toContain("0.19.1");
   });
 });
 
