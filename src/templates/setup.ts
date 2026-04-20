@@ -54,6 +54,9 @@ if [ ! -d ${venvDir} ]; then
   module load gcc-native/14.2
   export NVHPC_ROOT=${nvhpcRoot}
   export LD_LIBRARY_PATH=${ldLibPath}
+  # $PROJECTDIR is on a different filesystem from the uv cache (~/.cache/uv);
+  # hardlinking across filesystems is not possible so set copy mode explicitly.
+  export UV_LINK_MODE=copy
   uv venv ${venvDir} --python 3.12
   source ${venvDir}/bin/activate
   uv pip install vllm==${vllmVersion} \\
