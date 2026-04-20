@@ -92,6 +92,7 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 - **FP8 quantization**: GH200/H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
 - **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
+- **min-vllm-version**: Set this to the minimum vLLM version required to run the model. `ivllm start` checks this against the installed vLLM version and fails early if not satisfied. This key is **stripped before the config is passed to `vllm serve`** (vLLM errors on unknown keys). Use the earliest vLLM version in which the model and any required parsers/features were added. If unsure, check the vLLM changelog or recipes page, or set to `"0.9.1"` as a conservative baseline.
 
 ### 7. Write the YAML file
 
@@ -115,6 +116,9 @@ dtype: bfloat16
 enable-auto-tool-choice: true
 tool-call-parser: <parser>      # see vllm-config-guide.md for parser names
 enable-prefix-caching: true
+min-vllm-version: "<version>"
+# min-vllm-version: minimum vLLM version to run this model; ivllm checks before
+# submitting. Stripped before passing to vllm serve (vLLM errors on unknown keys).
 ```
 
 Only include keys that are non-default or important — keep the config minimal and readable.
@@ -163,6 +167,7 @@ Before writing the file, verify:
 - [ ] `max-model-len` is a positive integer ≤ native context length
 - [ ] `model` field exactly matches the HuggingFace model ID (case-sensitive)
 - [ ] If multi-node: user has been warned about resource requirements (multi-node is supported by `ivllm`)
+- [ ] `min-vllm-version` is set to the earliest vLLM version that supports this model
 
 ## Troubleshooting
 
@@ -175,6 +180,7 @@ Before writing the file, verify:
 | Reasoning parser name unknown | Check the model card vLLM quickstart snippet — it usually names the parser explicitly; or check the recipes page |
 | MoE model shows poor throughput | Add `enable-expert-parallel: true` with `tensor-parallel-size >= 2` |
 | Memory borderline | Try `quantization: fp8` — halves weight memory with minimal accuracy loss on Hopper (GH200/H100) |
+| `ivllm start` fails with "version too low" | The installed vLLM (`ivllm config --vllm-version`) is below `min-vllm-version`; run `ivllm setup` with a newer version or update the config |
 
 ## References
 

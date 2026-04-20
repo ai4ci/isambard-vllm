@@ -1,5 +1,10 @@
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import yaml from "js-yaml";
+
+/** Keys that are ivllm-specific and must be stripped before passing the config to `vllm serve`. */
+export const IVLLM_ONLY_KEYS = new Set(["min-vllm-version"]);
 
 export interface VllmConfig {
   model?: string;
@@ -53,4 +58,28 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const minVllmVersion = typeof minVer === "string" ? minVer : undefined;
 
   return { model, tensorParallelSize, pipelineParallelSize, minVllmVersion };
+}
+
+/**
+ * Returns a cleaned YAML string with all ivllm-specific keys removed.
+ * vLLM errors on unknown config keys — always use this when uploading to the remote.
+ */
+export function stripIvllmKeys(filePath: string): string {
+  const raw = readFileSync(filePath, "utf-8");
+  const doc = yaml.load(raw) as Record<string, unknown>;
+  for (const key of IVLLM_ONLY_KEYS) {
+    delete doc[key];
+  }
+  return yaml.dump(doc, { lineWidth: -1 });
+}
+
+/**
+ * Writes a stripped (ivllm-keys removed) copy of the YAML config to a temp file
+ * and returns the temp file path. Caller is responsible for deleting it.
+ */
+export function writeStrippedConfig(filePath: string): string {
+  const stripped = stripIvllmKeys(filePath);
+  const tmpPath = join(tmpdir(), `ivllm-stripped-${Date.now()}.yaml`);
+  writeFileSync(tmpPath, stripped, "utf-8");
+  return tmpPath;
 }

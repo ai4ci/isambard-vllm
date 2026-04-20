@@ -44,3 +44,8 @@ tool-call-parser: minimax_m2
 
 # Prefix caching — valuable for agentic workflows with shared system prompts.
 enable-prefix-caching: true
+
+min-vllm-version: "0.15.1"
+# min-vllm-version: MiniMax-M2.5 support requires vLLM >= 0.15.1; a nightly build
+# at a specific commit may be needed for full accuracy (see header comment above).
+# ivllm checks this before submitting; stripped before passing to vLLM.

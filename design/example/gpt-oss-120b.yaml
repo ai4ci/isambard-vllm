@@ -38,3 +38,7 @@ stream-interval: 20
 # For full built-in tool use (browsing, Python, MCP), also pass --tool-server.
 enable-auto-tool-choice: true
 tool-call-parser: openai
+
+min-vllm-version: "0.15.1"
+# min-vllm-version: GPT-OSS support integrated into vLLM since 0.15.1.
+# ivllm checks this before submitting; stripped before passing to vLLM.

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "bun:test";
-import { writeFileSync, unlinkSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseVllmConfig, resolveGpuCount } from "../src/vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount, stripIvllmKeys, IVLLM_ONLY_KEYS } from "../src/vllm-config.ts";
 
 function writeTmp(content: string): string {
   const path = join(tmpdir(), `ivllm-test-${Date.now()}.yaml`);
@@ -158,5 +158,43 @@ describe("resolveGpuCount", () => {
     expect(result.error).toBeUndefined();
     expect(result.gpuCount).toBe(8);
     expect(result.nodeCount).toBe(1);
+  });
+});
+
+describe("stripIvllmKeys", () => {
+  it("removes min-vllm-version from the output YAML", () => {
+    const path = writeTmp("model: some/model\nmin-vllm-version: \"0.9.1\"\ntensor-parallel-size: 4\n");
+    try {
+      const result = stripIvllmKeys(path);
+      expect(result).not.toContain("min-vllm-version");
+    } finally { unlinkSync(path); }
+  });
+
+  it("preserves all non-ivllm keys", () => {
+    const path = writeTmp(
+      "model: Qwen/Qwen2.5-0.5B-Instruct\n" +
+      "min-vllm-version: \"0.9.1\"\n" +
+      "tensor-parallel-size: 2\n" +
+      "max-model-len: 32768\n"
+    );
+    try {
+      const result = stripIvllmKeys(path);
+      expect(result).toContain("Qwen/Qwen2.5-0.5B-Instruct");
+      expect(result).toContain("tensor-parallel-size");
+      expect(result).toContain("max-model-len");
+    } finally { unlinkSync(path); }
+  });
+
+  it("is a no-op when no ivllm-only keys are present", () => {
+    const path = writeTmp("model: some/model\ntensor-parallel-size: 4\n");
+    try {
+      const result = stripIvllmKeys(path);
+      expect(result).toContain("some/model");
+      expect(result).toContain("tensor-parallel-size");
+    } finally { unlinkSync(path); }
+  });
+
+  it("IVLLM_ONLY_KEYS contains min-vllm-version", () => {
+    expect(IVLLM_ONLY_KEYS.has("min-vllm-version")).toBe(true);
   });
 });

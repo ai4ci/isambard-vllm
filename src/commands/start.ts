@@ -12,7 +12,7 @@ import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
-import { parseVllmConfig, resolveGpuCount } from "../vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount, writeStrippedConfig } from "../vllm-config.ts";
 import { semverLt } from "../semver.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -219,7 +219,13 @@ export async function cmdStart(args: string[]): Promise<void> {
   try {
     console.log("Copying files to login node...");
     if (remoteConfigFileScp && configFile) {
-      await ops.copyFile(configFile, remoteConfigFileScp);
+      // Strip ivllm-only keys (e.g. min-vllm-version) — vLLM errors on unknown keys
+      const strippedConfigTmp = writeStrippedConfig(configFile);
+      try {
+        await ops.copyFile(strippedConfigTmp, remoteConfigFileScp);
+      } finally {
+        unlinkSync(strippedConfigTmp);
+      }
     }
     await ops.copyFile(localScriptTmp, remoteScriptPathScp);
     console.log("✓ Files copied");

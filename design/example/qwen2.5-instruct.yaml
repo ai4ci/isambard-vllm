@@ -14,3 +14,5 @@ dtype: bfloat16
 enable-auto-tool-choice: true
 tool-call-parser: hermes
 enable-prefix-caching: true
+min-vllm-version: "0.9.1"
+# min-vllm-version: ivllm checks this before submitting the job; stripped before passing to vLLM.
