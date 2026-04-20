@@ -13,16 +13,18 @@
 #   KV cache at full 262,144 tokens (attention layers only):
 #     10 layers × 2 KV heads × head_dim 256 × 2 bytes × 262,144 tokens ≈ 2.5 GB
 #
-#   On a single Isambard AI node with tp=2:
-#     Available VRAM : 2 × 86.4 GB = 172.8 GB
+#   On a single Isambard AI node with tp=4:
+#     Available VRAM : 4 × 86.4 GB = 345.6 GB
 #     Weights        : ~70 GB
 #     KV cache       : ~2.5 GB at full 262K context
-#     Total used     : ~72.5 GB — fits with large margin, no multi-node required.
+#     Total used     : ~72.5 GB — massive headroom for large batch prefills.
+#   tp=4 (full node) preferred over tp=2: more VRAM headroom for activation
+#   peaks, higher aggregate memory bandwidth, and no real downside on Isambard AI.
 #
 # Usage: ivllm start <job-name> --config design/example/qwen3.5-long-context.yaml
 
 model: Qwen/Qwen3.5-35B-A3B
-tensor-parallel-size: 2
+tensor-parallel-size: 4
 max-model-len: 262144
 # Native context ceiling; the hybrid architecture keeps KV cache tiny (~2.5 GB)
 # even at full 262K. Reduce only if you encounter OOM on activations during

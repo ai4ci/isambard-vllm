@@ -3,7 +3,9 @@
 #
 # Hardware: 4 × GH200 120GB per node (Isambard AI Phase 1/2) — ~96 GiB usable HBM3e per GPU
 # Model: 0.49B parameters (dense transformer), ~1 GB at bfloat16
-# Parallelism: single GPU — model is tiny, no parallelism needed
+# Parallelism: tp=1 — model is trivially small; communication overhead of tp>1
+# would exceed the compute benefit. Use tp=4 only if maximising batch throughput
+# for high-concurrency workloads.
 
 model: Qwen/Qwen2.5-0.5B-Instruct
 tensor-parallel-size: 1

@@ -5,9 +5,11 @@
 # Model: 117B parameters (MoE, 5.1B activated), MXFP4-quantized MoE weights
 #
 # Memory: the MoE weights are MXFP4 (0.5 bytes/param) so effective weight
-# footprint is ~59 GB — fits on a single H100 80 GB, let alone the GH200's ~96 GiB.
-# tp=2 is recommended for reasonable KV-cache headroom at 131K context
-# and higher throughput on long reasoning chains.
+# footprint is ~59 GB — fits on a single GH200's ~96 GiB.
+# tp=2 follows the official vLLM recipe recommendation for this model; the
+# MXFP4 quantization and cuda-graph/stream tuning below are designed for tp=2.
+# Upgrading to tp=4 is possible for more KV headroom but requires re-tuning
+# max-cudagraph-capture-size and max-num-batched-tokens.
 #
 # GPT-OSS support is integrated into mainline vLLM since ≥0.15.1.
 # No special wheels needed — the standard ivllm setup venv is sufficient.

@@ -3,7 +3,8 @@
 #
 # Hardware: 4 × GH200 120GB per node (Isambard AI Phase 1/2) — ~96 GiB usable HBM3e per GPU
 # Model: 30.7B dense parameters, ~62 GB at bfloat16
-# Parallelism: single GPU (62 GB weights fit on one GH200 120GB (~96 GiB usable), ~24 GiB KV headroom)
+# Parallelism: tp=4 (full node) — weights fit on 1 GPU but tp=4 gives 4× KV cache headroom
+#   (~283 GB available for KV cache) enabling the full 256K native context at high throughput.
 #
 # Architecture: Dense hybrid transformer
 #   60 layers alternating local sliding-window (1024 tokens) and global attention
@@ -12,29 +13,14 @@
 #   Thinking mode: structured reasoning via <|channel|>thought... delimiters
 #   Function calling: native tool-use protocol with dedicated special tokens
 #
-# Context: native 256K tokens — reduced to 32768 as a practical default.
-#   To increase, set max-model-len up to 262144; the hybrid attention keeps
-#   KV cache small even at long contexts due to unified KV heads on global layers.
-#
-# ⚠ Gemma 4 is NOT currently runnable on Isambard AI:
-#   - vLLM Gemma 4 nightly wheels require CUDA 12.9 (cu129) or 13.0 (cu130)
-#   - Isambard AI GPU driver is 565.57.01, which supports CUDA 12.7 maximum
-#   - CUDA 12.9 requires driver ≥ ~575; the Apptainer container approach is
-#     also blocked by this — containers still need a compatible host driver
-#   - The stable vLLM 0.15.1 release (used by `ivllm setup`) does not include
-#     Gemma 4 support
-#
-#   This config is kept as a forward-compatible reference. It will work once
-#   either the Isambard GPU driver is updated (≥ 575) or Gemma 4 support lands
-#   in a stable vLLM release built against CUDA ≤ 12.7.
+# Context: full native 256K tokens (262144). With tp=4 the KV budget is ~283 GB —
+#   more than enough to serve the full context window.
 #
 # Usage: ivllm start <job-name> --config design/example/gemma-4-31B-it.yaml
 
 model: google/gemma-4-31B-it
-tensor-parallel-size: 1
-max-model-len: 32768
-# Native context: 262144 — increase if your workload needs longer context;
-# the model's unified KV on global layers keeps cache growth modest.
+tensor-parallel-size: 4
+max-model-len: 262144
 gpu-memory-utilization: 0.90
 dtype: bfloat16
 

@@ -71,19 +71,28 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 ```
 
 **Single node** (needed_gpus ≤ 4):
-- `tensor-parallel-size` = needed_gpus, rounded up to 1, 2, or 4
+- **Default to `tensor-parallel-size: 4` (full node) for any non-trivial model.**
+  There is no penalty to using all 4 GPUs on a single node — it gives 4× more KV cache space (directly enabling longer contexts and higher batch throughput), leverages NVLink-C2C for near-linear TP scaling, and keeps the job within a single node (simpler, lower latency). Only drop below tp=4 if:
+  - The model is very small (< ~7B) and the user explicitly asks for a minimal footprint, **or**
+  - The model's number of attention heads is not divisible by 4 (rare; check the model card)
 - `pipeline-parallel-size` = 1 (omit from config)
 
 **Multi-node** (needed_gpus > 4):
 - `tensor-parallel-size` = 4
 - `pipeline-parallel-size` = ceil(needed_gpus / 4)
-- ⚠️ **Warn the user**: multi-node jobs require more GPUs and resources. Confirm they need multi-node before proceeding. `ivllm start` supports multi-node via Ray — it will automatically request the required number of nodes.
+- ⚠️ **Warn the user**: multi-node jobs require more resources and inter-node communication adds latency. `ivllm start` supports multi-node via Ray automatically, but confirm the user needs multi-node before proceeding.
 
 ### 5. Choose max-model-len
 
-- Start with the model's native context length
-- If the model supports >64K tokens natively, suggest 32768 as a practical default (KV cache for very long contexts consumes significant GPU memory)
-- Note the native context length in a YAML comment so the user knows what they are giving up
+- **Default to the model's full native context length.** With tp=4 on 4 × GH200 120GB (~345 GB usable VRAM combined), KV cache headroom is large even for very long contexts — do not reduce the context pre-emptively.
+- Only reduce `max-model-len` if an explicit OOM analysis shows the KV cache at native context would exhaust available memory after weights are loaded. Calculate:
+  ```
+  kv_per_token ≈ num_kv_heads × head_dim × 2 bytes × num_layers  (standard dense attention)
+  total_kv_GB  = kv_per_token × max_tokens / 1e9
+  available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB
+  ```
+- If the native context does exceed available KV budget, reduce to the largest power-of-two that fits, and note the native context in a YAML comment.
+- Exception: hybrid architectures (e.g. Qwen3.5-35B-A3B with Gated DeltaNet layers) have a tiny KV footprint — keep the full context.
 
 ### 6. Check for special options
 
@@ -107,10 +116,9 @@ Write the config to the requested filename. Include comments to explain the key 
 # Parallelism: <explanation>
 
 model: <model-id>
-tensor-parallel-size: <N>
+tensor-parallel-size: 4
 # pipeline-parallel-size: <M>   # for multi-node: each pipeline stage = 1 node (tp=4)
-max-model-len: <context_length>
-# Native context: <native_context> — reduced to save KV cache memory
+max-model-len: <native_context_length>
 gpu-memory-utilization: 0.90
 dtype: bfloat16
 enable-auto-tool-choice: true
@@ -128,9 +136,9 @@ Only include keys that are non-default or important — keep the config minimal 
 After writing the file, tell the user:
 - The filename written
 - The model size and memory calculation
-- The parallelism chosen and why
+- The parallelism chosen and why (tp=4 is default; note if reduced and why)
 - How to use it: `ivllm start <job-name> --config <filename>`
-- Any warnings (multi-node, context reduction, etc.)
+- Any warnings (multi-node required, context was reduced from native, etc.)
 
 ## Guidance
 
@@ -142,16 +150,24 @@ For MoE models, all expert weights must reside in GPU memory simultaneously even
 
 ### Parallelism choices
 
-- **tp=1**: preferred when the model fits on a single GPU — no communication overhead
-- **tp=2**: when the model needs 2 GPUs; NVLink-C2C gives near-linear scaling on Isambard AI
-- **tp=4**: uses the whole node; ideal for the largest single-node models
-- **pp>1**: only for multi-node; each pipeline stage is one full node (tp=4); latency increases with depth
+**The default is tp=4 (full node).** On Isambard AI there is no queuing penalty for using all 4 GH200s on a single node — the purpose of the system is large-scale inference. Using the full node gives:
+- 4× more aggregate KV cache memory, enabling longer contexts and larger batches
+- Higher throughput via NVLink-C2C-connected tensor parallelism (near-linear scaling)
+- Full use of the allocated node allocation
 
-Valid `tensor-parallel-size` values depend on the number of attention heads — it must divide the head count evenly. 1, 2, and 4 work for virtually all modern models.
+Reduce below tp=4 only when:
+- **tp=1**: model is very small (< ~7B) and the user explicitly wants a minimal single-GPU footprint
+- **tp=2**: attention head count is not divisible by 4 but is divisible by 2 (rare with modern models)
 
-### Context length trade-offs
+Multi-node (pp>1) adds inter-node communication latency and complexity — only use it when the model's weights genuinely won't fit on a single 4-GPU node.
 
-The KV cache for a 128K context can be larger than the model weights for small models. If the model card says "supports 128K" but the use case is interactive chat, 32K is usually sufficient and much more memory efficient. Always leave the native context length in a comment so the user can restore it if needed.
+Valid `tensor-parallel-size` values must divide the model's number of attention heads evenly. 1, 2, and 4 work for virtually all modern models.
+
+### Context length
+
+**Default to the model's full native context length.** With tp=4 across 4 × GH200 120GB (~345 GB usable), there is substantial KV cache headroom. The point of running on Isambard AI is to go big — large contexts, high throughput.
+
+Only reduce `max-model-len` if an explicit calculation shows the KV cache at native context would exhaust remaining memory after weights are loaded. If reduction is needed, note the native context in a comment and reduce to the next power-of-two that fits. Never silently cap at 32K for a model that supports 128K+ unless forced by memory.
 
 ### Multi-node warning
 
@@ -176,7 +192,7 @@ Before writing the file, verify:
 | Model card not accessible | Ask user for parameter count and architecture manually |
 | Parameter count ambiguous | Use total parameters (not non-embedding, not active) for memory calculation |
 | Model fits on paper but OOM in practice | Reduce `max-model-len` by half; or suggest `quantization: fp8` |
-| User insists on a context length that won't fit | Explain the trade-off and suggest the maximum feasible context given the GPU budget |
+| Context reduced from native | Always note native context in a comment; reduce to next power-of-two that fits, not to an arbitrary 32K |
 | Reasoning parser name unknown | Check the model card vLLM quickstart snippet — it usually names the parser explicitly; or check the recipes page |
 | MoE model shows poor throughput | Add `enable-expert-parallel: true` with `tensor-parallel-size >= 2` |
 | Memory borderline | Try `quantization: fp8` — halves weight memory with minimal accuracy loss on Hopper (GH200/H100) |
