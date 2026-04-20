@@ -55,7 +55,7 @@ describe("renderSetupScript", () => {
 
   it("installs vllm using cu130 wheels", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("wheels.vllm.ai/cu130");
+    expect(script).toContain("wheels.vllm.ai/nightly/cu130");
     expect(script).not.toContain("cu129");
   });
 
