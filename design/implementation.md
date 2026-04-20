@@ -142,13 +142,119 @@
 
 ---
 
-## Phase F2 — Singularity container support
+## Phase F2 — CUDA forward compatibility via NVIDIA HPC SDK
 
-Replaces pip/venv-based vLLM installation with the official `vllm/vllm-openai` Singularity image,
-enabling CUDA forward compatibility on Isambard AI (driver 565.57.01, CUDA 12.7 max).
-See ADR-010.
+One-time shared install of NVIDIA HPC SDK 26.3 + vLLM nightly (cu129) into `$PROJECTDIR/ivllm/`.
+Enables CUDA 13.1 forward compatibility on Isambard AI (driver 565.57.01). See ADR-011.
 
-### F2.1 — Config changes
+Paths are fixed — no config needed:
+- `$PROJECTDIR/ivllm/nvhpc/` — HPC SDK install
+- `$PROJECTDIR/ivllm/venv/` — vLLM venv
+
+### F2.1 — Config simplification
+
+- [ ] Remove `venvPath` and `vllmVersion` fields from `Config` interface in `src/config.ts`
+- [ ] Remove them from `DEFAULTS`, from config read/write, and from `ivllm config` command
+- [ ] Write failing tests confirming the fields are absent from config schema
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.2 — Setup template
+
+- [ ] Rewrite `renderSetupScript` in `src/templates/setup.ts`:
+  - CPU-only SLURM job (no `--gpus`)
+  - Phase A — HPC SDK install (skip if `$PROJECTDIR/ivllm/nvhpc` already exists):
+    ```bash
+    mkdir -p $PROJECTDIR/ivllm
+    wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_13.1.tar.gz -O /tmp/nvhpc.tar.gz
+    tar xpzf /tmp/nvhpc.tar.gz -C /tmp
+    cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_13.1
+    NVHPC_SILENT=true NVHPC_INSTALL_DIR=$PROJECTDIR/ivllm/nvhpc NVHPC_INSTALL_TYPE=single ./install
+    rm -f /tmp/nvhpc.tar.gz
+    ```
+  - Phase B — vLLM venv install (skip if `$PROJECTDIR/ivllm/venv` already exists):
+    ```bash
+    module load gcc-native/14.2
+    export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
+    export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
+    uv venv $PROJECTDIR/ivllm/venv --python 3.12
+    source $PROJECTDIR/ivllm/venv/bin/activate
+    uv pip install vllm --pre --extra-index-url https://wheels.vllm.ai/nightly/cu129
+    ```
+  - Emit `IVLLM_SETUP_SUCCESS` marker on completion
+- [ ] Update `SetupScriptOptions` interface: remove `venvPath`/`vllmVersion` (no new fields needed — paths derived from `$PROJECTDIR`)
+- [ ] Write failing tests in `tests/setup.test.ts`:
+  - Script contains `nvhpc_2026_263_Linux_aarch64_cuda_13.1`
+  - Script contains `gcc-native/14.2`
+  - Script contains `$PROJECTDIR/ivllm/nvhpc`
+  - Script contains `$PROJECTDIR/ivllm/venv`
+  - Script contains `NVHPC_ROOT` and the compat `LD_LIBRARY_PATH`
+  - Script contains `uv pip install vllm --pre`
+  - Script does NOT contain `singularity`
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.3 — Setup command
+
+- [ ] Update `src/commands/setup.ts`:
+  - Remove `venvPath`/`vllmVersion` references
+  - Pass no path options to `renderSetupScript` (paths are in the template, derived from `$PROJECTDIR`)
+  - Success check: `test -d $PROJECTDIR/ivllm/venv/bin` on LOGIN
+  - Update console output to reflect new install approach
+- [ ] Write failing tests for success check using new path
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.4 — Inference templates
+
+- [ ] Add `LD_LIBRARY_PATH` preamble to `renderInferenceScript` in `src/templates/inference.ts`:
+  ```bash
+  export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
+  export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
+  source $PROJECTDIR/ivllm/venv/bin/activate
+  ```
+- [ ] Update single-node template: replace hardcoded `venvPath` with `$PROJECTDIR/ivllm/venv`
+- [ ] Update multi-node template: same preamble before `ray start` calls and `vllm serve`
+- [ ] Remove `venvPath` from `InferenceScriptOptions`
+- [ ] Write failing tests in `tests/inference.test.ts`:
+  - Single-node: contains `NVHPC_ROOT` and `cuda/13.1/compat`
+  - Single-node: `source $PROJECTDIR/ivllm/venv/bin/activate` present
+  - Multi-node: LD_LIBRARY_PATH preamble present before `ray start` srun calls
+  - Neither template contains `singularity`
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.5 — Start command
+
+- [ ] Update `src/commands/start.ts` pre-flight:
+  - Replace `config.venvPath` lookup with fixed path: `test -d $PROJECTDIR/ivllm/venv/bin`
+  - Error message: "vLLM not installed. Run `ivllm setup` first."
+- [ ] Remove `venvPath` from any options passed to `renderInferenceScript`
+- [ ] Write failing tests for new pre-flight check
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.6 — Dry-run verification
+
+- [ ] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script:
+  - Contains `NVHPC_ROOT` and `LD_LIBRARY_PATH` with compat path first
+  - Contains `source $PROJECTDIR/ivllm/venv/bin/activate`
+  - Does NOT contain `singularity`
+- [ ] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged
+
+### F2.7 — End-to-end testing on Isambard AI
+
+- [ ] Run `ivllm setup` — submit CPU-only job, verify HPC SDK installed at `$PROJECTDIR/ivllm/nvhpc/`
+- [ ] Verify venv created at `$PROJECTDIR/ivllm/venv/` with vLLM installed
+- [ ] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct`
+- [ ] Verify CUDA 13.1 forward compat active (check nvidia-smi output in SLURM log)
+- [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel
+- [ ] Commit
+
+---
+
+## Phase F2-alt — Singularity container support (on hold)
+
+Preserved for future consideration. See ADR-010 for rationale.
+Revisit if bare-metal pip install proves fragile across vLLM version updates,
+or if multi-node container support via `brics/apptainer-multi-node` is validated with Ray.
+
+### F2-alt.1 — Config changes
 
 - [ ] Add `vllmImage: string` to `Config` interface (default: `"docker://vllm/vllm-openai:latest"`)
 - [ ] Add `vllmImagePath: string` to `Config` interface (default: `"$PROJECTDIR/ivllm/images/vllm-openai.sif"`)
@@ -157,7 +263,7 @@ See ADR-010.
 - [ ] Add `--vllm-image` and `--vllm-image-path` flags to `ivllm config` command
 - [ ] Update `src/commands/config.ts` help text
 
-### F2.2 — Setup template
+### F2-alt.2 — Setup template
 
 - [ ] Rewrite `renderSetupScript` in `src/templates/setup.ts`:
   - CPU-only SLURM job (no `--gpus`, no GPU allocation needed for `singularity pull`)
@@ -173,7 +279,7 @@ See ADR-010.
   - Script contains the image path and image source
 - [ ] Confirm tests fail, then implement, then confirm tests pass
 
-### F2.3 — Setup command
+### F2-alt.3 — Setup command
 
 - [ ] Update `src/commands/setup.ts`:
   - Pre-flight: check `.sif` exists at `vllmImagePath` → skip if present (idempotent); add `--force` flag to override
@@ -183,7 +289,7 @@ See ADR-010.
 - [ ] Write failing tests in `tests/setup.test.ts` for idempotency and image path check
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.4 — Inference templates
+### F2-alt.4 — Inference templates
 
 - [ ] Add `vllmImagePath: string` to `InferenceScriptOptions` in `src/templates/inference.ts`
 - [ ] Single-node template: replace `source <venv>/bin/activate && vllm serve ...` with:
@@ -195,46 +301,37 @@ See ADR-010.
     vllm serve --config <configPath> --host 0.0.0.0 --port <port>
   ```
 - [ ] Multi-node template: same substitution for the `srun --overlap` vllm serve call;
-  Ray head/worker `srun` calls do not need the container (Ray is installed inside the image)
-  — revisit if Ray is not in the vLLM image; may need `singularity exec` for those too
+  Ray head/worker `srun` calls also need `singularity exec --nv <image> /host/adapt.sh bash -c "ray start ..."` — requires `module load brics/apptainer-multi-node`
 - [ ] Write failing tests in `tests/inference.test.ts`:
   - Single-node: contains `singularity run --nv`, `VLLM_ENABLE_CUDA_COMPATIBILITY=1`, `--bind $PROJECTDIR`
   - Single-node: does NOT contain `source` or `activate`
-  - Multi-node: vllm serve line uses singularity
+  - Multi-node: vllm serve line and ray start lines use singularity with `/host/adapt.sh`
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.5 — vllm-config: `min-vllm-version` support
+### F2-alt.5 — vllm-config: `min-vllm-version` support
 
 - [ ] Add optional `min-vllm-version` field to `VllmConfig` interface in `src/vllm-config.ts`
 - [ ] `parseVllmConfig` reads and returns `minVllmVersion?: string`
-- [ ] Add `validateImageVersion(imagePath, minVersion, config)` helper in `src/slurm.ts` or new `src/container.ts`:
+- [ ] Add `validateImageVersion(imagePath, minVersion, config)` helper:
   - Runs `singularity inspect --labels <imagePath>` on LOGIN via SSH
   - Parses `org.opencontainers.image.version` label
   - Compares semver; throws if image is too old
 - [ ] Write failing tests for `parseVllmConfig` with `min-vllm-version` field
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.6 — Start command
+### F2-alt.6 — Start command
 
 - [ ] Update `src/commands/start.ts` pre-flight:
   - Replace venv existence check with `.sif` existence check: `test -f <vllmImagePath>`
   - If `min-vllm-version` set in yaml config, call `validateImageVersion` and fail early if not met
-- [ ] HuggingFace pre-download: change from `source venv && huggingface-cli download` to
-  `singularity exec --bind $PROJECTDIR <imagePath> huggingface-cli download ...`
-  (the vLLM image includes `huggingface_hub`; `HF_HOME` set inside exec call)
+- [ ] HuggingFace pre-download via `singularity exec --bind $PROJECTDIR <imagePath> huggingface-cli download ...`
 - [ ] Pass `vllmImagePath` from config into `renderInferenceScript`
 - [ ] Write failing tests in `tests/start.test.ts` for new pre-flight check
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.7 — Dry-run verification
-
-- [ ] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script uses singularity
-- [ ] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged (mock does not use container)
-
-### F2.8 — End-to-end testing on Isambard AI
+### F2-alt.7 — End-to-end testing on Isambard AI
 
 - [ ] Run `ivllm setup` — submit CPU-only job, verify `.sif` created in `/projects/.../ivllm/images/`
 - [ ] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct` using container
-- [ ] Verify HuggingFace pre-download runs via `singularity exec`
 - [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel
 - [ ] Commit

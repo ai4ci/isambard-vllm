@@ -168,7 +168,7 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 
 ## ADR-010: Singularity container for vLLM on HPC
 
-**Status**: Accepted (supersedes ADR-005)
+**Status**: On hold — superseded by ADR-011. Preserved for future reference; Singularity remains a viable path for single-node and potentially multi-node if bare-metal limitations arise.
 
 **Context**: The GH200 GPU driver on Isambard AI (565.57.01) supports CUDA 12.7 at most. Recent vLLM releases require CUDA 12.9+. pip installation of vLLM nightly fails:
 - Build-time: `fastsafetensors` C++ extension fails to compile against system GCC
@@ -207,3 +207,54 @@ The Isambard support team recommends using Singularity/Apptainer with NGC contai
 - `ivllm setup` is idempotent: if the `.sif` already exists and matches the configured version, it skips the pull.
 - HuggingFace model cache (`$PROJECTDIR/hf`) and job working directories are bind-mounted into the container at runtime (`--bind $PROJECTDIR`).
 - `huggingface-cli` used for pre-download (ADR-007) must be available outside the container on LOGIN — this may require a separate lightweight Python install for `huggingface_hub`. Alternatively, pre-download can run inside the container via `singularity exec`.
+
+---
+
+## ADR-011: NVIDIA HPC SDK bare-metal approach for CUDA forward compatibility
+
+**Status**: Accepted (supersedes ADR-010)
+
+**Context**: Two viable options were identified to run vLLM (which requires CUDA 12.9+) on Isambard AI (driver 565.57.01, max CUDA 12.7):
+
+1. **Singularity containers** (ADR-010): clean single-node, but multi-node via Ray requires unproven `source /host/adapt.sh` pattern inside every `srun` task; large image (~10-15 GB); more `ivllm` code changes.
+2. **NVIDIA HPC SDK bare-metal**: install the HPC SDK once to shared project space; set `LD_LIBRARY_PATH` to activate CUDA 13.1 forward compatibility; keep existing pip/venv + Ray architecture unchanged.
+
+The Isambard AI documentation now explicitly documents the HPC SDK approach with the exact `LD_LIBRARY_PATH` to use, making it a low-risk, well-supported path. Multi-node Ray remains unchanged.
+
+**Decision**: Use NVIDIA HPC SDK 26.3 (CUDA 13.1) installed once to shared project space. pip-install vLLM into a shared venv. All paths are fixed — no user configuration required.
+
+**Installation layout** (all under `$PROJECTDIR/ivllm/`, managed by `ivllm setup`):
+
+```
+$PROJECTDIR/ivllm/
+  nvhpc/          ← NVIDIA HPC SDK 26.3 (CUDA 13.1 compat)
+  venv/           ← uv venv with vLLM nightly (cu129)
+```
+
+**`LD_LIBRARY_PATH` in all SLURM scripts** (set before `vllm serve` or `ray start`):
+```bash
+export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
+export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
+```
+
+**`ivllm setup`** submits a CPU-only SLURM job that:
+1. Downloads the HPC SDK aarch64 tarball (~3 GB) and installs it to `$PROJECTDIR/ivllm/nvhpc/`
+2. Sets up the compat `LD_LIBRARY_PATH`
+3. Loads `gcc-native/14.2` module (required to compile `fastsafetensors` C++ extension)
+4. Creates a uv venv at `$PROJECTDIR/ivllm/venv/` and pip-installs vLLM nightly (cu129)
+
+**Rationale**:
+- HPC SDK approach is officially documented by Isambard AI with exact commands and `LD_LIBRARY_PATH`.
+- Multi-node Ray architecture is unchanged — just env vars added to SLURM templates.
+- Fewer `ivllm` code changes than container approach: only SLURM templates and setup script change.
+- Shared project install (`$PROJECTDIR/ivllm/`) means one setup per team, not per user — same benefit as Singularity.
+- No configurable paths needed (YAGNI): paths are derived from `$PROJECTDIR` which is always set on Isambard.
+- Eliminates library ordering confusion: `compat` is first in `LD_LIBRARY_PATH` → `libcuda.so` from compat shadows the system stub.
+
+**Consequences**:
+- `venvPath` and `vllmVersion` removed from `~/.ivllm/config.yaml` (YAGNI — path is fixed as `$PROJECTDIR/ivllm/venv`).
+- `ivllm start` pre-flight checks `$PROJECTDIR/ivllm/venv` exists on HPC (unchanged mechanism, new path).
+- SLURM templates (single-node and multi-node) prepend the HPC SDK `LD_LIBRARY_PATH` before activating the venv and calling `vllm serve` or `ray start`.
+- `ivllm setup` is idempotent: skips HPC SDK install if `$PROJECTDIR/ivllm/nvhpc` already exists; skips venv creation if `$PROJECTDIR/ivllm/venv` already exists (unless `--force` passed).
+- `fastsafetensors` build requires `module load gcc-native/14.2` during setup — added to setup SLURM script.
+- HuggingFace pre-download (ADR-007) continues to use `huggingface-cli` from the shared venv on LOGIN.
