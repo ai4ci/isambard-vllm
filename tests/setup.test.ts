@@ -5,9 +5,14 @@ import { parseJobId, parseJobState } from "../src/slurm.ts";
 describe("renderSetupScript", () => {
   const base = { vllmVersion: "0.19.1" };
 
-  it("is a CPU-only SLURM job (no --gpus directive)", () => {
+  it("requests 4 GPUs so --torch-backend=auto can detect CUDA via nvidia-smi", () => {
     const script = renderSetupScript(base);
-    expect(script).not.toContain("#SBATCH --gpus");
+    expect(script).toContain("#SBATCH --gpus=4");
+  });
+
+  it("uses --torch-backend=auto for CUDA torch wheel selection", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("--torch-backend=auto");
   });
 
   it("installs HPC SDK to $PROJECTDIR/ivllm/nvhpc", () => {

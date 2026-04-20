@@ -20,6 +20,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
   return `#!/bin/bash
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
+#SBATCH --gpus=4
 #SBATCH --time=02:00:00
 
 set -euo pipefail
@@ -61,7 +62,9 @@ if [ ! -d ${venvDir} ]; then
   source ${venvDir}/bin/activate
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
   uv pip install vllm==${vllmVersion} \\
-    --extra-index-url https://wheels.vllm.ai/cu130
+    --torch-backend=auto \\
+    --extra-index-url https://wheels.vllm.ai/cu130 \\
+    --extra-index-url https://pypi.org/simple/
   echo "uv install complete."
   echo "=== vLLM version ==="
   python -c "import importlib.metadata; print('vllm', importlib.metadata.version('vllm'))"
