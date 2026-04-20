@@ -206,38 +206,31 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 
 ### F2.4 — Inference templates
 
-- [ ] Add `LD_LIBRARY_PATH` preamble and versioned venv activation to `renderInferenceScript`:
+- [x] Add `LD_LIBRARY_PATH` preamble and versioned venv activation to `renderInferenceScript`:
   ```bash
   export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
   export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
   source $PROJECTDIR/ivllm/<vllmVersion>/bin/activate
   ```
-- [ ] Update single-node template: replace `venvPath` with `$PROJECTDIR/ivllm/<vllmVersion>`
-- [ ] Update multi-node template: same preamble before `ray start` calls and `vllm serve`
-- [ ] Remove `venvPath` from `InferenceScriptOptions`; add `vllmVersion: string`
-- [ ] Write failing tests in `tests/inference.test.ts`:
-  - Single-node: contains `NVHPC_ROOT` and `cuda/13.1/compat`
-  - Single-node: `source $PROJECTDIR/ivllm/<version>/bin/activate` present
-  - Multi-node: LD_LIBRARY_PATH preamble present before `ray start` srun calls
-  - Neither template contains `singularity` or `cu129`
-- [ ] Confirm tests fail, implement, confirm pass
+- [x] Update single-node template: replace `venvPath` with `$PROJECTDIR/ivllm/<vllmVersion>`
+- [x] Update multi-node template: same preamble before `ray start` calls and `vllm serve`
+- [x] Remove `venvPath` from `InferenceScriptOptions`; add `vllmVersion: string`
+- [x] Tests: `NVHPC_ROOT`, `cuda/13.1/compat`, versioned venv path, multi-node preamble order
+- [x] Tests pass (180 total)
 
 ### F2.5 — vllm-config: `min-vllm-version` support
 
-- [ ] Add optional `min-vllm-version` field to `VllmConfig` interface in `src/vllm-config.ts`
-- [ ] `parseVllmConfig` reads and returns `minVllmVersion?: string`
-- [ ] Write failing tests for `parseVllmConfig` with `min-vllm-version` field
-- [ ] Confirm tests fail, implement, confirm pass
+- [x] Add optional `min-vllm-version` field to `VllmConfig` interface in `src/vllm-config.ts`
+- [x] `parseVllmConfig` reads and returns `minVllmVersion?: string`
+- [x] Tests pass for `parseVllmConfig` with/without `min-vllm-version`
 
 ### F2.6 — Start command
 
-- [ ] Update `src/commands/start.ts` pre-flight:
-  - Replace `config.venvPath` lookup with versioned path: `test -d $PROJECTDIR/ivllm/<vllmVersion>/bin`
+- [x] Update `src/commands/start.ts` pre-flight:
+  - Replace `config.venvPath` lookup with versioned path: `test -f $PROJECTDIR/ivllm/<vllmVersion>/bin/activate`
   - If `min-vllm-version` set in `vllm.yaml`, compare semver against `config.vllmVersion`; fail early if not satisfied
-  - Error messages: "vLLM <version> not installed — run `ivllm setup`" / "vLLM <installed> < min-vllm-version <required>"
-- [ ] Pass `vllmVersion` (not `venvPath`) into `renderInferenceScript`
-- [ ] Write failing tests for new pre-flight check and min-version comparison
-- [ ] Confirm tests fail, implement, confirm pass
+- [x] Pass `vllmVersion` (not `venvPath`) into `renderInferenceScript`
+- [x] `src/semver.ts` extracted for testability; 8 unit tests pass
 
 ### F2.7 — Dry-run verification
 
