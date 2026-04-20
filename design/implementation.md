@@ -139,3 +139,102 @@
 
 - [x] Removed `--model` from all non-mock examples (model is now in `vllm.yaml`)
 - [x] Updated options table; added skill install instructions
+
+---
+
+## Phase F2 — Singularity container support
+
+Replaces pip/venv-based vLLM installation with the official `vllm/vllm-openai` Singularity image,
+enabling CUDA forward compatibility on Isambard AI (driver 565.57.01, CUDA 12.7 max).
+See ADR-010.
+
+### F2.1 — Config changes
+
+- [ ] Add `vllmImage: string` to `Config` interface (default: `"docker://vllm/vllm-openai:latest"`)
+- [ ] Add `vllmImagePath: string` to `Config` interface (default: `"$PROJECTDIR/ivllm/images/vllm-openai.sif"`)
+- [ ] Deprecate `venvPath` and `vllmVersion` fields (keep for backward compat but no longer used by setup/start)
+- [ ] Update `DEFAULTS` in `src/config.ts`
+- [ ] Add `--vllm-image` and `--vllm-image-path` flags to `ivllm config` command
+- [ ] Update `src/commands/config.ts` help text
+
+### F2.2 — Setup template
+
+- [ ] Rewrite `renderSetupScript` in `src/templates/setup.ts`:
+  - CPU-only SLURM job (no `--gpus`, no GPU allocation needed for `singularity pull`)
+  - `module load brics/apptainer-multi-node`
+  - Create image directory: `mkdir -p $(dirname <imagePath>)`
+  - `singularity pull --force <imagePath> <image>` (note: pull is slow, ~10–20 min)
+  - Emit `IVLLM_SETUP_SUCCESS` marker on completion
+- [ ] Update `SetupScriptOptions` interface: replace `venvPath`/`vllmVersion` with `vllmImage`/`vllmImagePath`
+- [ ] Write failing tests in `tests/setup.test.ts`:
+  - Script contains `singularity pull`
+  - Script contains `brics/apptainer-multi-node`
+  - Script does NOT contain `uv pip install` or `venv`
+  - Script contains the image path and image source
+- [ ] Confirm tests fail, then implement, then confirm tests pass
+
+### F2.3 — Setup command
+
+- [ ] Update `src/commands/setup.ts`:
+  - Pre-flight: check `.sif` exists at `vllmImagePath` → skip if present (idempotent); add `--force` flag to override
+  - Pass `vllmImage`/`vllmImagePath` to `renderSetupScript`
+  - Success check: `test -f <vllmImagePath>` on LOGIN (replaces venv check)
+  - Update console output (remove venv references)
+- [ ] Write failing tests in `tests/setup.test.ts` for idempotency and image path check
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.4 — Inference templates
+
+- [ ] Add `vllmImagePath: string` to `InferenceScriptOptions` in `src/templates/inference.ts`
+- [ ] Single-node template: replace `source <venv>/bin/activate && vllm serve ...` with:
+  ```bash
+  singularity run --nv \
+    --env VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+    --bind $PROJECTDIR \
+    <vllmImagePath> \
+    vllm serve --config <configPath> --host 0.0.0.0 --port <port>
+  ```
+- [ ] Multi-node template: same substitution for the `srun --overlap` vllm serve call;
+  Ray head/worker `srun` calls do not need the container (Ray is installed inside the image)
+  — revisit if Ray is not in the vLLM image; may need `singularity exec` for those too
+- [ ] Write failing tests in `tests/inference.test.ts`:
+  - Single-node: contains `singularity run --nv`, `VLLM_ENABLE_CUDA_COMPATIBILITY=1`, `--bind $PROJECTDIR`
+  - Single-node: does NOT contain `source` or `activate`
+  - Multi-node: vllm serve line uses singularity
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.5 — vllm-config: `min-vllm-version` support
+
+- [ ] Add optional `min-vllm-version` field to `VllmConfig` interface in `src/vllm-config.ts`
+- [ ] `parseVllmConfig` reads and returns `minVllmVersion?: string`
+- [ ] Add `validateImageVersion(imagePath, minVersion, config)` helper in `src/slurm.ts` or new `src/container.ts`:
+  - Runs `singularity inspect --labels <imagePath>` on LOGIN via SSH
+  - Parses `org.opencontainers.image.version` label
+  - Compares semver; throws if image is too old
+- [ ] Write failing tests for `parseVllmConfig` with `min-vllm-version` field
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.6 — Start command
+
+- [ ] Update `src/commands/start.ts` pre-flight:
+  - Replace venv existence check with `.sif` existence check: `test -f <vllmImagePath>`
+  - If `min-vllm-version` set in yaml config, call `validateImageVersion` and fail early if not met
+- [ ] HuggingFace pre-download: change from `source venv && huggingface-cli download` to
+  `singularity exec --bind $PROJECTDIR <imagePath> huggingface-cli download ...`
+  (the vLLM image includes `huggingface_hub`; `HF_HOME` set inside exec call)
+- [ ] Pass `vllmImagePath` from config into `renderInferenceScript`
+- [ ] Write failing tests in `tests/start.test.ts` for new pre-flight check
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.7 — Dry-run verification
+
+- [ ] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script uses singularity
+- [ ] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged (mock does not use container)
+
+### F2.8 — End-to-end testing on Isambard AI
+
+- [ ] Run `ivllm setup` — submit CPU-only job, verify `.sif` created in `/projects/.../ivllm/images/`
+- [ ] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct` using container
+- [ ] Verify HuggingFace pre-download runs via `singularity exec`
+- [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel
+- [ ] Commit
