@@ -5,7 +5,6 @@ import { join } from "path";
 export interface Config {
   loginHost: string;
   username: string;
-  venvPath: string;
   projectDir: string;
   defaultLocalPort: number;
   vllmVersion: string;
@@ -17,10 +16,9 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 const DEFAULTS: Config = {
   loginHost: "",
   username: "",
-  venvPath: "~/ivllm-venv/.venv",
   projectDir: "$PROJECTDIR",
   defaultLocalPort: 11434,
-  vllmVersion: "0.15.1",
+  vllmVersion: "0.9.1",
 };
 
 export function loadConfig(): Config {

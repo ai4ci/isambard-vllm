@@ -8,10 +8,9 @@ import type { Config } from "../src/config.ts";
 const mockConfig: Config = {
   loginHost: "login.example.com",
   username: "testuser",
-  venvPath: "/home/testuser/ivllm-venv/.venv",
   projectDir: "/projects/myproject",
   defaultLocalPort: 11434,
-  vllmVersion: "0.15.1",
+  vllmVersion: "0.9.1",
 };
 
 describe("makeRemoteOps — dry-run mode", () => {

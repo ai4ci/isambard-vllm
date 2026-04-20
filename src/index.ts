@@ -53,9 +53,9 @@ async function cmdConfig(args: string[]): Promise<void> {
   }
   if (flags["login-host"]) config.loginHost = flags["login-host"]!;
   if (flags["username"]) config.username = flags["username"]!;
-  if (flags["venv-path"]) config.venvPath = flags["venv-path"]!;
   if (flags["project-dir"]) config.projectDir = flags["project-dir"]!;
   if (flags["default-local-port"]) config.defaultLocalPort = parseInt(flags["default-local-port"]!, 10);
+  if (flags["vllm-version"]) config.vllmVersion = flags["vllm-version"]!;
   saveConfig(config);
   console.log("Configuration saved.");
 }

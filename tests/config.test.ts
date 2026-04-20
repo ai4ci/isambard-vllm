@@ -22,8 +22,9 @@ describe("Config", () => {
   it("loadConfig returns defaults when no config file exists", () => {
     const config = loadConfig();
     expect(config.defaultLocalPort).toBe(11434);
-    expect(config.venvPath).toBe("~/ivllm-venv/.venv");
+    expect(config.vllmVersion).toBe("0.9.1");
     expect(config.loginHost).toBe("");
+    expect((config as Record<string, unknown>)["venvPath"]).toBeUndefined();
   });
 
   it("saveConfig persists and loadConfig reads back", () => {
