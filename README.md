@@ -38,10 +38,9 @@ Run once to configure your connection details where XXXX is your project ID, and
 ```bash
 ivllm config --login-host <login-node>   # e.g. XXXX.aip2.isambard
 ivllm config --username <hpc-username>   # e.g. YYYY.XXXX
-ivllm config --venv-path <path>          # default: /home/XXXX/YYYY.XXXX/ivllm-venv/.venv
 ivllm config --project-dir <path>        # HPC project dir, e.g. /projects/XXXX
 ivllm config --local-port <port>         # default: 11434
-ivllm config --vllm-version <version>    # default: 0.15.1
+ivllm config --vllm-version <version>    # default: 0.19.1
 ```
 
 Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no arguments to view current settings.
@@ -56,7 +55,7 @@ Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no 
 ivllm setup
 ```
 
-This submits a SLURM job on a compute node to install vLLM via `uv` into a virtual environment at `venvPath`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if the venv already exists.
+This submits a SLURM job on a compute node to install the NVIDIA HPC SDK 26.3 (providing CUDA 13.1 forward compatibility) and vLLM into a shared versioned directory at `$PROJECT_DIR/ivllm/`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if the install already exists.
 
 ### 2. vLLM config file
 

@@ -1,5 +1,12 @@
 ## Distributed vLLM Inference
 
+> **Note**: This document is an Isambard AI tutorial reference, reproduced here for context.
+> It predates the `ivllm` HPC SDK 26.3 approach (ADR-011). The setup section below uses the
+> old `module load cudatoolkit` + `uv`/cu129 pip approach — **do not follow it for new installs**.
+> The `ivllm setup` command handles installation using NVIDIA HPC SDK 26.3 with CUDA 13.1
+> forward compatibility and cu130 wheels instead. The parallelism, benchmarking, and
+> multi-node Ray content remains valid as reference material.
+
 Abstract
 
 This tutorial aims to introduce serving a large language model (LLM) across multiple GPUs and multiple nodes on Isambard-AI. It provides a reference for serving such models using the vLLM and Ray frameworks.

@@ -9,11 +9,10 @@
 #   Remaining ~125 GB supports the full 196K native context window comfortably.
 #   Expert parallelism enabled alongside TP for MoE layer efficiency (per recipe).
 #
-# NOTE: MiniMax-M2.5 may require a newer vLLM than the current 0.15.1 install.
-# The official recipe verified accuracy at commit dea63512bb9bdf7521d591546c52138d9d79e8ce.
-# If you see corrupted output or missing parser errors, run ivllm setup with
-# vllmVersion updated to a nightly build:
-#   uv pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly
+# NOTE: MiniMax-M2.5 was verified against a specific vLLM commit; if you see
+# corrupted output or missing parser errors with the current install, try
+# updating vllmVersion in `ivllm config` to a newer release and re-running
+# `ivllm setup`. The official recipe commit was dea63512bb9bdf7521d591546c52138d9d79e8ce.
 #
 # Usage: ivllm start <job-name> --config design/example/minimax-m2.5.yaml
 
