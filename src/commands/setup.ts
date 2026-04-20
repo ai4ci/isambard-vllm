@@ -15,9 +15,9 @@ export async function cmdSetup(_args: string[]): Promise<void> {
   try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
 
   console.log("=== ivllm setup ===");
-  console.log(`Login node : ${config.loginHost}`);
-  console.log(`venv path  : ${config.venvPath}`);
-  console.log(`vLLM       : ${config.vllmVersion}`);
+  console.log(`Login node  : ${config.loginHost}`);
+  console.log(`vLLM        : ${config.vllmVersion}`);
+  console.log(`Install dir : ${config.projectDir}/ivllm/${config.vllmVersion}`);
   console.log("");
 
   // Pre-flight: check SSH connectivity
@@ -29,21 +29,21 @@ export async function cmdSetup(_args: string[]): Promise<void> {
   }
   console.log("✓ SSH connectivity OK");
 
-  // Check if venv already exists
+  // Check if versioned venv already exists
+  const venvDir = `${config.projectDir}/ivllm/${config.vllmVersion}`;
   const { exitCode: venvCheck } = await runRemote(
     config,
-    `test -f ${config.venvPath}/bin/activate`,
+    `test -d ${venvDir}/bin`,
     { silent: true }
   );
   if (venvCheck === 0) {
-    console.log(`✓ vLLM venv already exists at ${config.venvPath}`);
-    console.log("  Delete the venv first to reinstall.");
+    console.log(`✓ vLLM ${config.vllmVersion} already installed at ${venvDir}`);
+    console.log("  Delete the directory first to reinstall.");
     return;
   }
 
   // Render and copy setup script to LOGIN
   const script = renderSetupScript({
-    venvPath: config.venvPath,
     vllmVersion: config.vllmVersion,
   });
 
@@ -90,15 +90,15 @@ export async function cmdSetup(_args: string[]): Promise<void> {
     // Validate venv exists
     const { exitCode: finalCheck } = await runRemote(
       config,
-      `test -f ${config.venvPath}/bin/activate`,
+      `test -d ${venvDir}/bin`,
       { silent: true }
     );
     if (finalCheck !== 0) {
-      console.error(`✗ venv not found at ${config.venvPath} after setup.`);
+      console.error(`✗ venv not found at ${venvDir} after setup.`);
       process.exit(1);
     }
 
-    console.log("✓ vLLM installation complete");
+    console.log(`✓ vLLM ${config.vllmVersion} installation complete`);
     const versionLine = log.split("\n").find(l => l.startsWith("vllm"));
     if (versionLine) console.log(`  ${versionLine}`);
   } finally {

@@ -1,26 +1,30 @@
-import { dirname } from "path";
-
 export interface SetupScriptOptions {
-  venvPath: string;
   vllmVersion: string;
 }
 
 export function renderSetupScript(opts: SetupScriptOptions): string {
-  const venvParent = dirname(opts.venvPath);
-  const { venvPath, vllmVersion } = opts;
+  const { vllmVersion } = opts;
+  const venvDir = `$PROJECTDIR/ivllm/${vllmVersion}`;
+  const nvhpcDir = `$PROJECTDIR/ivllm/nvhpc`;
+  const nvhpcRoot = `${nvhpcDir}/Linux_aarch64/26.3`;
+  const ldLibPath = [
+    `$NVHPC_ROOT/cuda/13.1/compat`,
+    `$NVHPC_ROOT/cuda/13.1/lib64`,
+    `$NVHPC_ROOT/compilers/lib`,
+    `$NVHPC_ROOT/comm_libs/13.1/nccl/lib`,
+    `$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib`,
+    `$NVHPC_ROOT/math_libs/13.1/lib64`,
+    `$LD_LIBRARY_PATH`,
+  ].join(":");
 
   return `#!/bin/bash
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
-#SBATCH --gpus=1
 #SBATCH --time=02:00:00
 
 set -euo pipefail
 
-# Redirect all output to a known log file using $HOME (tilde does not expand in SBATCH directives)
 exec > "$HOME/.config/ivllm/setup.log" 2>&1
-
-module load cudatoolkit
 
 # Install uv if not already present
 if ! command -v uv &>/dev/null; then
@@ -28,28 +32,38 @@ if ! command -v uv &>/dev/null; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-VENV_PARENT=${venvParent}
-VENV_PATH=${venvPath}
+mkdir -p $PROJECTDIR/ivllm
 
-mkdir -p "$VENV_PARENT"
-
-if [ ! -d "$VENV_PATH" ]; then
-  cd "$VENV_PARENT"
-  uv venv --seed --python=3.12 .venv
+# Phase A: Install NVIDIA HPC SDK 26.3 (provides CUDA 13.1 forward compatibility)
+if [ ! -d ${nvhpcDir} ]; then
+  echo "=== Installing NVIDIA HPC SDK 26.3 ==="
+  wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_13.1.tar.gz \\
+    -O /tmp/nvhpc.tar.gz
+  tar xpzf /tmp/nvhpc.tar.gz -C /tmp
+  cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_13.1
+  NVHPC_SILENT=true NVHPC_INSTALL_DIR=${nvhpcDir} NVHPC_INSTALL_TYPE=single ./install
+  rm -f /tmp/nvhpc.tar.gz
+  echo "=== HPC SDK install complete ==="
+else
+  echo "=== HPC SDK already installed at ${nvhpcDir} — skipping ==="
 fi
 
-srun \\
-  --nodes=1 \\
-  --gpus=1 \\
-  --ntasks=1 \\
-  bash -c "
-    source $VENV_PATH/bin/activate
-    uv pip install -U vllm[flashinfer]==${vllmVersion} ray[default] \\
-      --torch-backend=auto \\
-      --extra-index-url https://wheels.vllm.ai/${vllmVersion}/vllm
-    echo '=== vLLM version ==='
-    vllm --version
-    echo 'IVLLM_SETUP_SUCCESS'
-  "
+# Phase B: Install vLLM ${vllmVersion} into versioned venv
+if [ ! -d ${venvDir} ]; then
+  echo "=== Installing vLLM ${vllmVersion} ==="
+  module load gcc-native/14.2
+  export NVHPC_ROOT=${nvhpcRoot}
+  export LD_LIBRARY_PATH=${ldLibPath}
+  uv venv ${venvDir} --python 3.12
+  source ${venvDir}/bin/activate
+  uv pip install vllm==${vllmVersion} \\
+    --extra-index-url https://wheels.vllm.ai/cu130
+  echo "=== vLLM version ==="
+  vllm --version
+  echo "IVLLM_SETUP_SUCCESS"
+else
+  echo "=== vLLM ${vllmVersion} already installed at ${venvDir} — skipping ==="
+  echo "IVLLM_SETUP_SUCCESS"
+fi
 `.trimStart();
 }

@@ -3,27 +3,68 @@ import { renderSetupScript } from "../src/templates/setup.ts";
 import { parseJobId, parseJobState } from "../src/slurm.ts";
 
 describe("renderSetupScript", () => {
-  const base = {
-    venvPath: "/home/user/ivllm-venv/.venv",
-    vllmVersion: "0.15.1",
-  };
+  const base = { vllmVersion: "0.9.1" };
 
-  it("renders venv parent directory from venvPath", () => {
+  it("is a CPU-only SLURM job (no --gpus directive)", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("VENV_PARENT=/home/user/ivllm-venv");
+    expect(script).not.toContain("#SBATCH --gpus");
   });
 
-  it("renders venv path", () => {
+  it("installs HPC SDK to $PROJECTDIR/ivllm/nvhpc", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("VENV_PATH=/home/user/ivllm-venv/.venv");
+    expect(script).toContain("$PROJECTDIR/ivllm/nvhpc");
+    expect(script).toContain("nvhpc_2026_263_Linux_aarch64_cuda_13.1");
   });
 
-  it("renders vllm version", () => {
+  it("skips HPC SDK install if $PROJECTDIR/ivllm/nvhpc already exists", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("vllm[flashinfer]==0.15.1");
+    expect(script).toContain("$PROJECTDIR/ivllm/nvhpc");
+    // idempotency guard
+    expect(script).toMatch(/if \[ ! -d.*nvhpc/);
   });
 
-it("redirects output to log file via exec using $HOME (not SBATCH directive)", () => {
+  it("sets NVHPC_ROOT and LD_LIBRARY_PATH with compat path first", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3");
+    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
+    // compat must appear before lib64 in LD_LIBRARY_PATH
+    const idx1 = script.indexOf("cuda/13.1/compat");
+    const idx2 = script.indexOf("cuda/13.1/lib64");
+    expect(idx1).toBeLessThan(idx2);
+  });
+
+  it("loads gcc-native/14.2 module before pip install", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("module load gcc-native/14.2");
+  });
+
+  it("creates versioned venv at $PROJECTDIR/ivllm/<version>", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("$PROJECTDIR/ivllm/0.9.1");
+  });
+
+  it("skips venv install if versioned dir already exists", () => {
+    const script = renderSetupScript(base);
+    expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.9\.1/);
+  });
+
+  it("installs vllm using cu130 wheels", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("wheels.vllm.ai/cu130");
+    expect(script).not.toContain("cu129");
+  });
+
+  it("installs exact vllm version", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("vllm==0.9.1");
+  });
+
+  it("does not reference singularity", () => {
+    const script = renderSetupScript(base);
+    expect(script).not.toContain("singularity");
+  });
+
+  it("redirects output to log file via exec", () => {
     const script = renderSetupScript(base);
     expect(script).toContain('exec > "$HOME/.config/ivllm/setup.log" 2>&1');
     expect(script).not.toContain("#SBATCH --output");
@@ -34,14 +75,16 @@ it("redirects output to log file via exec using $HOME (not SBATCH directive)", (
     expect(script).toContain("IVLLM_SETUP_SUCCESS");
   });
 
-  it("does not use --pty flag (not valid in batch jobs)", () => {
+  it("does not use --pty flag", () => {
     const script = renderSetupScript(base);
     expect(script).not.toContain("--pty");
   });
 
-  it("activates the venv using the $VENV_PATH variable (tilde-safe)", () => {
-    const script = renderSetupScript(base);
-    expect(script).toContain("source $VENV_PATH/bin/activate");
+  it("uses a different version when specified", () => {
+    const script = renderSetupScript({ vllmVersion: "0.10.0" });
+    expect(script).toContain("$PROJECTDIR/ivllm/0.10.0");
+    expect(script).toContain("vllm==0.10.0");
+    expect(script).not.toContain("0.9.1");
   });
 });
 
