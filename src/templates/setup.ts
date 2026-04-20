@@ -18,6 +18,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
   ].join(":");
 
   return `#!/bin/bash
+# ivllm-setup version 0.2.9000
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
 #SBATCH --gpus=4
@@ -26,6 +27,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
 set -euo pipefail
 
 exec > "$HOME/.config/ivllm/setup.log" 2>&1
+echo "=== ivllm-setup version 0.2.9000 ==="
 
 # Install uv if not already present
 if ! command -v uv &>/dev/null; then
