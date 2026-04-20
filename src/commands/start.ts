@@ -13,6 +13,7 @@ import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount } from "../vllm-config.ts";
+import { semverLt } from "../semver.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -60,6 +61,17 @@ export async function cmdStart(args: string[]): Promise<void> {
     const resolved = resolveGpuCount(startArgs.gpuCount, yamlConfig);
     gpuCount = resolved.gpuCount;
     nodeCount = resolved.nodeCount;
+
+    // F2.5: enforce min-vllm-version from config
+    if (yamlConfig.minVllmVersion) {
+      if (semverLt(config.vllmVersion, yamlConfig.minVllmVersion)) {
+        console.error(
+          `Error: config requires vLLM >= ${yamlConfig.minVllmVersion} but ivllm is configured to use ${config.vllmVersion}.\n` +
+          `  Update 'vllm-version' in your ivllm config or use 'ivllm config --vllm-version <version>'.`
+        );
+        process.exit(1);
+      }
+    }
   }
 
   const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands (remote shell expands $HOME)
@@ -131,11 +143,12 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
 
     console.log("Checking venv...");
+    const venvDir = `${config.projectDir}/ivllm/${config.vllmVersion}`;
     const { exitCode: venvCheck } = await ops.runRemote(
-      `test -f ${config.venvPath}/bin/activate`, { silent: true }
+      `test -f ${venvDir}/bin/activate`, { silent: true }
     );
     if (venvCheck !== 0) {
-      console.error(`Error: vLLM venv not found at ${config.venvPath}. Run 'ivllm setup' first.`);
+      console.error(`Error: vLLM venv not found at ${venvDir}. Run 'ivllm setup' first.`);
       process.exit(1);
     }
     console.log("✓ Pre-flight checks passed");
@@ -156,7 +169,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     } else {
       console.log(`Downloading model ${model} to ${hfHome} on login node...`);
       const hfToken = process.env["HF_TOKEN"] ?? "";
-      const downloadCmd = `source ${config.venvPath}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} huggingface-cli download ${model}`;
+      const downloadCmd = `source ${config.projectDir}/ivllm/${config.vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} huggingface-cli download ${model}`;
       const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
       if (dlCode !== 0) {
         console.error("Error: Model download failed.");
@@ -194,7 +207,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   const script = startArgs.mock
     ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
     : renderInferenceScript({
-        jobName, model, venvPath: config.venvPath, hfHome,
+        jobName, model, vllmVersion: config.vllmVersion, hfHome,
         configFileName: configFile ? basename(configFile) : "",
         workDir: remoteWorkDir,
         serverPort, gpuCount, nodeCount, timeLimit,

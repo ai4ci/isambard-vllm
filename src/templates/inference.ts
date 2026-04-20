@@ -1,7 +1,7 @@
 export interface InferenceScriptOptions {
   jobName: string;
   model: string;
-  venvPath: string;
+  vllmVersion: string;
   hfHome: string;
   configFileName: string;
   workDir: string;
@@ -10,6 +10,9 @@ export interface InferenceScriptOptions {
   nodeCount: number;
   timeLimit: string;
 }
+
+const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
+export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH`;
 
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready
@@ -56,7 +59,8 @@ exit $EXIT_CODE`;
 }
 
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, venvPath, hfHome, configFileName, workDir, serverPort, gpuCount, timeLimit } = opts;
+  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, timeLimit } = opts;
+  const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
 
   return `#!/bin/bash
 #SBATCH --job-name=${jobName}
@@ -86,8 +90,8 @@ jq -n \\
   > "$JOB_DETAILS"
 
 module load brics/nccl
-module load cudatoolkit
 
+${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 
@@ -109,8 +113,9 @@ ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
 function renderMultiNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, venvPath, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit } = opts;
+  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
+  const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
 
   return `#!/bin/bash
 #SBATCH --job-name=${jobName}
@@ -144,8 +149,8 @@ jq -n \\
   > "$JOB_DETAILS"
 
 module load brics/nccl
-module load cudatoolkit
 
+${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 

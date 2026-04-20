@@ -91,6 +91,20 @@ describe("parseVllmConfig", () => {
       expect(() => parseVllmConfig(path)).toThrow();
     } finally { unlinkSync(path); }
   });
+
+  it("extracts min-vllm-version (kebab-case) from YAML", () => {
+    const path = writeTmp("min-vllm-version: \"0.9.1\"\n");
+    try {
+      expect(parseVllmConfig(path).minVllmVersion).toBe("0.9.1");
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns undefined minVllmVersion when not present", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).minVllmVersion).toBeUndefined();
+    } finally { unlinkSync(path); }
+  });
 });
 
 describe("resolveGpuCount", () => {

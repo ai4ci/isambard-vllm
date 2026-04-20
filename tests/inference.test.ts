@@ -4,7 +4,7 @@ import { renderInferenceScript } from "../src/templates/inference.ts";
 const base = {
   jobName: "my-job",
   model: "Qwen/Qwen2.5-0.5B-Instruct",
-  venvPath: "/home/user/ivllm-venv/.venv",
+  vllmVersion: "0.9.1",
   hfHome: "/projects/myproject/hf",
   configFileName: "vllm.yaml",
   workDir: "/home/user/my-job",
@@ -31,10 +31,34 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain('exec > "/home/user/my-job/my-job.slurm.log" 2>&1');
   });
 
-  it("activates the venv", () => {
+  it("activates the versioned venv from $PROJECTDIR", () => {
     expect(renderInferenceScript(base)).toContain(
-      "source /home/user/ivllm-venv/.venv/bin/activate"
+      "source $PROJECTDIR/ivllm/0.9.1/bin/activate"
     );
+  });
+
+  it("sets NVHPC_ROOT before venv activation", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3");
+    const idxNvhpc = script.indexOf("NVHPC_ROOT=");
+    const idxActivate = script.indexOf("source $PROJECTDIR/ivllm/");
+    expect(idxNvhpc).toBeLessThan(idxActivate);
+  });
+
+  it("sets LD_LIBRARY_PATH with cuda/13.1/compat first", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
+    const idxCompat = script.indexOf("cuda/13.1/compat");
+    const idxLib64 = script.indexOf("cuda/13.1/lib64");
+    expect(idxCompat).toBeLessThan(idxLib64);
+  });
+
+  it("does not reference singularity", () => {
+    expect(renderInferenceScript(base)).not.toContain("singularity");
+  });
+
+  it("does not reference cu129", () => {
+    expect(renderInferenceScript(base)).not.toContain("cu129");
   });
 
   it("sets HF_HOME", () => {
@@ -162,6 +186,16 @@ describe("renderInferenceScript (multi-node)", () => {
 
   it("loads the brics/nccl module", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("module load brics/nccl");
+  });
+
+  it("sets NVHPC_ROOT and LD_LIBRARY_PATH preamble before ray start", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3");
+    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
+    // preamble must appear before ray start
+    const idxNvhpc = script.indexOf("NVHPC_ROOT=");
+    const idxRay = script.indexOf("ray start");
+    expect(idxNvhpc).toBeLessThan(idxRay);
   });
 
   it("sets required Ray vLLM env vars", () => {

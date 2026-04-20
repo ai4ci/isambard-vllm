@@ -5,6 +5,7 @@ export interface VllmConfig {
   model?: string;
   tensorParallelSize?: number;
   pipelineParallelSize?: number;
+  minVllmVersion?: string;
 }
 
 /**
@@ -48,5 +49,8 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const pp = doc["pipeline-parallel-size"] ?? doc["pipeline_parallel_size"];
   const pipelineParallelSize = typeof pp === "number" ? pp : undefined;
 
-  return { model, tensorParallelSize, pipelineParallelSize };
+  const minVer = doc["min-vllm-version"];
+  const minVllmVersion = typeof minVer === "string" ? minVer : undefined;
+
+  return { model, tensorParallelSize, pipelineParallelSize, minVllmVersion };
 }
