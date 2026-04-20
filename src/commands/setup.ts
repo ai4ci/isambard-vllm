@@ -6,6 +6,8 @@ import { runRemote, copyFile } from "../ssh.ts";
 import { renderSetupScript } from "../templates/setup.ts";
 import { submitJob, pollJobStatus, getJobLog } from "../slurm.ts";
 
+import { tailRemoteLog } from "../ssh.ts";
+
 const POLL_INTERVAL_MS = 10_000;
 const REMOTE_SCRIPT_PATH = "~/.config/ivllm/setup.slurm.sh";
 const REMOTE_LOG_PATH = "~/.config/ivllm/setup.log";
@@ -61,16 +63,25 @@ export async function cmdSetup(_args: string[]): Promise<void> {
     const jobId = await submitJob(config, REMOTE_SCRIPT_PATH);
     console.log(`✓ SLURM job submitted: ${jobId}`);
     console.log("");
-    console.log("Waiting for job to complete (this may take 10–20 minutes)...");
+    console.log("Streaming setup log (this may take 10–20 minutes)...");
+    console.log("─".repeat(60));
 
-    // Poll for completion
+    // Stream the remote log to stdout in real time
+    // Give the job a moment to start writing the log before tailing
+    await sleep(3_000);
+    const tail = tailRemoteLog(config, REMOTE_LOG_PATH, "  ");
+
+    // Poll for job completion while log streams in the background
     let state = await pollJobStatus(config, jobId);
     while (state === "running") {
       await sleep(POLL_INTERVAL_MS);
       state = await pollJobStatus(config, jobId);
-      process.stdout.write(".");
     }
-    console.log("");
+
+    // Give tail a moment to flush remaining lines before stopping
+    await sleep(2_000);
+    tail.stop();
+    console.log("─".repeat(60));
 
     // Fetch log
     const log = await getJobLog(config, REMOTE_LOG_PATH);

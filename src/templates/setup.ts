@@ -59,8 +59,10 @@ if [ ! -d ${venvDir} ]; then
   export UV_LINK_MODE=copy
   uv venv ${venvDir} --python 3.12
   source ${venvDir}/bin/activate
+  echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
   uv pip install vllm==${vllmVersion} \\
     --extra-index-url https://wheels.vllm.ai/cu130
+  echo "uv install complete."
   echo "=== vLLM version ==="
   vllm --version
   echo "IVLLM_SETUP_SUCCESS"

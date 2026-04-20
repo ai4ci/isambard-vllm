@@ -56,6 +56,39 @@ export function copyFile(
 }
 
 /**
+ * Tail a remote file continuously (tail -n +1 -f), streaming lines to
+ * process.stdout with an optional prefix. Returns a handle to stop tailing.
+ */
+export function tailRemoteLog(
+  config: Config,
+  remotePath: string,
+  prefix = ""
+): { stop: () => void } {
+  const target = `${config.username}@${config.loginHost}`;
+  const proc = spawn(
+    "ssh",
+    ["-o", "BatchMode=yes", target, `tail -n +1 -f ${remotePath} 2>/dev/null`],
+    { stdio: ["ignore", "pipe", "ignore"] }
+  );
+
+  let buf = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    buf += chunk.toString();
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      process.stdout.write(prefix + line + "\n");
+    }
+  });
+
+  return {
+    stop: () => {
+      try { proc.kill(); } catch { /* ignore */ }
+    },
+  };
+}
+
+/**
  * Spawn a persistent forward SSH tunnel as a background child process.
  * ssh -N -L localPort:remoteHost:remotePort user@loginHost
  * Returns the child process so the caller can kill it on shutdown.
