@@ -45,11 +45,11 @@ describe("renderInferenceScript", () => {
     expect(idxNvhpc).toBeLessThan(idxActivate);
   });
 
-  it("sets LD_LIBRARY_PATH with cuda/13.1/compat first", () => {
+  it("sets LD_LIBRARY_PATH with cuda/12.9/compat first", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
-    const idxCompat = script.indexOf("cuda/13.1/compat");
-    const idxLib64 = script.indexOf("cuda/13.1/lib64");
+    expect(script).toContain("$NVHPC_ROOT/cuda/12.9/compat");
+    const idxCompat = script.indexOf("cuda/12.9/compat");
+    const idxLib64 = script.indexOf("cuda/12.9/lib64");
     expect(idxCompat).toBeLessThan(idxLib64);
   });
 
@@ -57,8 +57,8 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).not.toContain("singularity");
   });
 
-  it("does not reference cu129", () => {
-    expect(renderInferenceScript(base)).not.toContain("cu129");
+  it("does not reference cu130", () => {
+    expect(renderInferenceScript(base)).not.toContain("cu130");
   });
 
   it("sets HF_HOME", () => {
@@ -191,7 +191,7 @@ describe("renderInferenceScript (multi-node)", () => {
   it("sets NVHPC_ROOT and LD_LIBRARY_PATH preamble before ray start", () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain("NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3");
-    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
+    expect(script).toContain("$NVHPC_ROOT/cuda/12.9/compat");
     // preamble must appear before ray start
     const idxNvhpc = script.indexOf("NVHPC_ROOT=");
     const idxRay = script.indexOf("ray start");

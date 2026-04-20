@@ -8,12 +8,12 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
   const nvhpcDir = `$PROJECTDIR/ivllm/nvhpc`;
   const nvhpcRoot = `${nvhpcDir}/Linux_aarch64/26.3`;
   const ldLibPath = [
-    `$NVHPC_ROOT/cuda/13.1/compat`,
-    `$NVHPC_ROOT/cuda/13.1/lib64`,
+    `$NVHPC_ROOT/cuda/12.9/compat`,
+    `$NVHPC_ROOT/cuda/12.9/lib64`,
     `$NVHPC_ROOT/compilers/lib`,
-    `$NVHPC_ROOT/comm_libs/13.1/nccl/lib`,
-    `$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib`,
-    `$NVHPC_ROOT/math_libs/13.1/lib64`,
+    `$NVHPC_ROOT/comm_libs/12.9/nccl/lib`,
+    `$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib`,
+    `$NVHPC_ROOT/math_libs/12.9/lib64`,
     `\${LD_LIBRARY_PATH:-}`,
   ].join(":");
 
@@ -35,13 +35,13 @@ fi
 
 mkdir -p $PROJECTDIR/ivllm
 
-# Phase A: Install NVIDIA HPC SDK 26.3 (provides CUDA 13.1 forward compatibility)
+# Phase A: Install NVIDIA HPC SDK 26.3 cuda_multi (provides CUDA 12.9 + 13.1)
 if [ ! -d ${nvhpcDir} ]; then
-  echo "=== Installing NVIDIA HPC SDK 26.3 ==="
-  wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_13.1.tar.gz \\
+  echo "=== Installing NVIDIA HPC SDK 26.3 (cuda_multi) ==="
+  wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_multi.tar.gz \\
     -O /tmp/nvhpc.tar.gz
   tar xpzf /tmp/nvhpc.tar.gz -C /tmp
-  cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_13.1
+  cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_multi
   NVHPC_SILENT=true NVHPC_INSTALL_DIR=${nvhpcDir} NVHPC_INSTALL_TYPE=single ./install
   rm -f /tmp/nvhpc.tar.gz
   echo "=== HPC SDK install complete ==="
@@ -63,7 +63,7 @@ if [ ! -d ${venvDir} ]; then
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
   uv pip install vllm==${vllmVersion} \\
     --torch-backend=auto \\
-    --extra-index-url https://wheels.vllm.ai/nightly/cu130 \\
+    --extra-index-url https://wheels.vllm.ai/nightly/cu129 \\
     --extra-index-url https://pypi.org/simple/
   echo "uv install complete."
   echo "=== vLLM version ==="

@@ -18,7 +18,7 @@ describe("renderSetupScript", () => {
   it("installs HPC SDK to $PROJECTDIR/ivllm/nvhpc", () => {
     const script = renderSetupScript(base);
     expect(script).toContain("$PROJECTDIR/ivllm/nvhpc");
-    expect(script).toContain("nvhpc_2026_263_Linux_aarch64_cuda_13.1");
+    expect(script).toContain("nvhpc_2026_263_Linux_aarch64_cuda_multi");
   });
 
   it("skips HPC SDK install if $PROJECTDIR/ivllm/nvhpc already exists", () => {
@@ -31,10 +31,10 @@ describe("renderSetupScript", () => {
   it("sets NVHPC_ROOT and LD_LIBRARY_PATH with compat path first", () => {
     const script = renderSetupScript(base);
     expect(script).toContain("NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3");
-    expect(script).toContain("$NVHPC_ROOT/cuda/13.1/compat");
+    expect(script).toContain("$NVHPC_ROOT/cuda/12.9/compat");
     // compat must appear before lib64 in LD_LIBRARY_PATH
-    const idx1 = script.indexOf("cuda/13.1/compat");
-    const idx2 = script.indexOf("cuda/13.1/lib64");
+    const idx1 = script.indexOf("cuda/12.9/compat");
+    const idx2 = script.indexOf("cuda/12.9/lib64");
     expect(idx1).toBeLessThan(idx2);
   });
 
@@ -53,10 +53,10 @@ describe("renderSetupScript", () => {
     expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.19\.1/);
   });
 
-  it("installs vllm using cu130 wheels", () => {
+  it("installs vllm using cu129 wheels", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("wheels.vllm.ai/nightly/cu130");
-    expect(script).not.toContain("cu129");
+    expect(script).toContain("wheels.vllm.ai/nightly/cu129");
+    expect(script).not.toContain("cu130");
   });
 
   it("installs exact vllm version", () => {
