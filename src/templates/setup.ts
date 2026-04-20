@@ -64,7 +64,7 @@ if [ ! -d ${venvDir} ]; then
     --extra-index-url https://wheels.vllm.ai/cu130
   echo "uv install complete."
   echo "=== vLLM version ==="
-  vllm --version
+  python -c "import importlib.metadata; print('vllm', importlib.metadata.version('vllm'))"
   echo "IVLLM_SETUP_SUCCESS"
 else
   echo "=== vLLM ${vllmVersion} already installed at ${venvDir} — skipping ==="
