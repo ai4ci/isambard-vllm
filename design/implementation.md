@@ -144,18 +144,21 @@
 
 ## Phase F2 — CUDA forward compatibility via NVIDIA HPC SDK
 
-One-time shared install of NVIDIA HPC SDK 26.3 + vLLM nightly (cu129) into `$PROJECTDIR/ivllm/`.
+One-time shared install of NVIDIA HPC SDK 26.3 into `$PROJECTDIR/ivllm/nvhpc/`.
+Versioned vLLM venvs at `$PROJECTDIR/ivllm/<version>/` (cu130 wheels).
 Enables CUDA 13.1 forward compatibility on Isambard AI (driver 565.57.01). See ADR-011.
 
-Paths are fixed — no config needed:
-- `$PROJECTDIR/ivllm/nvhpc/` — HPC SDK install
-- `$PROJECTDIR/ivllm/venv/` — vLLM venv
+Path layout (derived from `vllmVersion` config, not separately configurable):
+- `$PROJECTDIR/ivllm/nvhpc/` — HPC SDK install (shared, installed once)
+- `$PROJECTDIR/ivllm/<vllmVersion>/` — versioned vLLM venv (e.g. `0.9.1/`)
 
-### F2.1 — Config simplification
+### F2.1 — Config changes
 
-- [ ] Remove `venvPath` and `vllmVersion` fields from `Config` interface in `src/config.ts`
-- [ ] Remove them from `DEFAULTS`, from config read/write, and from `ivllm config` command
-- [ ] Write failing tests confirming the fields are absent from config schema
+- [ ] Remove `venvPath` from `Config` interface in `src/config.ts` (path is now derived from `vllmVersion`)
+- [ ] Keep `vllmVersion` in `Config` — it determines both the pip install version and the venv directory
+- [ ] Update `DEFAULTS` and config read/write to remove `venvPath`
+- [ ] Remove `--venv-path` flag from `ivllm config` command; keep `--vllm-version`
+- [ ] Write failing tests confirming `venvPath` is absent and `vllmVersion` is present in config schema
 - [ ] Confirm tests fail, implement, confirm pass
 
 ### F2.2 — Setup template
@@ -171,76 +174,83 @@ Paths are fixed — no config needed:
     NVHPC_SILENT=true NVHPC_INSTALL_DIR=$PROJECTDIR/ivllm/nvhpc NVHPC_INSTALL_TYPE=single ./install
     rm -f /tmp/nvhpc.tar.gz
     ```
-  - Phase B — vLLM venv install (skip if `$PROJECTDIR/ivllm/venv` already exists):
+  - Phase B — vLLM venv install (skip if `$PROJECTDIR/ivllm/<version>` already exists):
     ```bash
     module load gcc-native/14.2
     export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
     export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
-    uv venv $PROJECTDIR/ivllm/venv --python 3.12
-    source $PROJECTDIR/ivllm/venv/bin/activate
-    uv pip install vllm --pre --extra-index-url https://wheels.vllm.ai/nightly/cu129
+    uv venv $PROJECTDIR/ivllm/<version> --python 3.12
+    source $PROJECTDIR/ivllm/<version>/bin/activate
+    uv pip install vllm==<version> --extra-index-url https://wheels.vllm.ai/cu130
     ```
   - Emit `IVLLM_SETUP_SUCCESS` marker on completion
-- [ ] Update `SetupScriptOptions` interface: remove `venvPath`/`vllmVersion` (no new fields needed — paths derived from `$PROJECTDIR`)
+- [ ] Update `SetupScriptOptions` interface: remove `venvPath`; keep `vllmVersion` as the sole version field
 - [ ] Write failing tests in `tests/setup.test.ts`:
   - Script contains `nvhpc_2026_263_Linux_aarch64_cuda_13.1`
   - Script contains `gcc-native/14.2`
   - Script contains `$PROJECTDIR/ivllm/nvhpc`
-  - Script contains `$PROJECTDIR/ivllm/venv`
+  - Script contains the versioned venv path (e.g. `$PROJECTDIR/ivllm/0.9.1`)
   - Script contains `NVHPC_ROOT` and the compat `LD_LIBRARY_PATH`
-  - Script contains `uv pip install vllm --pre`
-  - Script does NOT contain `singularity`
+  - Script contains `uv pip install vllm==` and `wheels.vllm.ai/cu130`
+  - Script does NOT contain `singularity` or `cu129`
 - [ ] Confirm tests fail, implement, confirm pass
 
 ### F2.3 — Setup command
 
 - [ ] Update `src/commands/setup.ts`:
-  - Remove `venvPath`/`vllmVersion` references
-  - Pass no path options to `renderSetupScript` (paths are in the template, derived from `$PROJECTDIR`)
-  - Success check: `test -d $PROJECTDIR/ivllm/venv/bin` on LOGIN
-  - Update console output to reflect new install approach
-- [ ] Write failing tests for success check using new path
+  - Remove `venvPath` reference; pass `vllmVersion` to `renderSetupScript`
+  - Success check: `test -d $PROJECTDIR/ivllm/<vllmVersion>/bin` on LOGIN
+  - Update console output to show version and install path
+- [ ] Write failing tests for success check using versioned path
 - [ ] Confirm tests fail, implement, confirm pass
 
 ### F2.4 — Inference templates
 
-- [ ] Add `LD_LIBRARY_PATH` preamble to `renderInferenceScript` in `src/templates/inference.ts`:
+- [ ] Add `LD_LIBRARY_PATH` preamble and versioned venv activation to `renderInferenceScript`:
   ```bash
   export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
   export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
-  source $PROJECTDIR/ivllm/venv/bin/activate
+  source $PROJECTDIR/ivllm/<vllmVersion>/bin/activate
   ```
-- [ ] Update single-node template: replace hardcoded `venvPath` with `$PROJECTDIR/ivllm/venv`
+- [ ] Update single-node template: replace `venvPath` with `$PROJECTDIR/ivllm/<vllmVersion>`
 - [ ] Update multi-node template: same preamble before `ray start` calls and `vllm serve`
-- [ ] Remove `venvPath` from `InferenceScriptOptions`
+- [ ] Remove `venvPath` from `InferenceScriptOptions`; add `vllmVersion: string`
 - [ ] Write failing tests in `tests/inference.test.ts`:
   - Single-node: contains `NVHPC_ROOT` and `cuda/13.1/compat`
-  - Single-node: `source $PROJECTDIR/ivllm/venv/bin/activate` present
+  - Single-node: `source $PROJECTDIR/ivllm/<version>/bin/activate` present
   - Multi-node: LD_LIBRARY_PATH preamble present before `ray start` srun calls
-  - Neither template contains `singularity`
+  - Neither template contains `singularity` or `cu129`
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.5 — Start command
+### F2.5 — vllm-config: `min-vllm-version` support
+
+- [ ] Add optional `min-vllm-version` field to `VllmConfig` interface in `src/vllm-config.ts`
+- [ ] `parseVllmConfig` reads and returns `minVllmVersion?: string`
+- [ ] Write failing tests for `parseVllmConfig` with `min-vllm-version` field
+- [ ] Confirm tests fail, implement, confirm pass
+
+### F2.6 — Start command
 
 - [ ] Update `src/commands/start.ts` pre-flight:
-  - Replace `config.venvPath` lookup with fixed path: `test -d $PROJECTDIR/ivllm/venv/bin`
-  - Error message: "vLLM not installed. Run `ivllm setup` first."
-- [ ] Remove `venvPath` from any options passed to `renderInferenceScript`
-- [ ] Write failing tests for new pre-flight check
+  - Replace `config.venvPath` lookup with versioned path: `test -d $PROJECTDIR/ivllm/<vllmVersion>/bin`
+  - If `min-vllm-version` set in `vllm.yaml`, compare semver against `config.vllmVersion`; fail early if not satisfied
+  - Error messages: "vLLM <version> not installed — run `ivllm setup`" / "vLLM <installed> < min-vllm-version <required>"
+- [ ] Pass `vllmVersion` (not `venvPath`) into `renderInferenceScript`
+- [ ] Write failing tests for new pre-flight check and min-version comparison
 - [ ] Confirm tests fail, implement, confirm pass
 
-### F2.6 — Dry-run verification
+### F2.7 — Dry-run verification
 
 - [ ] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script:
   - Contains `NVHPC_ROOT` and `LD_LIBRARY_PATH` with compat path first
-  - Contains `source $PROJECTDIR/ivllm/venv/bin/activate`
-  - Does NOT contain `singularity`
+  - Contains `source $PROJECTDIR/ivllm/<version>/bin/activate`
+  - Does NOT contain `singularity` or `cu129`
 - [ ] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged
 
-### F2.7 — End-to-end testing on Isambard AI
+### F2.8 — End-to-end testing on Isambard AI
 
-- [ ] Run `ivllm setup` — submit CPU-only job, verify HPC SDK installed at `$PROJECTDIR/ivllm/nvhpc/`
-- [ ] Verify venv created at `$PROJECTDIR/ivllm/venv/` with vLLM installed
+- [ ] Run `ivllm setup` — submit CPU-only job, verify HPC SDK at `$PROJECTDIR/ivllm/nvhpc/`
+- [ ] Verify versioned venv at `$PROJECTDIR/ivllm/<version>/` with vLLM installed
 - [ ] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct`
 - [ ] Verify CUDA 13.1 forward compat active (check nvidia-smi output in SLURM log)
 - [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel

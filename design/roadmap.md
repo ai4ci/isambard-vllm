@@ -8,10 +8,11 @@
 
 ### Phase F2 — CUDA forward compatibility via NVIDIA HPC SDK
 See ADR-011.
-- [ ] Remove `venvPath` and `vllmVersion` from `~/.ivllm/config.yaml` (YAGNI — paths fixed under `$PROJECTDIR/ivllm/`)
-- [ ] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create venv at `$PROJECTDIR/ivllm/venv/`, pip-install vLLM nightly with `gcc-native/14.2`
-- [ ] Update single-node and multi-node SLURM inference templates: prepend HPC SDK `LD_LIBRARY_PATH` before venv activation and vLLM/Ray invocations
-- [ ] Update `ivllm start` pre-flight: check `$PROJECTDIR/ivllm/venv` exists (no config lookup needed)
+- [ ] Remove `venvPath` from `~/.ivllm/config.yaml`; keep `vllmVersion` (determines versioned venv path)
+- [ ] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create versioned venv at `$PROJECTDIR/ivllm/<version>/`, pip-install vLLM (cu130 wheels) with `gcc-native/14.2`
+- [ ] Add optional `min-vllm-version` field to per-job `vllm.yaml`; `ivllm start` compares against `vllmVersion` config
+- [ ] Update single-node and multi-node SLURM inference templates: prepend HPC SDK `LD_LIBRARY_PATH` before versioned venv activation and vLLM/Ray invocations
+- [ ] Update `ivllm start` pre-flight: check `$PROJECTDIR/ivllm/<vllmVersion>` exists; enforce `min-vllm-version` if set
 - [ ] Dry-run verification: review generated SLURM scripts
 - [ ] End-to-end test on Isambard AI
 
