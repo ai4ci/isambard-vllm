@@ -14,7 +14,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
     `$NVHPC_ROOT/comm_libs/13.1/nccl/lib`,
     `$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib`,
     `$NVHPC_ROOT/math_libs/13.1/lib64`,
-    `$LD_LIBRARY_PATH`,
+    `\${LD_LIBRARY_PATH:-}`,
   ].join(":");
 
   return `#!/bin/bash
