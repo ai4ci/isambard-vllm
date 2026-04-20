@@ -6,7 +6,18 @@
 ### Phase F1 — MVP Open issues
 - Address github issues
 
-### Phase F2 — Model routing server
+### Phase F2 — Singularity container support
+- Replace pip/venv-based vLLM with `vllm/vllm-openai` Singularity image (see ADR-010)
+- `ivllm setup` submits a CPU-only SLURM job to `singularity pull` the image into `/projects/<project>/ivllm/images/`
+- Add `vllmImage` and `vllmImagePath` to `~/.ivllm/config.yaml`
+- Add optional `min-vllm-version` field to `vllm.yaml` config schema and validation
+- Update SLURM single-node template: replace venv activation with `singularity run --nv --env VLLM_ENABLE_CUDA_COMPATIBILITY=1`
+- Update SLURM multi-node template likewise
+- Handle HuggingFace pre-download: run `singularity exec <image.sif> huggingface-cli download` on LOGIN, or install `huggingface_hub` separately
+- `ivllm start` validates `.sif` exists and meets `min-vllm-version` before submitting job
+- `ivllm setup` is idempotent (skip pull if `.sif` exists and version matches)
+
+### Phase F3 — Model routing server
 - Concept: Run a model router on LOGIN, rather than tunnel each `ivllm` instance to LOCAL.
 - Support multiple concurrently running `ivllm` instances on COMPUTE nodes.
 - Auto port assignment from configurable range (default 11435–11534) allowing connection to COMPUTE from LOGIN

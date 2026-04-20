@@ -88,20 +88,13 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 
 ## ADR-005: vLLM installation location on HPC
 
-**Status**: Proposed (pending validation on HPC)
+**Status**: Superseded by ADR-010
 
 **Context**: vLLM must be installed once and reused across inference jobs. The `uv` venv created during setup must be activatable by the SLURM script.
 
-**Decision**: Install vLLM into a `uv` venv at a fixed, well-known path — proposed: `$HOME/ivllm-venv/` (or `$PROJECTDIR/ivllm-venv/` if shared across project members is desirable).
+**Decision (original)**: Install vLLM into a `uv` venv at a fixed path under `$HOME` or `$PROJECTDIR`.
 
-**Rationale**:
-- `$HOME` is on parallel storage, visible to both LOGIN and COMPUTE.
-- A fixed path means the SLURM script can unconditionally `source $HOME/ivllm-venv/.venv/bin/activate` without dynamic discovery.
-- `$PROJECTDIR` is preferred if multiple users in the same project share the installation; reduces setup overhead.
-
-**Open question**: Should vLLM be installed under `$HOME` (per-user) or `$PROJECTDIR` (per-project)? Deferred until first HPC test.
-
-**Consequences**: `ivllm setup` must record the venv path. `ivllm start` must validate the venv exists before submitting the SLURM job.
+**Why superseded**: The GH200 GPU driver on Isambard AI (565.57.01) only supports CUDA 12.7. Recent vLLM builds require CUDA 12.9+. pip installation of nightly vLLM either fails to build dependencies (e.g. `fastsafetensors`) or hits CUDA library version conflicts at runtime. The Isambard support team recommends using container images instead — see ADR-010.
 
 ---
 
@@ -170,3 +163,47 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 - Adding file detection (is the `chat-template:` value a local path?) and an extra `scp` call adds complexity for an edge case that is unlikely to arise in practice on Isambard AI.
 
 **Consequences**: If a user needs a file-based chat template, they must `scp` it to the HPC themselves and set `chat-template: /remote/path/template.jinja` in their YAML. This can be revisited if it becomes a recurring pain point during E2E testing.
+
+---
+
+## ADR-010: Singularity container for vLLM on HPC
+
+**Status**: Accepted (supersedes ADR-005)
+
+**Context**: The GH200 GPU driver on Isambard AI (565.57.01) supports CUDA 12.7 at most. Recent vLLM releases require CUDA 12.9+. pip installation of vLLM nightly fails:
+- Build-time: `fastsafetensors` C++ extension fails to compile against system GCC
+- Runtime: CUDA library version mismatches (`libnvJitLink`, `libcuda`) even with the forward-compat package
+
+The Isambard support team recommends using Singularity/Apptainer with NGC container images. The official vLLM Docker images (`vllm/vllm-openai:<version>`) ship CUDA forward-compatibility libraries and support `VLLM_ENABLE_CUDA_COMPATIBILITY=1` to activate them automatically.
+
+**Decision**: Replace pip/venv-based vLLM installation with a Singularity image:
+
+1. **`ivllm setup`** submits a CPU-only SLURM job that runs `singularity pull` to convert the Docker image to a `.sif` file. The image is stored in shared project space (`/projects/<project>/ivllm/images/`). This is a one-time team operation, not per-user.
+
+2. **SLURM inference template** runs:
+   ```bash
+   singularity run --nv \
+     --env VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+     <image.sif> vllm serve --config <config> --host 0.0.0.0 --port <port>
+   ```
+   instead of activating a venv.
+
+3. **Version is specified** in `~/.ivllm/config.yaml` as `vllmImage` (default: `docker://vllm/vllm-openai:latest`). The per-job `vllm.yaml` config may specify `min-vllm-version: X.Y.Z` to reject an image that is too old; `ivllm start` reads the version label from the `.sif` and fails early if the requirement is not met.
+
+4. **Image path** is configurable as `vllmImagePath` in `~/.ivllm/config.yaml`, defaulting to `/projects/<project>/ivllm/images/vllm-openai.sif`. Users who want a private image can point at `~/ivllm/images/` instead.
+
+**Rationale**:
+- Official vLLM images include CUDA compat libs; `VLLM_ENABLE_CUDA_COMPATIBILITY=1` handles `LD_LIBRARY_PATH` setup automatically — no manual library wrangling.
+- Singularity/Apptainer is Isambard's recommended and supported container runtime for GPU jobs.
+- `brics/apptainer-multi-node` module is available on Isambard for multi-node container workloads.
+- Shared image in `/projects/` avoids each user pulling a multi-GB image independently.
+- `singularity pull` is CPU-intensive and takes several minutes — must run on COMPUTE, not LOGIN.
+- Versioned images pin the vLLM version, improving reproducibility; `min-vllm-version` in `vllm.yaml` provides a safety check.
+
+**Consequences**:
+- `ivllm setup` now submits a SLURM job rather than running pip install. It no longer has a venv to activate.
+- SLURM templates (single-node and multi-node) replace `source .venv/bin/activate && vllm serve` with `singularity run --nv`.
+- `ivllm start` validates the `.sif` exists (and meets `min-vllm-version` if specified) before submitting the inference job.
+- `ivllm setup` is idempotent: if the `.sif` already exists and matches the configured version, it skips the pull.
+- HuggingFace model cache (`$PROJECTDIR/hf`) and job working directories are bind-mounted into the container at runtime (`--bind $PROJECTDIR`).
+- `huggingface-cli` used for pre-download (ADR-007) must be available outside the container on LOGIN — this may require a separate lightweight Python install for `huggingface_hub`. Alternatively, pre-download can run inside the container via `singularity exec`.
