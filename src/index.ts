@@ -5,6 +5,8 @@ import { cmdStatus } from "./commands/status.ts";
 import { cmdStop } from "./commands/stop.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 
+const { version } = await import("../package.json");
+
 const [, , command, ...args] = process.argv;
 
 const USAGE = `
@@ -17,10 +19,18 @@ Commands:
   stop <job>              Stop a job and clean up (recovery)
   config                  Show or set configuration
 
+Options:
+  --version, -v           Show version
+
 Run 'ivllm <command> --help' for command-specific options.
 `.trim();
 
 switch (command) {
+  case "--version":
+  case "-v":
+    console.log(`ivllm ${version}`);
+    process.exit(0);
+    break;
   case "setup":
     await cmdSetup(args);
     break;
