@@ -53,9 +53,10 @@ describe("renderSetupScript", () => {
     expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.19\.1/);
   });
 
-  it("installs vllm using cu129 wheels", () => {
+  it("installs vllm using version-specific cu129 wheels", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("wheels.vllm.ai/nightly/cu129");
+    expect(script).toContain("wheels.vllm.ai/0.19.1/cu129");
+    expect(script).not.toContain("nightly");
     expect(script).not.toContain("cu130");
   });
 

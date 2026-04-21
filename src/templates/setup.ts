@@ -65,7 +65,7 @@ if [ ! -d ${venvDir} ]; then
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
   uv pip install vllm==${vllmVersion} \\
     --torch-backend=auto \\
-    --extra-index-url https://wheels.vllm.ai/nightly/cu129 \\
+    --extra-index-url https://wheels.vllm.ai/${vllmVersion}/cu129 \\
     --extra-index-url https://pypi.org/simple/
   echo "uv install complete."
   echo "=== vLLM version ==="
