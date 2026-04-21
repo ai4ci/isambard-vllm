@@ -5,9 +5,9 @@ import { parseJobId, parseJobState } from "../src/slurm.ts";
 describe("renderSetupScript", () => {
   const base = { vllmVersion: "0.19.1" };
 
-  it("requests 4 GPUs so --torch-backend=auto can detect CUDA via nvidia-smi", () => {
+  it("requests 1 GPU so --torch-backend=auto can detect CUDA via nvidia-smi", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("#SBATCH --gpus=4");
+    expect(script).toContain("#SBATCH --gpus=1");
   });
 
   it("uses --torch-backend=auto for CUDA torch wheel selection", () => {
