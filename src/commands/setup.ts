@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { loadConfig, assertConfigured } from "../config.ts";
 import { runRemote, copyFile } from "../ssh.ts";
 import { renderSetupScript } from "../templates/setup.ts";
-import { submitJob, pollJobStatus, getJobLog } from "../slurm.ts";
+import { submitJob, pollJobStatus, getJobLog, getSlurmQueueState } from "../slurm.ts";
 
 import { tailRemoteLog } from "../ssh.ts";
 
@@ -62,8 +62,18 @@ export async function cmdSetup(_args: string[]): Promise<void> {
     console.log("Submitting SLURM setup job...");
     const jobId = await submitJob(config, REMOTE_SCRIPT_PATH);
     console.log(`✓ SLURM job submitted: ${jobId}`);
-    console.log("");
-    console.log("Streaming setup log (this may take 10–20 minutes)...");
+
+    // Truncate the log so we only stream this run's output
+    await runRemote(config, `truncate -s 0 ${REMOTE_LOG_PATH} 2>/dev/null || true`, { silent: true });
+
+    // Wait for the job to leave the queue (PENDING → RUNNING)
+    console.log("Waiting for compute node allocation...");
+    while (true) {
+      const queueState = await getSlurmQueueState(config, jobId);
+      if (!queueState || queueState.state !== "PENDING") break;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    console.log("✓ Job started — streaming setup log (this may take 10–20 minutes)...");
     console.log("─".repeat(60));
 
     // Stream the remote log to stdout in real time
