@@ -21,7 +21,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
 # ivllm-setup version 0.2.9000
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
-#SBATCH --gpus=1
+#SBATCH --gpus=4
 #SBATCH --time=02:00:00
 
 set -euo pipefail
