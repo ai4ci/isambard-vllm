@@ -169,7 +169,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     } else {
       console.log(`Downloading model ${model} to ${hfHome} on login node...`);
       const hfToken = process.env["HF_TOKEN"] ?? "";
-      const downloadCmd = `source ${config.projectDir}/ivllm/${config.vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} huggingface-cli download ${model}`;
+      const downloadCmd = `source ${config.projectDir}/ivllm/${config.vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} hf download ${model}`;
       const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
       if (dlCode !== 0) {
         console.error("Error: Model download failed.");
