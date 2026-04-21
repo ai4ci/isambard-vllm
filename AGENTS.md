@@ -1,5 +1,8 @@
 # Principles
 
+* If the user prompt looks like a bash command they have probably forgotten to escape it and you should stop and ask whether they forgot to escape it.
+* If the input looks incomplete ask the user and wait for the next message.
+* If uncertain about user intentions clarify with the user and do not make assumptions.
 * Design artefacts are in the `design` folder.
 * Design requirements (`design/requirements.md`) must be discussed and evolved in discussion with the user.
 * Confirm and review requirements critically with a YAGNI approach.
@@ -14,6 +17,6 @@
 * It is **mandatory** to implement using test driven development.
 * All tests must be implemented and proven to fail before starting development of a feature.
 * All tests must be proven to pass before development of a feature is complete.
-*
+* Bump minor version numbers with every commit.
 * After development of a roadmap phase update the design roadmap and implementation checklists and seek confirmation from user before proceeding to next roadmap phase.
-* If uncertain about requirements ask the user, do not make assumptions.
+* If uncertain about anything ask the user, do not make assumptions.
