@@ -154,23 +154,23 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 
 ### F2.1 — Config changes
 
-- [ ] Remove `venvPath` from `Config` interface in `src/config.ts` (path is now derived from `vllmVersion`)
-- [ ] Keep `vllmVersion` in `Config` — it determines both the pip install version and the venv directory
-- [ ] Update `DEFAULTS` and config read/write to remove `venvPath`
-- [ ] Remove `--venv-path` flag from `ivllm config` command; keep `--vllm-version`
-- [ ] Write failing tests confirming `venvPath` is absent and `vllmVersion` is present in config schema
-- [ ] Confirm tests fail, implement, confirm pass
+- [x] Remove `venvPath` from `Config` interface in `src/config.ts` (path is now derived from `vllmVersion`)
+- [x] Keep `vllmVersion` in `Config` — it determines both the pip install version and the venv directory
+- [x] Update `DEFAULTS` and config read/write to remove `venvPath`
+- [x] Remove `--venv-path` flag from `ivllm config` command; keep `--vllm-version`
+- [x] Write failing tests confirming `venvPath` is absent and `vllmVersion` is present in config schema
+- [x] Confirm tests fail, implement, confirm pass
 
 ### F2.2 — Setup template
 
-- [ ] Rewrite `renderSetupScript` in `src/templates/setup.ts`:
-  - CPU-only SLURM job (no `--gpus`)
+- [x] Rewrite `renderSetupScript` in `src/templates/setup.ts`:
+  - Uses `--gpus=1` so `--torch-backend=auto` can detect CUDA via `nvidia-smi` (changed from CPU-only)
   - Phase A — HPC SDK install (skip if `$PROJECTDIR/ivllm/nvhpc` already exists):
     ```bash
     mkdir -p $PROJECTDIR/ivllm
-    wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_13.1.tar.gz -O /tmp/nvhpc.tar.gz
+    wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_multi.tar.gz -O /tmp/nvhpc.tar.gz
     tar xpzf /tmp/nvhpc.tar.gz -C /tmp
-    cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_13.1
+    cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_multi
     NVHPC_SILENT=true NVHPC_INSTALL_DIR=$PROJECTDIR/ivllm/nvhpc NVHPC_INSTALL_TYPE=single ./install
     rm -f /tmp/nvhpc.tar.gz
     ```
@@ -178,31 +178,32 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
     ```bash
     module load gcc-native/14.2
     export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
-    export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:${LD_LIBRARY_PATH:-}
     uv venv $PROJECTDIR/ivllm/<version> --python 3.12
     source $PROJECTDIR/ivllm/<version>/bin/activate
-    uv pip install vllm==<version> --extra-index-url https://wheels.vllm.ai/cu130
+    uv pip install vllm==<version> --torch-backend=auto --extra-index-url https://wheels.vllm.ai/<version>/cu129
     ```
+    Note: `cuda_multi` image used (provides both 12.9 and 13.1); `cu129` wheels used (not `cu130`)
   - Emit `IVLLM_SETUP_SUCCESS` marker on completion
-- [ ] Update `SetupScriptOptions` interface: remove `venvPath`; keep `vllmVersion` as the sole version field
-- [ ] Write failing tests in `tests/setup.test.ts`:
-  - Script contains `nvhpc_2026_263_Linux_aarch64_cuda_13.1`
+- [x] Update `SetupScriptOptions` interface: remove `venvPath`; keep `vllmVersion` as the sole version field
+- [x] Write failing tests in `tests/setup.test.ts`:
+  - Script contains `nvhpc_2026_263_Linux_aarch64_cuda_multi`
   - Script contains `gcc-native/14.2`
   - Script contains `$PROJECTDIR/ivllm/nvhpc`
   - Script contains the versioned venv path (e.g. `$PROJECTDIR/ivllm/0.19.1`)
-  - Script contains `NVHPC_ROOT` and the compat `LD_LIBRARY_PATH`
-  - Script contains `uv pip install vllm==` and `wheels.vllm.ai/cu130`
-  - Script does NOT contain `singularity` or `cu129`
-- [ ] Confirm tests fail, implement, confirm pass
+  - Script contains `NVHPC_ROOT` and the compat `LD_LIBRARY_PATH` (with `cuda/12.9/compat` first)
+  - Script contains `uv pip install vllm==` and `wheels.vllm.ai/<version>/cu129`
+  - Script does NOT contain `singularity` or `cu130`
+- [x] Confirm tests fail, implement, confirm pass
 
 ### F2.3 — Setup command
 
-- [ ] Update `src/commands/setup.ts`:
+- [x] Update `src/commands/setup.ts`:
   - Remove `venvPath` reference; pass `vllmVersion` to `renderSetupScript`
   - Success check: `test -d $PROJECTDIR/ivllm/<vllmVersion>/bin` on LOGIN
   - Update console output to show version and install path
-- [ ] Write failing tests for success check using versioned path
-- [ ] Confirm tests fail, implement, confirm pass
+- [x] Write failing tests for success check using versioned path
+- [x] Confirm tests fail, implement, confirm pass
 
 ### F2.4 — Inference templates
 
