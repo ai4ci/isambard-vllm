@@ -14,6 +14,7 @@ import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from ".
 import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount, writeStrippedConfig } from "../vllm-config.ts";
 import { semverLt } from "../semver.ts";
+import { formatOpencodeSnippet } from "../opencode.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -41,6 +42,9 @@ export async function cmdStart(args: string[]): Promise<void> {
   let model: string;
   let gpuCount: number;
   let nodeCount: number;
+  let maxModelLen: number | undefined;
+  let enableAutoToolChoice: boolean | undefined;
+  let enableReasoning: boolean | undefined;
   if (startArgs.mock) {
     model = startArgs.model!;
     gpuCount = startArgs.gpuCount ?? 1;
@@ -61,6 +65,9 @@ export async function cmdStart(args: string[]): Promise<void> {
     const resolved = resolveGpuCount(startArgs.gpuCount, yamlConfig);
     gpuCount = resolved.gpuCount;
     nodeCount = resolved.nodeCount;
+    maxModelLen = yamlConfig.maxModelLen;
+    enableAutoToolChoice = yamlConfig.enableAutoToolChoice;
+    enableReasoning = yamlConfig.enableReasoning;
 
     // F2.5: enforce min-vllm-version from config
     if (yamlConfig.minVllmVersion) {
@@ -349,6 +356,16 @@ export async function cmdStart(args: string[]): Promise<void> {
 
     console.log(`\n🚀 OpenAI API endpoint: http://localhost:${localPort}/v1`);
     console.log(`   Model: ${details.model ?? model}`);
+
+    console.log("\n📋 opencode.ai config snippet (add to opencode.json):");
+    console.log(formatOpencodeSnippet({
+      model: details.model ?? model,
+      localPort,
+      maxModelLen,
+      toolCall: enableAutoToolChoice,
+      reasoning: enableReasoning,
+    }));
+
     console.log("\nType 'exit' + Enter to stop, or press Ctrl+C\n");
 
     // Re-register "exit" handler on the same readline interface for the running phase

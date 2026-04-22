@@ -21,6 +21,13 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 - Revisit if bare-metal pip install proves fragile across vLLM updates.
 - See `design/implementation.md` Phase F2-alt for full implementation plan.
 
+### Phase F2.6 — opencode.ai config auto-update
+- When `ivllm start` reaches running state, search for `opencode.json` in the current directory and all parent directories (up to `$HOME`).
+- If found, read the file and upsert the `provider.isambard-vllm.models.<model>` entry with the correct context limit, `tool_call`, and `reasoning` flags derived from the vLLM config YAML.
+- If not found, continue to echo the snippet to the terminal as now (no-op for missing file).
+- Add `--no-opencode` flag to suppress auto-update behaviour.
+- Backup existing `opencode.json` before writing (`.opencode.json.bak`).
+
 ### Phase F3 — Model routing server
 - Concept: Run a model router on LOGIN, rather than tunnel each `ivllm` instance to LOCAL.
 - Support multiple concurrently running `ivllm` instances on COMPUTE nodes.

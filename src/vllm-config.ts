@@ -10,6 +10,9 @@ export interface VllmConfig {
   model?: string;
   tensorParallelSize?: number;
   pipelineParallelSize?: number;
+  maxModelLen?: number;
+  enableAutoToolChoice?: boolean;
+  enableReasoning?: boolean;
   minVllmVersion?: string;
 }
 
@@ -57,7 +60,16 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const minVer = doc["min-vllm-version"];
   const minVllmVersion = typeof minVer === "string" ? minVer : undefined;
 
-  return { model, tensorParallelSize, pipelineParallelSize, minVllmVersion };
+  const mml = doc["max-model-len"] ?? doc["max_model_len"];
+  const maxModelLen = typeof mml === "number" ? mml : undefined;
+
+  const toolChoice = doc["enable-auto-tool-choice"] ?? doc["enable_auto_tool_choice"];
+  const enableAutoToolChoice = typeof toolChoice === "boolean" ? toolChoice : undefined;
+
+  const reasoning = doc["enable-reasoning"] ?? doc["enable_reasoning"];
+  const enableReasoning = typeof reasoning === "boolean" ? reasoning : undefined;
+
+  return { model, tensorParallelSize, pipelineParallelSize, maxModelLen, enableAutoToolChoice, enableReasoning, minVllmVersion };
 }
 
 /**

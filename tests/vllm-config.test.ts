@@ -105,6 +105,48 @@ describe("parseVllmConfig", () => {
       expect(parseVllmConfig(path).minVllmVersion).toBeUndefined();
     } finally { unlinkSync(path); }
   });
+
+  it("extracts max-model-len from YAML", () => {
+    const path = writeTmp("max-model-len: 131072\n");
+    try {
+      expect(parseVllmConfig(path).maxModelLen).toBe(131072);
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns undefined maxModelLen when not present", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).maxModelLen).toBeUndefined();
+    } finally { unlinkSync(path); }
+  });
+
+  it("extracts enable-auto-tool-choice: true from YAML", () => {
+    const path = writeTmp("enable-auto-tool-choice: true\n");
+    try {
+      expect(parseVllmConfig(path).enableAutoToolChoice).toBe(true);
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns undefined enableAutoToolChoice when not present", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).enableAutoToolChoice).toBeUndefined();
+    } finally { unlinkSync(path); }
+  });
+
+  it("extracts enable-reasoning: true from YAML", () => {
+    const path = writeTmp("enable-reasoning: true\n");
+    try {
+      expect(parseVllmConfig(path).enableReasoning).toBe(true);
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns undefined enableReasoning when not present", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).enableReasoning).toBeUndefined();
+    } finally { unlinkSync(path); }
+  });
 });
 
 describe("resolveGpuCount", () => {
