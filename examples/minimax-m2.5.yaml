@@ -14,7 +14,7 @@
 # updating vllmVersion in `ivllm config` to a newer release and re-running
 # `ivllm setup`. The official recipe commit was dea63512bb9bdf7521d591546c52138d9d79e8ce.
 #
-# Usage: ivllm start <job-name> --config design/example/minimax-m2.5.yaml
+# Usage: ivllm start <job-name> --config examples/minimax-m2.5.yaml
 
 model: MiniMaxAI/MiniMax-M2.5
 tensor-parallel-size: 4

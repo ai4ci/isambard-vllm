@@ -14,7 +14,7 @@
 # GPT-OSS support is integrated into mainline vLLM since ≥0.15.1.
 # No special wheels needed — the standard ivllm setup venv is sufficient.
 #
-# Usage: ivllm start <job-name> --config design/example/gpt-oss-120b.yaml
+# Usage: ivllm start <job-name> --config examples/gpt-oss-120b.yaml
 #
 # API: the /v1/responses endpoint is recommended for full tool use (browsing,
 # Python, MCP). Standard /v1/chat/completions also works; reasoning is

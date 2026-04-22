@@ -16,7 +16,7 @@
 # Context: full native 256K tokens (262144). With tp=4 the KV budget is ~283 GB —
 #   more than enough to serve the full context window.
 #
-# Usage: ivllm start <job-name> --config design/example/gemma-4-31B-it.yaml
+# Usage: ivllm start <job-name> --config examples/gemma-4-31B-it.yaml
 
 model: google/gemma-4-31B-it
 tensor-parallel-size: 4

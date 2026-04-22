@@ -32,7 +32,7 @@ MVP is single-node inference only.
 2) `ivllm start <job>` — session owner:
 * `ivllm start` is a **long-running foreground process** that owns the full lifecycle of the inference session. It exits only when the session ends (user request, heartbeat failure, or SLURM timeout).
 * Each inference job has a name. A single inference job is associated with a working directory on the HPC named after the job.
-* Objective: start vllm with a specific model and vllm configuration options file (see [design/example/GPT-OSS_Hopper.yaml]).
+* Objective: start vllm with a specific model and vllm configuration options file (see [examples/gpt-oss-120b.yaml]).
 * LOCAL connects to LOGIN and checks vllm is installed. Fails early if not.
 * **Model download** (on LOGIN, before submitting the SLURM job):
   * Checks whether the model is already present in the shared HuggingFace cache (`$PROJECTDIR/hf`).

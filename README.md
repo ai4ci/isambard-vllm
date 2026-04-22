@@ -75,10 +75,21 @@ enable-prefix-caching: true
 This file needs to be saved locally, and passed in the `--config` parameter. See later
 for details on how to create this file.
 
+Ready-to-use example configs for popular models are in the [`examples/`](examples/) directory:
+
+| File | Model | Notes |
+|------|-------|-------|
+| [`qwen2.5-instruct.yaml`](examples/qwen2.5-instruct.yaml) | Qwen/Qwen2.5-0.5B-Instruct | Dense 0.5B, single node (minimal example) |
+| [`qwen3.6-35b-a3b.yaml`](examples/qwen3.6-35b-a3b.yaml) | Qwen/Qwen3.6-35B-A3B | Hybrid MoE 35B, reasoning, single node |
+| [`qwen3.5-long-context.yaml`](examples/qwen3.5-long-context.yaml) | Qwen/Qwen3.5-35B-A3B | Hybrid MoE 35B, long context, single node |
+| [`gemma-4-31B-it.yaml`](examples/gemma-4-31B-it.yaml) | google/gemma-4-31B-it | Dense 31B multimodal, single node |
+| [`gpt-oss-120b.yaml`](examples/gpt-oss-120b.yaml) | openai/gpt-oss-120b | MoE 117B MXFP4, single node |
+| [`minimax-m2.5.yaml`](examples/minimax-m2.5.yaml) | MiniMaxAI/MiniMax-M2.5 | MoE 230B, multi-node |
+
 ### 3. Start an inference session
 
 ```bash
-ivllm start my-job --config vllm.yaml
+ivllm start my-job --config examples/qwen2.5-instruct.yaml
 ```
 
 This will:

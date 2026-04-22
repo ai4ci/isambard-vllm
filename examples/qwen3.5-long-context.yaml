@@ -21,7 +21,7 @@
 #   tp=4 (full node) preferred over tp=2: more VRAM headroom for activation
 #   peaks, higher aggregate memory bandwidth, and no real downside on Isambard AI.
 #
-# Usage: ivllm start <job-name> --config design/example/qwen3.5-long-context.yaml
+# Usage: ivllm start <job-name> --config examples/qwen3.5-long-context.yaml
 
 model: Qwen/Qwen3.5-35B-A3B
 tensor-parallel-size: 4

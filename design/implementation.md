@@ -133,7 +133,7 @@
 - [x] Tool calling: always include `enable-auto-tool-choice` + `tool-call-parser` for instruct/chat models; parser name table by model family
 - [x] Prefix caching recommendation
 - [x] Reasoning model parser names documented (`qwen3`, `deepseek_r1`, etc.)
-- [x] Example config generated for `Qwen/Qwen2.5-0.5B-Instruct` in `design/example/vllm.yaml`
+- [x] Example config generated for `Qwen/Qwen2.5-0.5B-Instruct` in `examples/vllm.yaml`
 
 ### README updates
 
