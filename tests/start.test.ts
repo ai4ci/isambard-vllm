@@ -77,7 +77,7 @@ describe("parseStartArgs", () => {
   it("applies defaults for optional args", () => {
     const result = parseStartArgs(["my-job", "--config", "vllm.yaml"]);
     expect(result.gpuCount).toBeUndefined();
-    expect(result.timeLimit).toBe("4:00:00");
+    expect(result.timeLimit).toBe("8:00:00");
     expect(result.serverPort).toBe(8000);
   });
 

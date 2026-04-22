@@ -75,7 +75,7 @@ export function parseStartArgs(args: string[]): StartArgs {
     configFile: flags["config"],
     localPort: flags["local-port"] ? parseInt(flags["local-port"], 10) : undefined,
     gpuCount,
-    timeLimit: flags["time"] ?? "4:00:00",
+    timeLimit: flags["time"] ?? "8:00:00",
     serverPort: flags["server-port"] ? parseInt(flags["server-port"], 10) : 8000,
     mock,
     dryRun,
