@@ -56,6 +56,8 @@ if [ ! -d ${venvDir} ]; then
   echo "=== Installing vLLM ${vllmVersion} ==="
   module load gcc-native/14.2
   export NVHPC_ROOT=${nvhpcRoot}
+  export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
+  export PATH=$CUDA_HOME/bin:$PATH
   export LD_LIBRARY_PATH=${ldLibPath}
   # $PROJECTDIR is on a different filesystem from the uv cache (~/.cache/uv);
   # hardlinking across filesystems is not possible so set copy mode explicitly.

@@ -45,6 +45,12 @@ describe("renderInferenceScript", () => {
     expect(idxNvhpc).toBeLessThan(idxActivate);
   });
 
+  it("sets CUDA_HOME and adds nvcc to PATH for Ray worker kernel compilation", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("CUDA_HOME=$NVHPC_ROOT/cuda/12.9");
+    expect(script).toContain("PATH=$CUDA_HOME/bin:$PATH");
+  });
+
   it("sets LD_LIBRARY_PATH with cuda/12.9/compat first", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("$NVHPC_ROOT/cuda/12.9/compat");
