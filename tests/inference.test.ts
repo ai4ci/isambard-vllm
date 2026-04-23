@@ -51,6 +51,12 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("PATH=$CUDA_HOME/bin:$PATH");
   });
 
+  it("sets CUDAHOSTCXX so flashinfer JIT kernels compile with C++20", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("CUDAHOSTCXX");
+    expect(script).toContain("gcc-native/14.2");
+  });
+
   it("sets LD_LIBRARY_PATH with cuda/12.9/compat first", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("$NVHPC_ROOT/cuda/12.9/compat");
