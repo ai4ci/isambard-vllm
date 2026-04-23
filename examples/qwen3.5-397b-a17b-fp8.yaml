@@ -7,11 +7,7 @@
 #
 # Parallelism: tp=4, pp=2 — requires 2 nodes (8 GPUs total)
 #   8 × 86.4 GB usable = 691 GB; 397 GB weights leaves ~294 GB for KV cache
-#
-# ⚠ MULTI-NODE: ivllm does not yet fully support multi-node SLURM jobs.
-#   This config will work once multi-node support (Phase F3) is implemented.
-#   For now, use with: ivllm start <job> --config <this-file>
-#   (the node count is derived automatically from tensor-parallel-size × pipeline-parallel-size)
+#   ivllm start will automatically bootstrap a Ray cluster across 2 nodes.
 #
 # Context: 131,072 tokens (model card recommends ≥128K for thinking capability)
 #   Native context is 262,144 — reduce max-model-len if you encounter OOM.

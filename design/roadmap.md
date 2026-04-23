@@ -28,6 +28,12 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 - Add `--no-opencode` flag to suppress auto-update behaviour.
 - Backup existing `opencode.json` before writing (`.opencode.json.bak`).
 
+### ✅ Multi-node inference via Ray (complete)
+- `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`
+- `renderInferenceScript` with `nodeCount > 1` generates a Ray cluster bootstrap SLURM script: `#SBATCH --nodes=N`, Ray head/worker startup via `srun`, `vllm serve --distributed-executor-backend ray`
+- `ivllm start` prints `⚠ Multi-node job: N nodes requested` when applicable
+- No manual SLURM setup required — pipeline-parallel-size in the vllm.yaml is sufficient
+
 ### Phase F3 — Model routing server
 - Concept: Run a model router on LOGIN, rather than tunnel each `ivllm` instance to LOCAL.
 - Support multiple concurrently running `ivllm` instances on COMPUTE nodes.
