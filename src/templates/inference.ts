@@ -17,7 +17,10 @@ export PATH=$CUDA_HOME/bin:$PATH
 # NVHPC separates math library headers (cuBLAS, cuSPARSE) from the CUDA SDK headers.
 # flashinfer JIT kernels include cublasLt.h which is in math_libs, not cuda/include.
 export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
-export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}`;
+export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
+# Redirect flashinfer JIT cache to Lustre (PROJECTDIR) instead of NFS home (~/.cache).
+# NFS does not support fcntl.flock reliably; Lustre does. Cache persists across jobs.
+export FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache`;
 
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready

@@ -56,6 +56,11 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("CPATH=$NVHPC_ROOT/math_libs/12.9/include:");
   });
 
+  it("redirects FLASHINFER_JIT_CACHE_DIR to Lustre for reliable flock and persistent cache", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache");
+  });
+
   it("loads gcc-native module for C++20 host compiler support", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("module load brics/nccl gcc-native");
