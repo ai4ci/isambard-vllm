@@ -51,6 +51,11 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("PATH=$CUDA_HOME/bin:$PATH");
   });
 
+  it("sets CPATH to include NVHPC math_libs headers for cublasLt.h", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("CPATH=$NVHPC_ROOT/math_libs/12.9/include:");
+  });
+
   it("loads gcc-native module for C++20 host compiler support", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("module load brics/nccl gcc-native");

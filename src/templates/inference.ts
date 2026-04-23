@@ -14,6 +14,9 @@ export interface InferenceScriptOptions {
 const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
 export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
 export PATH=$CUDA_HOME/bin:$PATH
+# NVHPC separates math library headers (cuBLAS, cuSPARSE) from the CUDA SDK headers.
+# flashinfer JIT kernels include cublasLt.h which is in math_libs, not cuda/include.
+export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}`;
 
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
