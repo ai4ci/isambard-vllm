@@ -18,9 +18,20 @@ export PATH=$CUDA_HOME/bin:$PATH
 # flashinfer JIT kernels include cublasLt.h which is in math_libs, not cuda/include.
 export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
+# Use gcc from gcc-native module for JIT compilation (flashinfer, torch.compile).
+export CC=gcc
+export CXX=g++
 # Redirect flashinfer JIT cache to Lustre (PROJECTDIR) instead of NFS home (~/.cache).
 # NFS does not support fcntl.flock reliably; Lustre does. Cache persists across jobs.
-export FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache`;
+export FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache
+# Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
+# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+mkdir -p $PROJECTDIR/ivllm/flashinfer_cache ~/.cache
+if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
+  cp -r ~/.cache/flashinfer/. $PROJECTDIR/ivllm/flashinfer_cache/ 2>/dev/null || true
+  rm -rf ~/.cache/flashinfer
+fi
+ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer`;
 
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready
@@ -164,6 +175,8 @@ export HF_HOME=${hfHome}
 
 # Required env vars for multi-node Ray+vLLM
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0
+export NCCL_CROSS_NIC=1
+export NCCL_FORCE_FLUSH=0
 
 # Start Ray head node
 # bash -c is used to guarantee venv PATH is active on the compute node,

@@ -61,6 +61,17 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache");
   });
 
+  it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer");
+  });
+
+  it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("export CC=gcc");
+    expect(script).toContain("export CXX=g++");
+  });
+
   it("loads gcc-native module for C++20 host compiler support", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("module load brics/nccl gcc-native");
@@ -248,6 +259,12 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(script).not.toContain("VLLM_USE_RAY_SPMD_WORKER");
     expect(script).not.toContain("VLLM_USE_RAY_COMPILED_DAG");
     expect(script).not.toContain("VLLM_USE_RAY_SPMD_HEAD");
+  });
+
+  it("sets NCCL_CROSS_NIC=1 and NCCL_FORCE_FLUSH=0 for multi-node NCCL comms", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("NCCL_CROSS_NIC=1");
+    expect(script).toContain("NCCL_FORCE_FLUSH=0");
   });
 
   it("single-node template is unchanged for nodeCount=1", () => {
