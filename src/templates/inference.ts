@@ -161,6 +161,8 @@ export VLLM_USE_RAY_SPMD_WORKER=1
 export VLLM_USE_RAY_SPMD_HEAD=1
 
 # Start Ray head node
+# bash -c is used to guarantee venv PATH is active on the compute node,
+# and to avoid any .local/bin/env shadowing /usr/bin/env on login nodes.
 echo "Starting Ray head node ($HEAD_NODE)..."
 srun \\
   --nodelist "$HEAD_NODE" \\
@@ -168,7 +170,7 @@ srun \\
   --gpus=$GPUS_PER_NODE \\
   --cpus-per-task 72 \\
   --ntasks-per-node 1 \\
-  env VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT &
+  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT" &
 sleep 20
 
 # Start Ray worker nodes
@@ -182,7 +184,7 @@ for WORKER in $WORKER_NODES; do
     --gpus=$GPUS_PER_NODE \\
     --cpus-per-task 72 \\
     --ntasks-per-node 1 \\
-    env VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP &
+    bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP" &
 done
 sleep 20
 
@@ -192,20 +194,15 @@ srun --overlap \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
   --ntasks-per-node 1 \\
-  ray status
+  bash -c "source ${venvPath}/bin/activate && ray status"
 
 # Start vLLM on the head node via srun --overlap (runs within existing job allocation)
-export VLLM_HOST_IP=$HEAD_NODE_IP
 srun --overlap \\
   --nodelist "$HEAD_NODE" \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
   --ntasks-per-node 1 \\
-  vllm serve \\
-  --config "$VLLM_CONFIG" \\
-  --distributed-executor-backend ray \\
-  --host 0.0.0.0 \\
-  --port ${serverPort} \\
+  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
   &
 VLLM_PID=$!
 

@@ -169,6 +169,30 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("ray start --block --address");
   });
 
+  it("wraps ray start commands in bash -c to guarantee venv PATH on compute nodes", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('bash -c "source');
+    expect(script).not.toContain("env VLLM_HOST_IP");
+  });
+
+  it("sources the venv inside each bash -c ray start call", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('bash -c "source');
+    // All bash -c invocations that call ray or vllm should source the venv
+    const activateCount = (script.match(/bash -c "source[^"]*\/bin\/activate/g) ?? []).length;
+    expect(activateCount).toBeGreaterThanOrEqual(3); // head, worker, vllm serve (plus ray status)
+  });
+
+  it("sets VLLM_HOST_IP inside bash -c for ray head", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head");
+  });
+
+  it("sets VLLM_HOST_IP inside bash -c for ray workers", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("VLLM_HOST_IP=$WORKER_IP ray start --block --address");
+  });
+
   it("runs vllm serve with --distributed-executor-backend ray", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("--distributed-executor-backend ray");
   });
