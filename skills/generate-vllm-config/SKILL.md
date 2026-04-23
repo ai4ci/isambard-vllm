@@ -35,17 +35,7 @@ If the model ID was not provided as an argument, ask the user:
 - Which HuggingFace model they want to use
 - What filename to write to (default: `vllm.yaml`)
 
-### 2. Look up the official vLLM recipe (if available)
-
-Before calculating from scratch, check `https://docs.vllm.ai/projects/recipes/en/latest/` for a model-specific recipe. The recipes page lists community-maintained guides for common models. If a recipe exists:
-- Note the recommended `tensor-parallel-size`, quantization, and any special flags
-- Note whether `--enable-expert-parallel` is recommended (always the case for large MoE models)
-- Note the `reasoning-parser` name if applicable
-- Adapt the recipe's recommendations to Isambard AI's 4 × GH200 120GB topology (~96 GiB usable per GPU)
-
-The recipes are written for various hardware; translate GPU counts to Isambard AI node counts using: `nodes = ceil(recipe_gpus / 4)`.
-
-### 3. Fetch the model card
+### 2. Fetch the model card
 
 Fetch `https://huggingface.co/<model-id>` and extract:
 
@@ -60,7 +50,31 @@ Fetch `https://huggingface.co/<model-id>` and extract:
 
 If the model card is not accessible or the parameter count cannot be determined, ask the user to provide it.
 
-### 4. Calculate memory and parallelism
+### 3. Look up the official vLLM recipe (if available)
+
+vLLM recipes are often linked to from HuggingFace model cards, alternatively, check `https://docs.vllm.ai/projects/recipes/en/latest/` for a model-specific recipe. The recipes page lists community-maintained guides for common models.
+
+If a recipe exists:
+- Note the recommended `tensor-parallel-size`, quantization, and any special flags
+- Note whether `--enable-expert-parallel` is recommended (always the case for large MoE models)
+- Note the `reasoning-parser` name if applicable
+- Adapt the recipe's recommendations to Isambard AI's 4 × GH200 120GB topology (~96 GiB usable per GPU)
+
+The recipes are written for various hardware; translate GPU counts to Isambard AI node counts using: `nodes = ceil(recipe_gpus / 4)`.
+
+### 4. Establish vLLM minimum version
+
+- **min-vllm-version**: Set this to the minimum vLLM version required to run the model. `ivllm start` checks this against the installed vLLM version and fails early if not satisfied. This key is **stripped before the config is passed to `vllm serve`** (vLLM errors on unknown keys). Use the earliest vLLM version in which the model and any required parsers/features were added. If unsure, check the vLLM changelog or recipes page, or set to `"0.19.1"` as a conservative baseline (the current default install version).
+
+vLLM CLI options and config keys vary between releases. Always consult the documentation for the specific version being deployed:
+
+- **All versions index**: https://app.readthedocs.org/projects/vllm/
+- **Versioned serve CLI docs**: `https://docs.vllm.ai/en/v<version>/cli/serve/`
+  e.g. https://docs.vllm.ai/en/v0.19.1/cli/serve/
+
+When checking whether a feature, parser, or config key exists, verify it in the docs for the version specified by `min-vllm-version` in the config (or the user's configured `vllm-version`). Avoid referencing `/en/latest/` when the deployed version is fixed.
+
+### 5. Calculate memory and parallelism
 
 Use the rules in [references/vllm-config-guide.md](references/vllm-config-guide.md):
 
@@ -82,7 +96,7 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 - `pipeline-parallel-size` = ceil(needed_gpus / 4)
 - ⚠️ **Warn the user**: multi-node jobs require more resources and inter-node communication adds latency. `ivllm start` supports multi-node via Ray automatically, but confirm the user needs multi-node before proceeding.
 
-### 5. Choose max-model-len
+### 6. Choose max-model-len
 
 - **Default to the model's full native context length.** With tp=4 on 4 × GH200 120GB (~345 GB usable VRAM combined), KV cache headroom is large even for very long contexts — do not reduce the context pre-emptively.
 - Only reduce `max-model-len` if an explicit OOM analysis shows the KV cache at native context would exhaust available memory after weights are loaded. Calculate:
@@ -94,14 +108,13 @@ needed_gpus = ceil(weights_GB / usable_per_gpu)
 - If the native context does exceed available KV budget, reduce to the largest power-of-two that fits, and note the native context in a YAML comment.
 - Exception: hybrid architectures (e.g. Qwen3.5-35B-A3B with Gated DeltaNet layers) have a tiny KV footprint — keep the full context.
 
-### 6. Check for special options
+### 7. Check for special options
 
-- **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add `enable-reasoning: true` and the `reasoning-parser`. Use `qwen3` for Qwen3 series; `deepseek_r1` for DeepSeek-R1/V3 and most others. Check the model card vLLM quickstart snippet for the exact name.
+- **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add the `reasoning-parser`. Use `qwen3` for Qwen3 series; `deepseek_r1` for DeepSeek-R1/V3 and most others. Check the model card vLLM quickstart snippet for the exact name.
 - **MoE models with `tensor-parallel-size >= 2`**: add `enable-expert-parallel: true`. The official vLLM recipes (DeepSeek-R1, Qwen3.5) consistently recommend this — it uses expert parallelism for the MoE layers (all-to-all comms, more efficient) while dense layers remain tensor-parallelized. No benefit when tp=1.
 - **FP8 quantization**: GH200/H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
 - **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
-- **min-vllm-version**: Set this to the minimum vLLM version required to run the model. `ivllm start` checks this against the installed vLLM version and fails early if not satisfied. This key is **stripped before the config is passed to `vllm serve`** (vLLM errors on unknown keys). Use the earliest vLLM version in which the model and any required parsers/features were added. If unsure, check the vLLM changelog or recipes page, or set to `"0.19.1"` as a conservative baseline (the current default install version).
 
 ### 7. Write the YAML file
 
@@ -203,15 +216,5 @@ Before writing the file, verify:
 - [Isambard AI hardware specs](references/isambard-specs.md)
 - [vLLM config options and memory guide](references/vllm-config-guide.md)
 - [vLLM model-specific recipes](https://docs.vllm.ai/projects/recipes/en/latest/)
-- [vLLM serve help text](references/help.txt)
 - [Isambard AI specs online](https://docs.isambard.ac.uk/specs/#system-specifications-isambard-ai-phase-2)
 
-### vLLM versioned documentation
-
-vLLM CLI options and config keys vary between releases. Always consult the documentation for the specific version being deployed:
-
-- **All versions index**: https://app.readthedocs.org/projects/vllm/
-- **Versioned serve CLI docs**: `https://docs.vllm.ai/en/v<version>/cli/serve/`  
-  e.g. https://docs.vllm.ai/en/v0.19.1/cli/serve/
-
-When checking whether a feature, parser, or config key exists, verify it in the docs for the version specified by `min-vllm-version` in the config (or the user's configured `vllm-version`). Avoid referencing `/en/latest/` when the deployed version is fixed.

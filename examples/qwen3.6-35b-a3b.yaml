@@ -20,7 +20,6 @@ gpu-memory-utilization: 0.90
 dtype: bfloat16
 
 # Reasoning (thinking mode enabled by default; use /no_think in prompt to disable)
-enable-reasoning: true
 reasoning-parser: qwen3
 
 # Tool calling

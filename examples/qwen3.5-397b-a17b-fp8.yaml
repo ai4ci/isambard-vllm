@@ -22,7 +22,6 @@ dtype: bfloat16
 quantization: fp8
 
 # Reasoning (thinking mode enabled by default; use /no_think in prompt to disable)
-enable-reasoning: true
 reasoning-parser: qwen3
 
 # Tool calling
