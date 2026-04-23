@@ -63,7 +63,7 @@ if [ ! -d ${venvDir} ]; then
   uv venv ${venvDir} --python 3.12
   source ${venvDir}/bin/activate
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
-  uv pip install vllm==${vllmVersion} \\
+  uv pip install vllm==${vllmVersion} ray[default] \\
     --torch-backend=auto \\
     --extra-index-url https://wheels.vllm.ai/${vllmVersion}/cu129 \\
     --extra-index-url https://pypi.org/simple/
