@@ -9,12 +9,12 @@
 ### Phase F2 — CUDA forward compatibility via NVIDIA HPC SDK
 See ADR-011.
 - [x] Remove `venvPath` from `~/.ivllm/config.yaml`; keep `vllmVersion` (determines versioned venv path)
-- [x] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create versioned venv at `$PROJECTDIR/ivllm/<version>/`, pip-install vLLM (cu129 wheels) with `gcc-native/14.2`
+- [x] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create versioned venv at `$PROJECTDIR/ivllm/<version>/`, pip-install vLLM (cu129 wheels) with `gcc-native`
 - [x] Add optional `min-vllm-version` field to per-job `vllm.yaml`; `ivllm start` compares against `vllmVersion` config
-- [x] Update single-node and multi-node SLURM inference templates: prepend HPC SDK `LD_LIBRARY_PATH` before versioned venv activation and vLLM/Ray invocations
+- [x] Update single-node and multi-node SLURM inference templates: prepend full HPC SDK preamble (`NVHPC_ROOT`, `CUDA_HOME`, `PATH`, `CPATH`, `LD_LIBRARY_PATH`, `CC`, `CXX`, flashinfer cache symlink) before venv activation and vLLM/Ray invocations
 - [x] Update `ivllm start` pre-flight: check `$PROJECTDIR/ivllm/<vllmVersion>` exists; enforce `min-vllm-version` if set
-- [ ] Dry-run verification: review generated SLURM scripts
-- [ ] End-to-end test on Isambard AI
+- [x] Dry-run verification: review generated SLURM scripts
+- [x] Single-node end-to-end test on Isambard AI (Qwen2.5-0.5B-Instruct — passing)
 
 ### Phase F2-alt — Singularity container support (on hold)
 Preserved as ADR-010 for future consideration (single-node clean versioning; multi-node unproven with Ray).
@@ -28,11 +28,16 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 - Add `--no-opencode` flag to suppress auto-update behaviour.
 - Backup existing `opencode.json` before writing (`.opencode.json.bak`).
 
-### ✅ Multi-node inference via Ray (complete)
+### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
 - `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`
-- `renderInferenceScript` with `nodeCount > 1` generates a Ray cluster bootstrap SLURM script: `#SBATCH --nodes=N`, Ray head/worker startup via `srun`, `vllm serve --distributed-executor-backend ray`
+- `renderInferenceScript` with `nodeCount > 1` generates a Ray cluster bootstrap SLURM script: `#SBATCH --nodes=N`, Ray head/worker startup via `srun bash -c`, `vllm serve --distributed-executor-backend ray`
 - `ivllm start` prints `⚠ Multi-node job: N nodes requested` when applicable
 - No manual SLURM setup required — pipeline-parallel-size in the vllm.yaml is sufficient
+- Extensive environment fixes applied for Isambard AI multi-node (see Phase F2.9 in implementation.md)
+- [ ] 2-node run of Qwen3.5-397B-A17B-FP8 to confirm fully working end-to-end
+
+### Phase F2.9 — Multi-node E2E debugging
+See implementation.md Phase F2.9 for full bug list. All known bugs fixed. Awaiting next test run to confirm.
 
 ### Phase F3 — Model routing server
 - Concept: Run a model router on LOGIN, rather than tunnel each `ivllm` instance to LOCAL.

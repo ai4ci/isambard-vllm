@@ -217,38 +217,48 @@ The Isambard support team recommends using Singularity/Apptainer with NGC contai
 **Context**: Two viable options were identified to run vLLM (which requires CUDA 12.9+) on Isambard AI (driver 565.57.01, max CUDA 12.7):
 
 1. **Singularity containers** (ADR-010): clean single-node, but multi-node via Ray requires unproven `source /host/adapt.sh` pattern inside every `srun` task; large image (~10-15 GB); more `ivllm` code changes.
-2. **NVIDIA HPC SDK bare-metal**: install the HPC SDK once to shared project space; set `LD_LIBRARY_PATH` to activate CUDA 13.1 forward compatibility; keep existing pip/venv + Ray architecture unchanged.
+2. **NVIDIA HPC SDK bare-metal**: install the HPC SDK once to shared project space; set `LD_LIBRARY_PATH` to activate CUDA 12.9 forward compatibility; keep existing pip/venv + Ray architecture unchanged.
 
 The Isambard AI documentation now explicitly documents the HPC SDK approach with the exact `LD_LIBRARY_PATH` to use, making it a low-risk, well-supported path. Multi-node Ray remains unchanged.
 
-**Decision**: Use NVIDIA HPC SDK 26.3 (CUDA 13.1) installed once to shared project space. pip-install vLLM into a per-version shared venv. The vLLM version is specified in `~/.ivllm/config.yaml`; the venv path is derived from it — no separate path config.
+**Decision**: Use NVIDIA HPC SDK 26.3 (provides CUDA 12.9) installed once to shared project space. pip-install vLLM into a per-version shared venv using `cu129` wheels. The vLLM version is specified in `~/.ivllm/config.yaml`; the venv path is derived from it — no separate path config.
 
 **Installation layout** (all under `$PROJECTDIR/ivllm/`, managed by `ivllm setup`):
 
 ```
 $PROJECTDIR/ivllm/
   nvhpc/          ← NVIDIA HPC SDK 26.3 (shared, installed once)
-  0.19.1/         ← uv venv with vLLM 0.19.1 (cu130)
-  0.10.0/         ← uv venv with vLLM 0.10.0 (cu130)  ← active if vllmVersion = "0.10.0"
+  0.19.1/         ← uv venv with vLLM 0.19.1 (cu129)
+  flashinfer_cache/  ← flashinfer JIT kernel cache (Lustre, persistent)
+  uv_cache/          ← uv package cache (Lustre, enables hard links into venv)
 ```
 
 The active venv path is always `$PROJECTDIR/ivllm/<vllmVersion>/`.
 
-**`LD_LIBRARY_PATH` in all SLURM scripts** (set before `vllm serve` or `ray start`):
+**`NVHPC_PREAMBLE` in all SLURM scripts** (set before `vllm serve` or `ray start`):
 ```bash
 export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
-export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/13.1/nccl/lib:$NVHPC_ROOT/comm_libs/13.1/nvshmem/lib:$NVHPC_ROOT/math_libs/13.1/lib64:$LD_LIBRARY_PATH
+export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
+export PATH=$CUDA_HOME/bin:$PATH
+export CPATH=$NVHPC_ROOT/math_libs/12.9/include:${CPATH:-}
+export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:${LD_LIBRARY_PATH:-}
+export CC=gcc
+export CXX=g++
+export FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache
+# symlink ~/.cache/flashinfer → Lustre so Ray actors inherit it without env var propagation
+ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer
 ```
 
-**`ivllm setup`** submits a CPU-only SLURM job that:
+**`ivllm setup`** submits a GPU SLURM job that:
 1. Downloads the HPC SDK aarch64 tarball (~3 GB) and installs it to `$PROJECTDIR/ivllm/nvhpc/` (skipped if already present)
-2. Sets up the compat `LD_LIBRARY_PATH`
-3. Loads `gcc-native/14.2` module (required to compile `fastsafetensors` C++ extension)
-4. Creates a uv venv at `$PROJECTDIR/ivllm/<vllmVersion>/` and pip-installs that specific vLLM version (cu130 wheels):
+2. Sets up the compat `LD_LIBRARY_PATH` and `CUDA_HOME`
+3. Loads `gcc-native` module (required to compile `fastsafetensors` and flashinfer JIT kernels)
+4. Creates a uv venv at `$PROJECTDIR/ivllm/<vllmVersion>/` and pip-installs that specific vLLM version (cu129 wheels):
    ```bash
-   uv pip install vllm==<version> --extra-index-url https://wheels.vllm.ai/cu130
+   UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache uv pip install vllm==<version> ray[default] \
+     --extra-index-url https://wheels.vllm.ai/<version>/cu129
    ```
-   (or `--pre` for nightly; the `cu130` extra-index provides CUDA 13.0 wheels)
+   Note: `UV_CACHE_DIR` on Lustre enables hard links into the venv (same filesystem), avoiding slow NFS→Lustre copies.
 
 **Per-job `vllm.yaml`** may specify `min-vllm-version: X.Y.Z`. `ivllm start` compares this against the configured `vllmVersion` and fails early if the installed version does not meet the minimum.
 
@@ -259,13 +269,54 @@ export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/13.1/compat:$NVHPC_ROOT/cuda/13.1/lib64:
 - Shared project install (`$PROJECTDIR/ivllm/`) means one setup per team, not per user — same benefit as Singularity.
 - Versioned venv directories allow multiple vLLM versions to coexist; upgrading is a second `ivllm setup` call.
 - `vllmVersion` in config is the single source of truth; venv path is always derived — no path duplication.
-- `cu130` wheels (CUDA 13.0) match the CUDA 13.1 forward compat environment provided by HPC SDK 26.3.
+- `cu129` wheels (CUDA 12.9) match the CUDA 12.9 forward compat environment provided by HPC SDK 26.3.
 - Eliminates library ordering confusion: `compat` is first in `LD_LIBRARY_PATH` → `libcuda.so` from compat shadows the system stub.
+- `CPATH` must include `math_libs/12.9/include` because NVHPC stores math library headers (cuBLAS, cuSPARSE, cublasLt) separately from the CUDA SDK headers — flashinfer JIT kernels include `cublasLt.h`.
 
 **Consequences**:
 - `venvPath` removed from `~/.ivllm/config.yaml`; `vllmVersion` is retained and required.
 - `ivllm start` pre-flight checks `$PROJECTDIR/ivllm/<vllmVersion>` exists on HPC; if `min-vllm-version` set in `vllm.yaml`, compares semver against configured version.
-- SLURM templates (single-node and multi-node) prepend the HPC SDK `LD_LIBRARY_PATH` before activating the venv and calling `vllm serve` or `ray start`.
+- SLURM templates (single-node and multi-node) prepend the full NVHPC preamble before activating the venv and calling `vllm serve` or `ray start`.
 - `ivllm setup` is idempotent: skips HPC SDK install if `$PROJECTDIR/ivllm/nvhpc` already exists; skips venv creation if `$PROJECTDIR/ivllm/<vllmVersion>` already exists (unless `--force` passed).
-- `fastsafetensors` build requires `module load gcc-native/14.2` during setup — added to setup SLURM script.
+- `fastsafetensors` and flashinfer JIT kernel build require `module load gcc-native` during setup and inference — added to both SLURM scripts.
 - HuggingFace pre-download (ADR-007) continues to use `huggingface-cli` from the versioned venv on LOGIN.
+- `ray[default]` must be explicitly installed alongside `vllm` — vLLM does not declare it as a hard dependency.
+
+---
+
+## ADR-012: Multi-node Ray actor environment propagation via filesystem symlink
+
+**Status**: Accepted
+
+**Context**: vLLM's `ray_env.py` propagates only a fixed set of environment variable prefixes to Ray actors (`VLLM_*`, `NCCL_*`, `HF_*`, `UCX_*`, `LMCACHE_*`, plus `LD_LIBRARY_PATH` explicitly). Variables not in this list — including `FLASHINFER_JIT_CACHE_DIR`, `PATH`, `CPATH`, `CUDA_HOME`, `CC`, `CXX` — are not propagated.
+
+When Ray actors on worker nodes call flashinfer's JIT build machinery, `FileLock` uses `fcntl.flock()` on a lock file in the flashinfer cache directory. The default cache is `~/.cache/flashinfer/` which is on NFS home on Isambard AI. NFS does not support `fcntl.flock` reliably and returns `ESTALE` (errno 116). This causes:
+1. GDN prefill kernel warmup failure
+2. The flashinfer autotuner runs without bounds during `determine_available_memory`
+3. The Ray actor is OOM-killed
+4. The actor's gRPC socket closes: `RpcError: Socket closed rpc_code: 14`
+
+Setting `FLASHINFER_JIT_CACHE_DIR` to Lustre in the SLURM preamble fixes the login-node and head-node srun steps, but `ray_env.py` does not propagate `FLASHINFER_JIT_CACHE_DIR` to the worker actor processes.
+
+**Decision**: Symlink `~/.cache/flashinfer` → `$PROJECTDIR/ivllm/flashinfer_cache` (Lustre) in the SLURM preamble. This runs before any Ray actor is spawned and ensures that all processes — regardless of how they were launched and regardless of env var propagation — resolve `~/.cache/flashinfer` to Lustre.
+
+```bash
+mkdir -p $PROJECTDIR/ivllm/flashinfer_cache ~/.cache
+if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
+  cp -r ~/.cache/flashinfer/. $PROJECTDIR/ivllm/flashinfer_cache/ 2>/dev/null || true
+  rm -rf ~/.cache/flashinfer
+fi
+ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer
+```
+
+The `FLASHINFER_JIT_CACHE_DIR` env var is retained alongside the symlink as belt-and-braces.
+
+**Rationale**:
+- Symlink approach works for all consumer processes without requiring env var propagation.
+- Lustre supports POSIX `fcntl.flock`; NFS home does not.
+- The compiled kernel cache persists across SLURM jobs, eliminating the ~25-minute `fused_moe_90` recompile on every restart.
+- Same pattern applies to `UV_CACHE_DIR` (on Lustre) to avoid NFS→Lustre cross-filesystem copies during venv install.
+
+**Consequences**:
+- The symlink is created at SLURM job startup on the head node. Worker nodes run in separate `srun` steps and have their own home directory view; the symlink on the head node does not automatically propagate to workers. However, Ray actor processes on the worker nodes inherit the srun daemon's environment. As long as the srun step that starts the Ray worker daemon also runs the preamble (which it does via `bash -c "source venv && ..."`), the symlink will be created on the worker node too.
+- Stale lock files from previous failed runs should be cleaned up: `rm -rf ~/.cache/flashinfer/*.lock` before the next job.

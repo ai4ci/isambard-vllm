@@ -110,12 +110,12 @@
 - [x] `resolveGpuCount` now returns `{ gpuCount, nodeCount }` where `nodeCount = ceil(gpuCount / gpusPerNode=4)`; no longer errors on configs with `pipeline-parallel-size > 1`
 - [x] `renderInferenceScript` accepts `nodeCount`; when `nodeCount > 1` generates a Ray cluster bootstrap SLURM script:
   - Sets `#SBATCH --nodes=N`
-  - Starts Ray head node and worker nodes via `srun` using `env VLLM_HOST_IP=...`
+  - Starts Ray head node and worker nodes via `srun bash -c "source venv && VLLM_HOST_IP=... ray start ..."`
   - Verifies cluster with `ray status`
   - Runs `vllm serve --distributed-executor-backend ray` on head node via `srun --overlap`
-  - Sets required env vars (`VLLM_ALLREDUCE_USE_SYMM_MEM=0`, `VLLM_USE_RAY_COMPILED_DAG=1`, `VLLM_USE_RAY_SPMD_WORKER=1`, `VLLM_USE_RAY_SPMD_HEAD=1`)
+  - Sets required env vars: `VLLM_ALLREDUCE_USE_SYMM_MEM=0`, `NCCL_CROSS_NIC=1`, `NCCL_FORCE_FLUSH=0`
   - `compute_hostname` written to `job_details.json` is the Ray head node (tunnel target)
-- [x] Added `module load brics/nccl` to single-node template (required for NCCL over Slingshot HSN)
+- [x] Added `module load brics/nccl gcc-native` to both single-node and multi-node templates
 - [x] `start.ts` prints `⚠ Multi-node job: N nodes requested` when applicable
 - [x] Updated `generate-vllm-config` skill: multi-node is now supported by `ivllm`
 
@@ -216,7 +216,7 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 - [x] Update single-node template: replace `venvPath` with `$PROJECTDIR/ivllm/<vllmVersion>`
 - [x] Update multi-node template: same preamble before `ray start` calls and `vllm serve`
 - [x] Remove `venvPath` from `InferenceScriptOptions`; add `vllmVersion: string`
-- [x] Tests: `NVHPC_ROOT`, `cuda/13.1/compat`, versioned venv path, multi-node preamble order
+- [x] Tests: `NVHPC_ROOT`, `cuda/12.9/compat`, versioned venv path, multi-node preamble order
 - [x] Tests pass (180 total)
 
 ### F2.5 — vllm-config: `min-vllm-version` support
@@ -235,22 +235,44 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 
 ### F2.7 — Dry-run verification
 
-- [ ] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script:
+- [x] Run `ivllm start <job> --config <file> --dry-run` and verify generated SLURM script:
   - Contains `NVHPC_ROOT` and `LD_LIBRARY_PATH` with compat path first
   - Contains `source $PROJECTDIR/ivllm/<version>/bin/activate`
-  - Does NOT contain `singularity` or `cu129`
-- [ ] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged
+  - Does NOT contain `singularity` or `cu130`
+- [x] Run `ivllm start <job> --mock --dry-run` and verify mock script is unchanged
 
 ### F2.8 — End-to-end testing on Isambard AI
 
-- [ ] Run `ivllm setup` — submit CPU-only job, verify HPC SDK at `$PROJECTDIR/ivllm/nvhpc/`
-- [ ] Verify versioned venv at `$PROJECTDIR/ivllm/<version>/` with vLLM installed
-- [ ] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct`
-- [ ] Verify CUDA 13.1 forward compat active (check nvidia-smi output in SLURM log)
-- [ ] Verify OpenAI API endpoint accessible on LOCAL via tunnel
-- [ ] Commit
+- [x] Run `ivllm setup` — submit GPU job, verify HPC SDK at `$PROJECTDIR/ivllm/nvhpc/`
+- [x] Verify versioned venv at `$PROJECTDIR/ivllm/<version>/` with vLLM installed
+- [x] Run `ivllm start` with `Qwen/Qwen2.5-0.5B-Instruct` (single-node — passing)
+- [x] Verify OpenAI API endpoint accessible on LOCAL via tunnel
+- [x] Commit
 
 ---
+
+## Phase F2.9 — Multi-node E2E debugging (Qwen3.5-397B-A17B-FP8)
+
+Live debugging of 2-node `tp=4, pp=2` run. Each fix is iterative — one issue resolved reveals the next.
+
+### Bugs fixed
+
+- [x] **`srun env VAR=val cmd` permission denied**: `.local/bin/env` on login node inaccessible on compute nodes. Fixed: all `srun` steps use `bash -c "source venv && VAR=val cmd"`.
+- [x] **`ray: command not found`**: `ray[default]` is not a hard vLLM dependency. Fixed: added `ray[default]` to setup install command.
+- [x] **`--enable-reasoning` invalid vLLM flag**: Not a valid vLLM 0.19.1 option. Fixed: removed from example configs; `enableReasoning` in `vllm-config.ts` derived from presence of `reasoning-parser` key.
+- [x] **`nvcc: command not found`**: Ray actors inherit `LD_LIBRARY_PATH` but not `PATH` or `CUDA_HOME`. Fixed: `CUDA_HOME` and `PATH=$CUDA_HOME/bin:$PATH` added to `NVHPC_PREAMBLE`.
+- [x] **`nvcc warning: -std=c++20 not supported with host compiler`**: System gcc too old. Fixed: `module load brics/nccl gcc-native` added to both templates; `CC=gcc` and `CXX=g++` set explicitly.
+- [x] **Deprecated Ray env vars**: `VLLM_USE_RAY_COMPILED_DAG`, `VLLM_USE_RAY_SPMD_WORKER`, `VLLM_USE_RAY_SPMD_HEAD` removed in vLLM 0.19.1. Fixed: removed from multi-node template.
+- [x] **`cublasLt.h: No such file or directory`**: NVHPC stores math library headers in `math_libs/12.9/include/` not alongside CUDA SDK headers. Fixed: `CPATH=$NVHPC_ROOT/math_libs/12.9/include` added to `NVHPC_PREAMBLE`.
+- [x] **`fused_moe_90` compile blocks Ray keepalive**: 182 nvcc invocations take ~25 min; Ray gRPC keepalive timeout fires. Fixed: redirected flashinfer JIT cache to Lustre (`FLASHINFER_JIT_CACHE_DIR`); cache persists across jobs.
+- [x] **UV cache cross-filesystem copies**: UV cache on NFS home → venv on Lustre forces slow file copies. Fixed: `UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache` on Lustre enables hard links.
+- [x] **GDN prefill kernel NFS flock ESTALE**: `FLASHINFER_JIT_CACHE_DIR` not propagated to Ray actors by `ray_env.py`. Ray actors use default `~/.cache/flashinfer` (NFS) → `fcntl.flock` returns ESTALE → warmup fails → autotuner OOM kills actor → `Socket closed`. Fixed: symlink `~/.cache/flashinfer` → Lustre in preamble (see ADR-012).
+- [x] **`NCCL_CROSS_NIC` / `NCCL_FORCE_FLUSH`**: Added per Isambard AI distributed inference guide.
+
+### Current status
+
+- [ ] 2-node `Qwen3.5-397B-A17B-FP8` run with all fixes applied — pending next test run
+
 
 ## Phase F2-alt — Singularity container support (on hold)
 
