@@ -9,13 +9,14 @@
 #   8 × 86.4 GB usable = 691 GB; 397 GB weights leaves ~294 GB for KV cache
 #   ivllm start will automatically bootstrap a Ray cluster across 2 nodes.
 #
-# Context: 131,072 tokens (model card recommends ≥128K for thinking capability)
-#   Native context is 262,144 — reduce max-model-len if you encounter OOM.
+# Context: 262,144 tokens (full native context length)
+#   With language-model-only, ~294 GB free for KV cache across 8 GPUs.
+#   Reduce max-model-len if you encounter OOM at runtime.
 
 model: Qwen/Qwen3.5-397B-A17B-FP8
 tensor-parallel-size: 4
 pipeline-parallel-size: 2
-max-model-len: 131072
+max-model-len: 262144
 gpu-memory-utilization: 0.90
 dtype: bfloat16
 quantization: fp8
