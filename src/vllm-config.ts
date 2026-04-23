@@ -66,8 +66,10 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const toolChoice = doc["enable-auto-tool-choice"] ?? doc["enable_auto_tool_choice"];
   const enableAutoToolChoice = typeof toolChoice === "boolean" ? toolChoice : undefined;
 
-  const reasoning = doc["enable-reasoning"] ?? doc["enable_reasoning"];
-  const enableReasoning = typeof reasoning === "boolean" ? reasoning : undefined;
+  // Derive enableReasoning from the presence of reasoning-parser (not from enable-reasoning,
+  // which is an opencode.js concept and not a valid vLLM config key).
+  const reasoningParser = doc["reasoning-parser"] ?? doc["reasoning_parser"];
+  const enableReasoning = typeof reasoningParser === "string" && reasoningParser.length > 0 ? true : undefined;
 
   return { model, tensorParallelSize, pipelineParallelSize, maxModelLen, enableAutoToolChoice, enableReasoning, minVllmVersion };
 }

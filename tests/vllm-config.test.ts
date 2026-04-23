@@ -134,15 +134,22 @@ describe("parseVllmConfig", () => {
     } finally { unlinkSync(path); }
   });
 
-  it("extracts enable-reasoning: true from YAML", () => {
-    const path = writeTmp("enable-reasoning: true\n");
+  it("derives enableReasoning: true from presence of reasoning-parser in YAML", () => {
+    const path = writeTmp("reasoning-parser: qwen3\n");
     try {
       expect(parseVllmConfig(path).enableReasoning).toBe(true);
     } finally { unlinkSync(path); }
   });
 
-  it("returns undefined enableReasoning when not present", () => {
+  it("returns undefined enableReasoning when reasoning-parser is absent", () => {
     const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseVllmConfig(path).enableReasoning).toBeUndefined();
+    } finally { unlinkSync(path); }
+  });
+
+  it("does not derive enableReasoning from enable-reasoning key (not a valid vLLM key)", () => {
+    const path = writeTmp("enable-reasoning: true\n");
     try {
       expect(parseVllmConfig(path).enableReasoning).toBeUndefined();
     } finally { unlinkSync(path); }
