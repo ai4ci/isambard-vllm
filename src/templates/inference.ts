@@ -14,11 +14,7 @@ export interface InferenceScriptOptions {
 const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
 export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
 export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
-# Point nvcc at gcc-native/14.2 so flashinfer JIT kernels compile with C++20 support.
-# gcc-native/14.2 may not be module-loadable on compute nodes, so set CUDAHOSTCXX directly.
-export CUDAHOSTCXX=$(which g++ 2>/dev/null || echo /usr/bin/g++)
-if module load gcc-native/14.2 2>/dev/null; then export CUDAHOSTCXX=$(which g++); fi`;
+export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}`;
 
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready
@@ -95,7 +91,7 @@ jq -n \\
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
   > "$JOB_DETAILS"
 
-module load brics/nccl
+module load brics/nccl gcc-native
 
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
@@ -154,7 +150,7 @@ jq -n \\
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
   > "$JOB_DETAILS"
 
-module load brics/nccl
+module load brics/nccl gcc-native
 
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
@@ -162,9 +158,6 @@ export HF_HOME=${hfHome}
 
 # Required env vars for multi-node Ray+vLLM
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0
-export VLLM_USE_RAY_COMPILED_DAG=1
-export VLLM_USE_RAY_SPMD_WORKER=1
-export VLLM_USE_RAY_SPMD_HEAD=1
 
 # Start Ray head node
 # bash -c is used to guarantee venv PATH is active on the compute node,

@@ -51,10 +51,9 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("PATH=$CUDA_HOME/bin:$PATH");
   });
 
-  it("sets CUDAHOSTCXX so flashinfer JIT kernels compile with C++20", () => {
+  it("loads gcc-native module for C++20 host compiler support", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("CUDAHOSTCXX");
-    expect(script).toContain("gcc-native/14.2");
+    expect(script).toContain("module load brics/nccl gcc-native");
   });
 
   it("sets LD_LIBRARY_PATH with cuda/12.9/compat first", () => {
@@ -220,8 +219,8 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(script).toContain("compute_hostname");
   });
 
-  it("loads the brics/nccl module", () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain("module load brics/nccl");
+  it("loads the brics/nccl and gcc-native modules", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("module load brics/nccl gcc-native");
   });
 
   it("sets NVHPC_ROOT and LD_LIBRARY_PATH preamble before ray start", () => {
@@ -234,10 +233,11 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(idxNvhpc).toBeLessThan(idxRay);
   });
 
-  it("sets required Ray vLLM env vars", () => {
+  it("does not set deprecated Ray env vars removed in vLLM 0.19.1", () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain("VLLM_USE_RAY_SPMD_WORKER");
-    expect(script).toContain("VLLM_USE_RAY_COMPILED_DAG");
+    expect(script).not.toContain("VLLM_USE_RAY_SPMD_WORKER");
+    expect(script).not.toContain("VLLM_USE_RAY_COMPILED_DAG");
+    expect(script).not.toContain("VLLM_USE_RAY_SPMD_HEAD");
   });
 
   it("single-node template is unchanged for nodeCount=1", () => {
