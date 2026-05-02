@@ -1,10 +1,25 @@
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
 import yaml from "js-yaml";
 
 /** Keys that are ivllm-specific and must be stripped before passing the config to `vllm serve`. */
 export const IVLLM_ONLY_KEYS = new Set(["min-vllm-version"]);
+
+const JOB_CONFIG_DIR = join(homedir(), ".config", "ivllm");
+
+/** Returns the path where a named job's vLLM config is stored locally. */
+export function jobConfigPath(jobName: string): string {
+  return join(JOB_CONFIG_DIR, `${jobName}.yaml`);
+}
+
+/** Saves a copy of the given vLLM config file to the local job config store. */
+export function saveJobConfig(jobName: string, sourcePath: string): void {
+  if (!existsSync(JOB_CONFIG_DIR)) {
+    mkdirSync(JOB_CONFIG_DIR, { recursive: true });
+  }
+  copyFileSync(sourcePath, jobConfigPath(jobName));
+}
 
 export interface VllmConfig {
   model?: string;

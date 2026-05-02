@@ -100,8 +100,15 @@ describe("parseStartArgs", () => {
     expect(() => parseStartArgs(["--config", "c.yaml"])).toThrow(/job name/i);
   });
 
-  it("throws when --config is missing (non-mock)", () => {
-    expect(() => parseStartArgs(["my-job"])).toThrow(/--config/);
+  it("--config is optional in non-mock mode (resolved later from job store)", () => {
+    const result = parseStartArgs(["my-job"]);
+    expect(result.configFile).toBeUndefined();
+    expect(result.mock).toBe(false);
+  });
+
+  it("--config is still accepted when provided", () => {
+    const result = parseStartArgs(["my-job", "--config", "c.yaml"]);
+    expect(result.configFile).toBe("c.yaml");
   });
 
   it("--dry-run flag sets dryRun: true", () => {
@@ -138,8 +145,9 @@ describe("parseStartArgs", () => {
     expect(result.dryRun).toBe(true);
   });
 
-  it("--config is still required without --mock", () => {
-    expect(() => parseStartArgs(["my-job"])).toThrow(/--config/);
+  it("--config is still accepted without --mock", () => {
+    const result = parseStartArgs(["my-job", "--config", "c.yaml"]);
+    expect(result.configFile).toBe("c.yaml");
   });
 
   it("--tensor-parallel-size is not accepted (use YAML config)", () => {

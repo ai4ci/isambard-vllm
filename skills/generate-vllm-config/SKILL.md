@@ -52,12 +52,21 @@ If the model card is not accessible or the parameter count cannot be determined,
 
 ### 3. Look up the official vLLM recipe (if available)
 
-vLLM recipes are often linked to from HuggingFace model cards, alternatively, check `https://docs.vllm.ai/projects/recipes/en/latest/` for a model-specific recipe. The recipes page lists community-maintained guides for common models.
+vLLM recipes can be queried using the huggingface model-id and hardware. Isambard AI;s GH200 fals between H100 and H200 in terms of specifications:
+
+e.g.:
+
+`https://recipes.vllm.ai/<model-id>?hardware=h100`
+`https://recipes.vllm.ai/<model-id>?hardware=h200`
+
+Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100).
 
 If a recipe exists:
+- Note the minimum vLLM version that supports the model
 - Note the recommended `tensor-parallel-size`, quantization, and any special flags
 - Note whether `--enable-expert-parallel` is recommended (always the case for large MoE models)
 - Note the `reasoning-parser` name if applicable
+- Find out what specific options are recommended and why.
 - Adapt the recipe's recommendations to Isambard AI's 4 × GH200 120GB topology (~96 GiB usable per GPU)
 
 The recipes are written for various hardware; translate GPU counts to Isambard AI node counts using: `nodes = ceil(recipe_gpus / 4)`.

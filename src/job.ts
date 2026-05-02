@@ -65,7 +65,6 @@ export function parseStartArgs(args: string[]): StartArgs {
   const dryRun = boolFlags.has("dry-run");
 
   if (mock && !flags["model"]) throw new Error("--model <model> is required in mock mode");
-  if (!mock && !flags["config"]) throw new Error("--config <file> is required");
 
   const gpuCount = flags["gpus"] ? parseInt(flags["gpus"], 10) : undefined;
 

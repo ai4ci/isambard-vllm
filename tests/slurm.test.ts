@@ -1,5 +1,11 @@
 import { describe, it, expect } from "bun:test";
-import { parseJobId, parseJobState, parseSlurmQueueState } from "../src/slurm.ts";
+import {
+  buildSacctDiagnosticsCommand,
+  parseJobId,
+  parseJobState,
+  parseSlurmQueueState,
+  sacctDiagnosticsSettled,
+} from "../src/slurm.ts";
 
 describe("parseJobId", () => {
   it("extracts job ID from standard sbatch output", () => {
@@ -72,5 +78,44 @@ describe("parseSlurmQueueState", () => {
   it("handles leading/trailing whitespace", () => {
     const result = parseSlurmQueueState("  PENDING Priority  ");
     expect(result).toEqual({ state: "PENDING", reason: "Priority" });
+  });
+});
+
+describe("buildSacctDiagnosticsCommand", () => {
+  it("queries the specified job id", () => {
+    expect(buildSacctDiagnosticsCommand("4252365")).toContain("-j 4252365");
+  });
+
+  it("requests the crash-diagnostics accounting fields", () => {
+    expect(buildSacctDiagnosticsCommand("4252365")).toContain(
+      "--format=JobID,JobName%24,NodeList%24,State,ExitCode,ReqMem,AllocTRES%40,MaxRSS,MaxRSSNode%18,MaxRSSTask,MaxVMSize"
+    );
+  });
+});
+
+describe("sacctDiagnosticsSettled", () => {
+  it("returns false while the main job is still RUNNING", () => {
+    const output = [
+      "JobID JobName State",
+      "------------ ------------------------ ----------",
+      "4260856 qwen35max RUNNING",
+      "4260856.1 bash OUT_OF_MEMORY",
+    ].join("\n");
+    expect(sacctDiagnosticsSettled(output, "4260856")).toBeFalse();
+  });
+
+  it("returns true once the main job reaches a terminal state", () => {
+    const output = [
+      "JobID JobName State",
+      "------------ ------------------------ ----------",
+      "4260856 qwen35max FAILED",
+      "4260856.1 bash OUT_OF_MEMORY",
+    ].join("\n");
+    expect(sacctDiagnosticsSettled(output, "4260856")).toBeTrue();
+  });
+
+  it("returns false when the main job row is absent", () => {
+    const output = "JobID JobName State\n------------ ------------------------ ----------";
+    expect(sacctDiagnosticsSettled(output, "4260856")).toBeFalse();
   });
 });

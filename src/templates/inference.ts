@@ -1,3 +1,5 @@
+import { SACCT_DIAGNOSTICS_FORMAT } from "../slurm.ts";
+
 export interface InferenceScriptOptions {
   jobName: string;
   model: string;
@@ -33,33 +35,94 @@ if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
 fi
 ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer`;
 
+function renderExitDiagnostics(workDir: string): string {
+  return `WORK_DIR="${workDir}"
+SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
+
+persist_slurm_accounting() {
+  if command -v sacct >/dev/null 2>&1; then
+    sacct -j "$SLURM_JOB_ID" --format=${SACCT_DIAGNOSTICS_FORMAT} > "$SLURM_ACCOUNTING_FILE" 2>&1 || true
+  fi
+}`;
+}
+
+function renderMultiNodeExitDiagnostics(workDir: string): string {
+  return `${renderExitDiagnostics(workDir)}
+RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"
+
+persist_ray_logs() {
+  mkdir -p "$RAY_LOG_ARCHIVE_DIR"
+  for NODE_NAME in $(scontrol show hostnames $SLURM_NODELIST); do
+    RAY_DESTINATION="$RAY_LOG_ARCHIVE_DIR/$NODE_NAME"
+    ARCHIVE_STATUS_FILE="$RAY_DESTINATION/archive-status.txt"
+    mkdir -p "$RAY_DESTINATION"
+    printf "%s\\n" "Starting Ray log archival for $NODE_NAME" > "$ARCHIVE_STATUS_FILE"
+    if srun --overlap \\
+      --nodelist "$NODE_NAME" \\
+      --nodes=1 \\
+      --ntasks-per-node 1 \\
+      --cpus-per-task 1 \\
+      --export=ALL,RAY_DESTINATION="$RAY_DESTINATION" \\
+      bash -lc '
+        RAY_SESSION_DIR=$(readlink -f /local/user/$UID/ray/session_latest 2>/dev/null || true)
+        mkdir -p "$RAY_DESTINATION"
+        if [ -n "$RAY_SESSION_DIR" ] && [ -d "$RAY_SESSION_DIR/logs" ]; then
+          cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DESTINATION/" 2>/dev/null || true
+          printf "%s\\n" "$RAY_SESSION_DIR" > "$RAY_DESTINATION/session_dir.txt"
+        else
+          printf "%s\\n" "No Ray logs found at /local/user/$UID/ray/session_latest" > "$RAY_DESTINATION/missing.txt"
+        fi
+      '; then
+      printf "%s\\n" "Finished Ray log archival for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
+    else
+      printf "%s\\n" "Ray log archival srun failed for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
+    fi
+  done
+}`;
+}
+
+function renderExitTrap(includeRayLogs: boolean): string {
+  const maybePersistRayLogs = includeRayLogs ? "\n  persist_ray_logs" : "";
+  return `collect_exit_diagnostics() {
+  local reason="$1"
+  echo "Collecting exit diagnostics ($reason)..."
+  persist_slurm_accounting${maybePersistRayLogs}
+  echo "Finished exit diagnostics ($reason)."
+}
+
+finalize_and_exit() {
+  local exit_code="$1"
+  local reason="$2"
+  trap - EXIT
+  collect_exit_diagnostics "$reason"
+  exit "$exit_code"
+}
+
+on_exit() {
+  EXIT_CODE=$?
+  trap - EXIT
+  collect_exit_diagnostics "EXIT trap"
+  exit $EXIT_CODE
+}
+
+trap on_exit EXIT`;
+}
+
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready
 echo "Waiting for vLLM to become healthy on port ${serverPort}..."
-MAX_WAIT=1200
-READY=0
-for i in $(seq 1 $MAX_WAIT); do
+while true; do
   if curl -sf http://localhost:${serverPort}/health > /dev/null 2>&1; then
-    READY=1
     break
   fi
   if ! kill -0 $VLLM_PID 2>/dev/null; then
     echo "vLLM process died during startup"
     jq '.status = "failed" | .error = "vLLM process died during startup"' \\
       "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
-    exit 1
+    finalize_and_exit 1 "startup failure"
   fi
   sleep 1
 done
-
-if [ $READY -eq 0 ]; then
-  echo "Timed out waiting for vLLM after \${MAX_WAIT}s"
-  kill $VLLM_PID 2>/dev/null
-  jq --arg error "vLLM did not become healthy within \${MAX_WAIT}s" \\
-    '.status = "timeout" | .error = $error' \\
-    "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
-  exit 1
-fi
 
 echo "vLLM is ready"
 jq '.status = "running"' "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
@@ -74,7 +137,7 @@ if [ $EXIT_CODE -ne 0 ]; then
     "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
 fi
 
-exit $EXIT_CODE`;
+finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
@@ -85,6 +148,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 #SBATCH --job-name=${jobName}
 #SBATCH --nodes=1
 #SBATCH --gpus=${gpuCount}
+#SBATCH --mem=0
 #SBATCH --time=${timeLimit}
 #SBATCH --exclusive
 
@@ -113,12 +177,15 @@ module load brics/nccl gcc-native
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
+${renderExitDiagnostics(workDir)}
+${renderExitTrap(false)}
 
 # Start vLLM in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
 srun \\
   --nodes=1 \\
   --gpus=${gpuCount} \\
+  --mem=0 \\
   --cpus-per-task 72 \\
   --ntasks-per-node 1 \\
   vllm serve \\
@@ -135,11 +202,13 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
   const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
+  const rayObjectStoreMemoryGiB = 64;
 
   return `#!/bin/bash
 #SBATCH --job-name=${jobName}
 #SBATCH --nodes=${nodeCount}
-#SBATCH --gpus=${gpuCount}
+#SBATCH --gpus-per-node=${gpusPerNode}
+#SBATCH --mem=0
 #SBATCH --time=${timeLimit}
 #SBATCH --exclusive
 
@@ -172,6 +241,9 @@ module load brics/nccl gcc-native
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
+${renderMultiNodeExitDiagnostics(workDir)}
+${renderExitTrap(true)}
+RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
 
 # Required env vars for multi-node Ray+vLLM
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0
@@ -186,9 +258,10 @@ srun \\
   --nodelist "$HEAD_NODE" \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
   --cpus-per-task 72 \\
   --ntasks-per-node 1 \\
-  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT" &
+  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 sleep 20
 
 # Start Ray worker nodes
@@ -200,9 +273,10 @@ for WORKER in $WORKER_NODES; do
     --nodelist "$WORKER" \\
     --nodes=1 \\
     --gpus=$GPUS_PER_NODE \\
+    --mem=0 \\
     --cpus-per-task 72 \\
     --ntasks-per-node 1 \\
-    bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP" &
+    bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 done
 sleep 20
 
@@ -211,6 +285,7 @@ srun --overlap \\
   --nodelist "$HEAD_NODE" \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
   --ntasks-per-node 1 \\
   bash -c "source ${venvPath}/bin/activate && ray status"
 
@@ -219,6 +294,7 @@ srun --overlap \\
   --nodelist "$HEAD_NODE" \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
   --ntasks-per-node 1 \\
   bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
   &

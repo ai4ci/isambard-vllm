@@ -86,13 +86,15 @@ The scripts in `design/old/` that use reverse tunnels (`vllm-slurm.sh`, `tunnel-
 
 ## Implementation
 
-* The tutorial in [design/references/inference.md] uses a pre-downloaded set of model weights. This is only available for GPT-OSS. We will not be able to use this.
+* The tutorial in [design/references/vllm-distributed.md] uses a pre-downloaded set of model weights. This is only available for GPT-OSS. We will not be able to use this.
 * LOCAL CLI is implemented in Node.js + bun. LOGIN and COMPUTE scripts are bash.
-* vLLM startup is slow. We need a connection test that mocks the vLLM server, so we can end-to-end test the monitoring workflow. The mock HTTP server pattern in [design/old/tunnel-test.sh] is a useful reference, repurposed for a forward-tunnel test.
+* vLLM startup is slow. We need a connection test that mocks the vLLM server, so we can end-to-end test the monitoring workflow.
 * Testing end to end with vLLM will need to be done with a lighter weight LLM like Qwen/Qwen2.5-0.5B-Instruct
 
 ## References
 
-* [design/references/jupyter.md] - describes the process of triggering a job on a COMPUTE node and subsequent login from LOCAL. This is useful for identifying patterns for remote port forwarding.
-* [design/references/inference.md] - describes the process of setting up inferencing on COMPUTE node and testing via a second COMPUTE node job. This is useful for the details of how to interactively set up and start vllm. This is what we are trying to automate.
+* [design/references/cuda.md] - using newer CUDA versions on isambard
+* [design/references/vllm-serve-0.19.1] - vllm serve commarnd reference for v0.19.1
+* [design/references/vllm-distributed.md] - describes the process of setting up inferencing on COMPUTE node and testing via a second COMPUTE node job on Isambard. This is useful for the details of how to interactively set up and start vllm. This is what we are trying to automate.
+* [design/references/vllm-parallel.md] - describes the process of setting up vllm in parallel on general hardware.
 * [design/references/storage.md] - info about where Isambard storage is.

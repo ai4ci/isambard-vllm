@@ -3,6 +3,22 @@ import { runRemote } from "./ssh.ts";
 
 export type JobState = "running" | "completed" | "failed";
 export type SlurmQueueState = { state: string; reason: string };
+export const SACCT_DIAGNOSTICS_FORMAT =
+  "JobID,JobName%24,NodeList%24,State,ExitCode,ReqMem,AllocTRES%40,MaxRSS,MaxRSSNode%18,MaxRSSTask,MaxVMSize";
+
+export function buildSacctDiagnosticsCommand(jobId: string): string {
+  return `sacct -j ${jobId} --format=${SACCT_DIAGNOSTICS_FORMAT}`;
+}
+
+export function sacctDiagnosticsSettled(sacctOutput: string, jobId: string): boolean {
+  const jobLine = sacctOutput
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(`${jobId} `));
+
+  if (!jobLine) return false;
+  return !/\b(RUNNING|PENDING|CONFIGURING|COMPLETING)\b/i.test(jobLine);
+}
 
 export function parseJobId(sbatchOutput: string): string | null {
   const match = sbatchOutput.match(/Submitted batch job (\d+)/);

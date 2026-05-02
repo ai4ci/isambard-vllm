@@ -23,6 +23,10 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain("#SBATCH --gpus=4");
   });
 
+  it("requests full node memory in SBATCH", () => {
+    expect(renderInferenceScript(base)).toContain("#SBATCH --mem=0");
+  });
+
   it("sets SBATCH time limit", () => {
     expect(renderInferenceScript(base)).toContain("#SBATCH --time=4:00:00");
   });
@@ -148,8 +152,11 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain('"failed"');
   });
 
-  it("updates status to timeout when health check times out", () => {
-    expect(renderInferenceScript(base)).toContain('"timeout"');
+  it("waits indefinitely for health rather than enforcing a startup timeout", () => {
+    const script = renderInferenceScript(base);
+    expect(script).not.toContain("MAX_WAIT=");
+    expect(script).not.toContain("Timed out waiting for vLLM");
+    expect(script).not.toContain('"timeout"');
   });
 
   it("polls /health endpoint on localhost", () => {
@@ -189,8 +196,10 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --nodes=2");
   });
 
-  it("sets total GPU count in SBATCH --gpus", () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --gpus=8");
+  it("requests GPUs per node in SBATCH for multi-node overlap compatibility", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("#SBATCH --gpus-per-node=4");
+    expect(script).not.toContain("#SBATCH --gpus=8");
   });
 
   it("starts Ray head node", () => {
@@ -199,6 +208,55 @@ describe("renderInferenceScript (multi-node)", () => {
 
   it("starts Ray worker nodes via srun", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("ray start --block --address");
+  });
+
+  it("requests full node memory in SBATCH", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --mem=0");
+  });
+
+  it("requests full node memory for all multi-node srun steps", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    const memRequests = script.match(/--mem=0/g) ?? [];
+    expect(memRequests.length).toBeGreaterThanOrEqual(5); // SBATCH + head + worker + status + serve
+  });
+
+  it("caps Ray object store memory to reduce host-RAM pressure during startup", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("RAY_OBJECT_STORE_MEMORY=$((64 * 1024 * 1024 * 1024))");
+    expect(script).toContain("--object-store-memory=$RAY_OBJECT_STORE_MEMORY");
+  });
+
+  it("captures a slurm accounting snapshot in the job work directory on exit", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('WORK_DIR="/home/user/my-job"');
+    expect(script).toContain('SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"');
+    expect(script).toContain('sacct -j "$SLURM_JOB_ID"');
+  });
+
+  it("archives per-node Ray logs from local scratch back to the job work directory on exit", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"');
+    expect(script).toContain('readlink -f /local/user/$UID/ray/session_latest');
+    expect(script).toContain('cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DESTINATION/"');
+  });
+
+  it("installs an EXIT trap so diagnostics are still collected after startup failures", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("on_exit()");
+    expect(script).toContain("trap on_exit EXIT");
+  });
+
+  it("records per-node archive status files even when Ray log collection fails", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('ARCHIVE_STATUS_FILE="$RAY_DESTINATION/archive-status.txt"');
+    expect(script).toContain('printf "%s\\n" "Starting Ray log archival for $NODE_NAME"');
+    expect(script).toContain('printf "%s\\n" "Ray log archival srun failed for $NODE_NAME"');
+  });
+
+  it("collects exit diagnostics explicitly before the scripted startup-failure exit", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('finalize_and_exit 1 "startup failure"');
+    expect(script).toContain('collect_exit_diagnostics()');
   });
 
   it("wraps ray start commands in bash -c to guarantee venv PATH on compute nodes", () => {

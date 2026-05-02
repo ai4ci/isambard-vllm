@@ -7,12 +7,18 @@ import type { ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
 import { spawnTunnel } from "../ssh.ts";
 import { runRemote } from "../ssh.ts";
-import { submitJob, pollJobStatus, getSlurmQueueState } from "../slurm.ts";
+import {
+  submitJob,
+  pollJobStatus,
+  getSlurmQueueState,
+  buildSacctDiagnosticsCommand,
+  sacctDiagnosticsSettled,
+} from "../slurm.ts";
 import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
-import { parseVllmConfig, resolveGpuCount, writeStrippedConfig } from "../vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
 import { semverLt } from "../semver.ts";
 import { formatOpencodeSnippet } from "../opencode.ts";
 
@@ -28,14 +34,36 @@ export async function cmdStart(args: string[]): Promise<void> {
     startArgs = parseStartArgs(args);
   } catch (e) {
     console.error("Error:", (e as Error).message);
-    console.error("Usage: ivllm start <job> --config <file> [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]");
+    console.error("Usage: ivllm start <job> [--config <file>] [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]");
     console.error("       ivllm start <job> --mock --model <model> [--local-port <port>] [--time <hh:mm:ss>]");
     process.exit(1);
   }
 
-  const { jobName, configFile, timeLimit, serverPort } = startArgs;
+  const { jobName, timeLimit, serverPort } = startArgs;
+  let configFile = startArgs.configFile;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
   const hfHome = `${config.projectDir}/hf`;
+
+  // Resolve config file: if --config provided, save to job store; if omitted, load from store.
+  let usingStoredConfig = false;
+  if (!startArgs.mock) {
+    if (configFile) {
+      try {
+        saveJobConfig(jobName, configFile);
+      } catch (e) {
+        console.warn(`Warning: Could not save config to job store: ${(e as Error).message}`);
+      }
+    } else {
+      const stored = jobConfigPath(jobName);
+      if (!existsSync(stored)) {
+        console.error(`Error: No --config provided and no stored config found for '${jobName}'.`);
+        console.error(`  First run: ivllm start ${jobName} --config <path>`);
+        process.exit(1);
+      }
+      configFile = stored;
+      usingStoredConfig = true;
+    }
+  }
 
   // Resolve model and gpuCount: for real mode, read from the vLLM config YAML.
   // For mock mode, model comes from --model CLI flag.
@@ -94,6 +122,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   let slurmJobId: string | null = null;
   let tunnel: ChildProcess | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let crashDiagnosticsPrinted = false;
 
   async function shutdown(reason: string, exitCode = 0): Promise<void> {
     if (shuttingDown) return;
@@ -122,6 +151,44 @@ export async function cmdStart(args: string[]): Promise<void> {
     process.exit(exitCode);
   }
 
+  async function printCrashDiagnostics(): Promise<void> {
+    if (crashDiagnosticsPrinted || !slurmJobId) return;
+    crashDiagnosticsPrinted = true;
+
+    console.error("\n--- SLURM accounting ---");
+    let stdout = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const result = await ops.runRemote(
+        `${buildSacctDiagnosticsCommand(slurmJobId)} 2>/dev/null || true`,
+        { silent: true }
+      );
+      stdout = result.stdout;
+      if (stdout.trim() && sacctDiagnosticsSettled(stdout, slurmJobId)) break;
+      if (attempt < 4) await sleep(2000);
+    }
+    if (stdout.trim()) {
+      console.error(stdout);
+      const localAccountingTmp = join(tmpdir(), `ivllm-${jobName}-slurm-accounting.txt`);
+      writeFileSync(localAccountingTmp, stdout.endsWith("\n") ? stdout : `${stdout}\n`, "utf-8");
+      try {
+        await ops.copyFile(localAccountingTmp, `${remoteWorkDirScp}/slurm-accounting.txt`);
+      } catch (error) {
+        console.error(`(failed to save SLURM accounting snapshot to ~/${jobName}/slurm-accounting.txt: ${(error as Error).message})`);
+      } finally {
+        if (existsSync(localAccountingTmp)) unlinkSync(localAccountingTmp);
+      }
+    } else {
+      console.error("(no sacct output available)");
+    }
+    console.error("--- end accounting ---");
+    console.error(`Remote work dir : ~/${jobName}`);
+    console.error(`Remote script   : ~/${jobName}/${jobName}.slurm.sh`);
+    console.error(`Remote log      : ~/${jobName}/${jobName}.slurm.log`);
+    console.error(`Remote ray logs : ~/${jobName}/ray-logs/`);
+    console.error(`Remote sacct    : ~/${jobName}/slurm-accounting.txt`);
+    console.error(`Remote details  : ~/${jobName}/job_details.json\n`);
+  }
+
   // Register signal handlers immediately
   process.on("SIGINT", () => shutdown("interrupted (Ctrl+C)"));
   process.on("SIGTERM", () => shutdown("terminated"));
@@ -129,7 +196,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   console.log("=== ivllm start ===");
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
-  console.log(`Config     : ${configFile ?? "(N/A — mock mode)"}`);
+  console.log(`Config     : ${configFile ? `${configFile}${usingStoredConfig ? " (stored)" : ""}` : "(N/A — mock mode)"}`);
   console.log(`GPUs       : ${gpuCount}${nodeCount > 1 ? ` (${nodeCount} nodes × ${gpuCount / nodeCount} GPUs each)` : ""}`);
   if (nodeCount > 1) {
     console.log(`⚠ Multi-node job: ${nodeCount} nodes requested`);
@@ -281,6 +348,8 @@ export async function cmdStart(args: string[]): Promise<void> {
       // File missing — SLURM job may have died without updating it
       const slurmState = await pollJobStatus(config, slurmJobId!);
       if (slurmState === "failed") {
+        await printSlurmLog(config, remoteWorkDir, jobName);
+        await printCrashDiagnostics();
         await shutdown("SLURM job failed unexpectedly", 1);
         return;
       }
@@ -329,6 +398,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     if (details.status === "failed" || details.status === "timeout") {
       if (details.error) console.error(`  Error: ${details.error}`);
       await printSlurmLog(config, remoteWorkDir, jobName);
+      await printCrashDiagnostics();
       await shutdown(`vLLM ${details.status}`, 1);
       return;
     }
@@ -382,14 +452,15 @@ export async function cmdStart(args: string[]): Promise<void> {
       try {
         const res = await fetch(`http://localhost:${localPort}/health`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch (e) {
-        if (!shuttingDown) {
-          console.error(`\nHeartbeat failed: ${(e as Error).message}`);
-          await printSlurmLog(config, remoteWorkDir, jobName);
-          shutdown("vLLM heartbeat failed", 1);
+        } catch (e) {
+          if (!shuttingDown) {
+            console.error(`\nHeartbeat failed: ${(e as Error).message}`);
+            await printSlurmLog(config, remoteWorkDir, jobName);
+            await printCrashDiagnostics();
+            shutdown("vLLM heartbeat failed", 1);
+          }
         }
-      }
-    }, HEARTBEAT_INTERVAL_MS);
+      }, HEARTBEAT_INTERVAL_MS);
   }
 }
 

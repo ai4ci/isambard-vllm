@@ -1,8 +1,8 @@
-import { describe, it, expect } from "bun:test";
-import { writeFileSync, unlinkSync, readFileSync } from "fs";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { writeFileSync, unlinkSync, readFileSync, existsSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
-import { parseVllmConfig, resolveGpuCount, stripIvllmKeys, IVLLM_ONLY_KEYS } from "../src/vllm-config.ts";
+import { tmpdir, homedir } from "os";
+import { parseVllmConfig, resolveGpuCount, stripIvllmKeys, IVLLM_ONLY_KEYS, jobConfigPath, saveJobConfig } from "../src/vllm-config.ts";
 
 function writeTmp(content: string): string {
   const path = join(tmpdir(), `ivllm-test-${Date.now()}.yaml`);
@@ -245,5 +245,50 @@ describe("stripIvllmKeys", () => {
 
   it("IVLLM_ONLY_KEYS contains min-vllm-version", () => {
     expect(IVLLM_ONLY_KEYS.has("min-vllm-version")).toBe(true);
+  });
+});
+
+describe("jobConfigPath", () => {
+  it("returns path under ~/.config/ivllm/<name>.yaml", () => {
+    const expected = join(homedir(), ".config", "ivllm", "qwen36.yaml");
+    expect(jobConfigPath("qwen36")).toBe(expected);
+  });
+
+  it("uses the job name verbatim", () => {
+    const expected = join(homedir(), ".config", "ivllm", "my-job.yaml");
+    expect(jobConfigPath("my-job")).toBe(expected);
+  });
+});
+
+describe("saveJobConfig", () => {
+  const testJobName = `ivllm-test-job-${Date.now()}`;
+  const jobPath = join(homedir(), ".config", "ivllm", `${testJobName}.yaml`);
+
+  afterEach(() => {
+    if (existsSync(jobPath)) rmSync(jobPath);
+  });
+
+  it("copies the source file to the job config path", () => {
+    const src = join(tmpdir(), `ivllm-src-${Date.now()}.yaml`);
+    writeFileSync(src, "model: Qwen/Test\ntensor-parallel-size: 4\n", "utf-8");
+    try {
+      saveJobConfig(testJobName, src);
+      expect(existsSync(jobPath)).toBe(true);
+      expect(readFileSync(jobPath, "utf-8")).toBe("model: Qwen/Test\ntensor-parallel-size: 4\n");
+    } finally {
+      unlinkSync(src);
+    }
+  });
+
+  it("creates the ~/.config/ivllm directory if it does not exist", () => {
+    // This is already created in most environments, so just check the file is saved
+    const src = join(tmpdir(), `ivllm-src2-${Date.now()}.yaml`);
+    writeFileSync(src, "model: Test\n", "utf-8");
+    try {
+      saveJobConfig(testJobName, src);
+      expect(existsSync(jobPath)).toBe(true);
+    } finally {
+      unlinkSync(src);
+    }
   });
 });

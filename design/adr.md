@@ -1,5 +1,13 @@
 # Architecture Decision Records — isambard-vllm
 
+## References
+
+* [design/references/cuda.md] - using newer CUDA versions on isambard
+* [design/references/vllm-serve-0.19.1] - vllm serve commarnd reference for v0.19.1
+* [design/references/vllm-distributed.md] - describes the process of setting up inferencing on COMPUTE node and testing via a second COMPUTE node job on Isambard. This is useful for the details of how to interactively set up and start vllm. This is what we are trying to automate.
+* [design/references/vllm-parallel.md] - describes the process of setting up vllm in parallel on general hardware.
+* [design/references/storage.md] - info about where Isambard storage is.
+
 ## ADR-001: LOCAL CLI language — Node.js + bun
 
 **Status**: Accepted
