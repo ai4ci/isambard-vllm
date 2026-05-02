@@ -221,10 +221,9 @@ The address format is:
 | System | Login host | SSH user |
 |--------|-----------|----------|
 | Isambard 3 | `<project-id>.3.isambard` | `<brics-id>.<project-id>` |
-| Isambard AI | `<project-id>.aip2.isambard` | `<brics-id>` (local username) |
+| Isambard AI | `<project-id>.aip2.isambard` | `<brics-id>.<project-id>` |
 
-For Isambard 3, the SSH username is compound: `<brics-id>.<project-id>@<project-id>.3.isambard`.  
-For Isambard AI, the username is just your BriCS username: `<brics-id>@<project-id>.aip2.isambard`.
+Both systems use the same compound username format: `<brics-id>.<project-id>@<project-id>.<system>.isambard`.
 
 These should be supplied by the user as configuration (e.g. `--user`, `--project`, `--system` CLI flags, or a config file) since they cannot be inferred programmatically from the local machine.
 

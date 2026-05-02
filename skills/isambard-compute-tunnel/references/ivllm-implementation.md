@@ -86,10 +86,10 @@ ivllm takes `loginHost` and `username` as explicit user-configured values stored
 Set via: `ivllm config --login-host myproject.aip2.isambard --username alice`
 
 The login host format is:
-- **Isambard AI**: `<project-id>.aip2.isambard`, user is your BriCS username
+- **Isambard AI**: `<project-id>.aip2.isambard`, user is `<brics-id>.<project-id>`
 - **Isambard 3**: `<project-id>.3.isambard`, user is `<brics-id>.<project-id>`
 
-ivllm does not auto-detect which system it is targeting — the user supplies `loginHost` directly. The SLURM inference script writes `login_host` and `login_user` into `job_details.json` so the local client can verify consistency and use them for tunnel construction.
+Both systems use the same compound username format. In ivllm's config, the user supplies these as pre-assembled strings (e.g. `loginHost: "myproject.aip2.isambard"`, `username: "alice.myproject"`). Future implementations should consider assembling these from `brics_id` and `project_id` fields instead.
 
 ## Pre-flight
 
