@@ -8,7 +8,7 @@ import { submitJob, pollJobStatus, getJobLog, getSlurmQueueState } from "../slur
 
 import { tailRemoteLog } from "../ssh.ts";
 
-const POLL_INTERVAL_MS = 10_000;
+const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler more than once per minute
 const REMOTE_SCRIPT_PATH = "~/.config/ivllm/setup.slurm.sh";
 const REMOTE_LOG_PATH = "~/.config/ivllm/setup.log";
 

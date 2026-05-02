@@ -92,6 +92,23 @@ describe("renderSetupScript", () => {
     expect(script).not.toContain("--pty");
   });
 
+  it("does not use /tmp for temporary files (Isambard policy: use $LOCALDIR)", () => {
+    const script = renderSetupScript(base);
+    expect(script).not.toContain("/tmp/nvhpc");
+    expect(script).not.toMatch(/\btmp\b.*nvhpc/);
+  });
+
+  it("uses $LOCALDIR for temporary HPC SDK download and extraction", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("$LOCALDIR");
+    expect(script).toMatch(/\$LOCALDIR.*nvhpc\.tar\.gz|nvhpc\.tar\.gz.*\$LOCALDIR/);
+  });
+
+  it("cleans up the extracted HPC SDK installer directory after install", () => {
+    const script = renderSetupScript(base);
+    expect(script).toMatch(/rm -rf.*nvhpc_2026_263_Linux_aarch64_cuda_multi/);
+  });
+
   it("uses a different version when specified", () => {
     const script = renderSetupScript({ vllmVersion: "0.10.0" });
     expect(script).toContain("$PROJECTDIR/ivllm/0.10.0");

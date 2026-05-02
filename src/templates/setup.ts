@@ -40,12 +40,13 @@ mkdir -p $PROJECTDIR/ivllm
 # Phase A: Install NVIDIA HPC SDK 26.3 cuda_multi (provides CUDA 12.9 + 13.1)
 if [ ! -d ${nvhpcDir} ]; then
   echo "=== Installing NVIDIA HPC SDK 26.3 (cuda_multi) ==="
+  # Use $LOCALDIR (fast in-job scratch, wiped at job end) not /tmp (policy: never use /tmp)
   wget https://developer.download.nvidia.com/hpc-sdk/26.3/nvhpc_2026_263_Linux_aarch64_cuda_multi.tar.gz \\
-    -O /tmp/nvhpc.tar.gz
-  tar xpzf /tmp/nvhpc.tar.gz -C /tmp
-  cd /tmp/nvhpc_2026_263_Linux_aarch64_cuda_multi
+    -O $LOCALDIR/nvhpc.tar.gz
+  tar xpzf $LOCALDIR/nvhpc.tar.gz -C $LOCALDIR
+  cd $LOCALDIR/nvhpc_2026_263_Linux_aarch64_cuda_multi
   NVHPC_SILENT=true NVHPC_INSTALL_DIR=${nvhpcDir} NVHPC_INSTALL_TYPE=single ./install
-  rm -f /tmp/nvhpc.tar.gz
+  rm -rf $LOCALDIR/nvhpc.tar.gz $LOCALDIR/nvhpc_2026_263_Linux_aarch64_cuda_multi
   echo "=== HPC SDK install complete ==="
 else
   echo "=== HPC SDK already installed at ${nvhpcDir} — skipping ==="

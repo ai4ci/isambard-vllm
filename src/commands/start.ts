@@ -24,6 +24,8 @@ import { formatOpencodeSnippet } from "../opencode.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
+// Isambard policy: do not poll Slurm scheduler (squeue/sacct) more than once per minute
+const SLURM_POLL_INTERVAL_MS = 60_000;
 
 export async function cmdStart(args: string[]): Promise<void> {
   const config = loadConfig();
@@ -338,6 +340,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   let lastStatus = "pending";
   let lastSlurmQueueState = "";
   let logLineOffset = 0;
+  let lastSlurmPollTime = 0; // timestamp of last squeue/sacct call
 
   while (!shuttingDown) {
     await sleep(POLL_INTERVAL_MS);
@@ -346,26 +349,34 @@ export async function cmdStart(args: string[]): Promise<void> {
 
     if (!details) {
       // File missing — SLURM job may have died without updating it
-      const slurmState = await pollJobStatus(config, slurmJobId!);
-      if (slurmState === "failed") {
-        await printSlurmLog(config, remoteWorkDir, jobName);
-        await printCrashDiagnostics();
-        await shutdown("SLURM job failed unexpectedly", 1);
-        return;
+      // Gate sacct call to Slurm poll interval
+      if (Date.now() - lastSlurmPollTime >= SLURM_POLL_INTERVAL_MS) {
+        lastSlurmPollTime = Date.now();
+        const slurmState = await pollJobStatus(config, slurmJobId!);
+        if (slurmState === "failed") {
+          await printSlurmLog(config, remoteWorkDir, jobName);
+          await printCrashDiagnostics();
+          await shutdown("SLURM job failed unexpectedly", 1);
+          return;
+        }
       }
       continue;
     }
 
     // Issue #2a: while our lockfile shows "pending", report actual SLURM queue state
+    // Gate squeue calls to at most once per SLURM_POLL_INTERVAL_MS (Isambard policy)
     if (details.status === "pending") {
-      const queueState = await getSlurmQueueState(config, slurmJobId!);
-      if (queueState) {
-        const msg = queueState.state === "PENDING"
-          ? `  [${timestamp()}] Waiting in SLURM queue (${queueState.reason})`
-          : `  [${timestamp()}] SLURM state: ${queueState.state}`;
-        if (msg !== lastSlurmQueueState) {
-          console.log(msg);
-          lastSlurmQueueState = msg;
+      if (Date.now() - lastSlurmPollTime >= SLURM_POLL_INTERVAL_MS) {
+        lastSlurmPollTime = Date.now();
+        const queueState = await getSlurmQueueState(config, slurmJobId!);
+        if (queueState) {
+          const msg = queueState.state === "PENDING"
+            ? `  [${timestamp()}] Waiting in SLURM queue (${queueState.reason})`
+            : `  [${timestamp()}] SLURM state: ${queueState.state}`;
+          if (msg !== lastSlurmQueueState) {
+            console.log(msg);
+            lastSlurmQueueState = msg;
+          }
         }
       }
     }
