@@ -72,7 +72,26 @@ trap on_exit EXIT
 
 The local daemon is implemented in `src/commands/start.ts` (TypeScript, runs with Bun).
 
-### Pre-flight
+### Login Node Configuration
+
+ivllm takes `loginHost` and `username` as explicit user-configured values stored in `~/.config/ivllm/config.json`:
+
+```json
+{
+  "loginHost": "myproject.aip2.isambard",
+  "username": "alice"
+}
+```
+
+Set via: `ivllm config --login-host myproject.aip2.isambard --username alice`
+
+The login host format is:
+- **Isambard AI**: `<project-id>.aip2.isambard`, user is your BriCS username
+- **Isambard 3**: `<project-id>.3.isambard`, user is `<brics-id>.<project-id>`
+
+ivllm does not auto-detect which system it is targeting — the user supplies `loginHost` directly. The SLURM inference script writes `login_host` and `login_user` into `job_details.json` so the local client can verify consistency and use them for tunnel construction.
+
+## Pre-flight
 
 ```typescript
 const { stdout: ok } = await ops.runRemote("echo ok", { silent: true });

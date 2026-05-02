@@ -170,6 +170,74 @@ while ! bash -c "echo > /dev/tcp/localhost/$SERVICE_PORT" 2>/dev/null; do
 done
 ```
 
+## Login Node Address
+
+The login node address (the SSH jump host for the tunnel) depends on which system you are targeting and can be derived from the project ID.
+
+### From inside the SLURM job (recommended)
+
+The most reliable approach is to have the compute node calculate its own login host and write it into the rendezvous file. This avoids the local client needing to know the system type in advance.
+
+```bash
+# Inside the SLURM script:
+PROJECT_ID=$(basename "$PROJECTDIR")
+
+# Isambard 3 (Grace CPU):
+LOGIN_HOST="$PROJECT_ID.3.isambard"
+
+# Isambard AI (GH200 GPU):
+LOGIN_HOST="$PROJECT_ID.aip2.isambard"
+```
+
+The full login SSH target (user@host) is then:
+
+```bash
+LOGIN_TARGET="$SLURM_JOB_USER@$LOGIN_HOST"
+# e.g. alice@myproject.aip2.isambard
+```
+
+Include `login_host` and `login_user` in the rendezvous file so the local daemon can use them directly without any configuration:
+
+```bash
+jq -n \
+  --arg status "initialising" \
+  --arg compute_hostname "$COMPUTE_HOSTNAME" \
+  --arg login_host "$LOGIN_HOST" \
+  --arg login_user "$SLURM_JOB_USER" \
+  --argjson server_port "$SERVICE_PORT" \
+  '{status: $status, compute_hostname: $compute_hostname,
+    login_host: $login_host, login_user: $login_user, server_port: $server_port}' \
+  > "$JOB_DETAILS"
+```
+
+The local daemon then reads `login_user@login_host` from the JSON rather than needing it hardcoded.
+
+### Before the job is submitted (local client)
+
+If the local client needs to SSH to the login node before the job starts (e.g. to copy files or run pre-flight checks), it must know the login address in advance because `$SLURM_JOB_USER` and `$PROJECTDIR` are not yet available.
+
+The address format is:
+
+| System | Login host | SSH user |
+|--------|-----------|----------|
+| Isambard 3 | `<project-id>.3.isambard` | `<brics-id>.<project-id>` |
+| Isambard AI | `<project-id>.aip2.isambard` | `<brics-id>` (local username) |
+
+For Isambard 3, the SSH username is compound: `<brics-id>.<project-id>@<project-id>.3.isambard`.  
+For Isambard AI, the username is just your BriCS username: `<brics-id>@<project-id>.aip2.isambard`.
+
+These should be supplied by the user as configuration (e.g. `--user`, `--project`, `--system` CLI flags, or a config file) since they cannot be inferred programmatically from the local machine.
+
+Example config (YAML):
+```yaml
+system: ai          # or: i3
+brics_id: alice
+project_id: myproject
+# Derived:
+# AI  login: alice@myproject.aip2.isambard
+# I3  login: alice.myproject@myproject.3.isambard
+```
+
 ## SSH Tunnel
 
 The tunnel command to run locally:
