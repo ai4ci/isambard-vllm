@@ -60,9 +60,10 @@ if [ ! -d ${venvDir} ]; then
   export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
   export PATH=$CUDA_HOME/bin:$PATH
   export LD_LIBRARY_PATH=${ldLibPath}
-  # Point UV cache to Lustre (same filesystem as the venv) so UV can use hard links
-  # instead of cross-filesystem copies, which makes installation much faster.
-  export UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache
+  # UV_CACHE_DIR: use $LOCALDIR (per-user in-job scratch) so multiple project
+  # members don't share a single cache directory with conflicting permissions.
+  # $LOCALDIR is wiped at job end; the installed venv in $PROJECTDIR persists.
+  export UV_CACHE_DIR=$LOCALDIR/uv_cache
   uv venv ${venvDir} --python 3.12
   source ${venvDir}/bin/activate
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."

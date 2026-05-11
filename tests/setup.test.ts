@@ -60,10 +60,10 @@ describe("renderSetupScript", () => {
     expect(script).not.toContain("cu130");
   });
 
-  it("sets UV_CACHE_DIR to Lustre for fast hard-link installs", () => {
+  it("sets UV_CACHE_DIR to $LOCALDIR (per-user in-job scratch, not shared $PROJECTDIR)", () => {
     const script = renderSetupScript(base);
-    expect(script).toContain("UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache");
-    expect(script).not.toContain("UV_LINK_MODE=copy");
+    expect(script).toContain("UV_CACHE_DIR=$LOCALDIR/uv_cache");
+    expect(script).not.toContain("UV_CACHE_DIR=$PROJECTDIR");
   });
 
   it("installs exact vllm version", () => {
