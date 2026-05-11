@@ -93,6 +93,37 @@ usable_per_gpu = 86.4 GB                 (96 GB × 0.90 utilization; GH200 repor
 needed_gpus = ceil(weights_GB / usable_per_gpu)
 ```
 
+**GH200 unified memory + CPU offload (`--cpu-offload-gb`):**
+
+The GH200's NVLink-C2C (900 GB/s coherent interconnect) creates a unified memory address space between CPU (460 GB) and GPU (96 GB). The `--cpu-offload-gb` flag reserves CPU memory space per GPU for model weights, accessed via UVA zero-copy during forward passes. This is effectively a virtual way to increase GPU memory — e.g., 24 GB GPU + 10 GB offload = 34 GB virtual capacity.
+
+Use `--cpu-offload-gb` if:
+- The model's weight memory exceeds what fits on available GPUs even at fp8
+- The user explicitly requests it or asks about memory optimization for very large models
+- It requires vLLM ≥ 0.6.0 (feature availability)
+
+**Example:**
+```yaml
+model: meta-llama/Llama-3.1-70B
+tensor-parallel-size: 1               # 70B @ bf16 ≈ 140 GB; exceeds single 96GB GPU
+# On single GPU with offload:
+#   cpu-offload-gb: 50                  # reserves 50 GB CPU memory (passed as CLI arg)
+#   gpu-memory-utilization: 0.90        # uses ~86 GB GPU (140-50 = 90 GB, close to limit)
+```
+
+**Important:** `--cpu-offload-gb` is a vLLM serve CLI argument, not a YAML config key. The agent should note this when generating the config:
+
+```yaml
+# Note: --cpu-offload-gb <n> is passed as a CLI argument to vllm serve,
+# not as a YAML key. Report this to the user.
+# min-vllm-version: "0.6.0"             # if using offload
+```
+
+When reporting to the user, include:
+- "CPU offload: --cpu-offload-gb <N> (CLI arg, not in YAML)"
+- "Requires fast CPU-GPU interconnect (NVLink-C2C on GH200)"
+- "Minimum vLLM version: 0.6.0+"
+
 **Single node** (needed_gpus ≤ 4):
 - **Default to `tensor-parallel-size: 4` (full node) for any non-trivial model.**
   There is no penalty to using all 4 GPUs on a single node — it gives 4× more KV cache space (directly enabling longer contexts and higher batch throughput), leverages NVLink-C2C for near-linear TP scaling, and keeps the job within a single node (simpler, lower latency). Only drop below tp=4 if:
@@ -169,6 +200,36 @@ After writing the file, tell the user:
 The rule of thumb `params_B × 2 GB` for bfloat16 is conservative (it's exact for weights; the actual overhead includes activations and KV cache, handled by `gpu-memory-utilization`). When in doubt, round up.
 
 For MoE models, all expert weights must reside in GPU memory simultaneously even though only a few activate per forward pass — use total parameter count, not active parameter count, for the memory calculation.
+
+### CPU offload (`--cpu-offload-gb`)
+
+**Key facts from NVIDIA's GH200 unified memory research:**
+- NVLink-C2C connects CPU and GPU at 900 GB/s — 7× PCIe Gen 5 bandwidth, memory-coherent
+- Creates a single unified memory address space: CPU (480 GB) + GPU (96 GB) share one page table
+- `--cpu-offload-gb` uses UVA (Unified Virtual Addressing) for zero-copy access — weights are loaded from CPU memory to GPU memory on-the-fly during each forward pass
+- The offload parameter is "virtual GPU memory" — e.g., 24 GB GPU + 10 GB offload = 34 GB virtual capacity
+- Requires fast CPU-GPU interconnect (NVLink-C2C on GH200 makes this practical)
+
+**Configuration options (from vLLM OffloadConfig):**
+
+| Option | Description | Default | Notes |
+|--------|-------------|---------|-------|
+| `--cpu-offload-gb` | CPU memory (GiB) per GPU for weights | 0 | Must use UVA backend |
+| `--offload-backend` | "auto", "prefetch", or "uva" | auto | "uva" for cpu-offload-gb; "prefetch" for async |
+| `--offload-group-size` | Group N layers, offload last N of each group | 0 | Uses async prefetch, not UVA |
+| `--offload-num-in-group` | Layers to offload per group | 1 | Must be ≤ offload-group-size |
+
+**When to suggest CPU offload:**
+- Model exceeds single-GPU memory (e.g., Llama-3-70B at 140 GB vs 96 GB GPU)
+- Single-node job desired but weights don't fit
+- User asks about optimization for large models
+
+**When NOT to suggest:**
+- Multi-node is appropriate (better throughput)
+- fp8 quantization solves the problem
+- Offload backend not available (vLLM ≥ 0.6.0)
+
+**Note:** `--cpu-offload-gb` maps to `cpu-offload-gb` in YAML config — all vLLM CLI arguments work as YAML keys (with `--` stripped).
 
 ### Parallelism choices
 

@@ -225,13 +225,22 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 - [x] `parseVllmConfig` reads and returns `minVllmVersion?: string`
 - [x] Tests pass for `parseVllmConfig` with/without `min-vllm-version`
 
-### F2.6 — Start command
+### F2.6 — AI coding assistant integration
 
-- [x] Update `src/commands/start.ts` pre-flight:
-  - Replace `config.venvPath` lookup with versioned path: `test -f $PROJECTDIR/ivllm/<vllmVersion>/bin/activate`
-  - If `min-vllm-version` set in `vllm.yaml`, compare semver against `config.vllmVersion`; fail early if not satisfied
-- [x] Pass `vllmVersion` (not `venvPath`) into `renderInferenceScript`
-- [x] `src/semver.ts` extracted for testability; 8 unit tests pass
+- [x] `src/assistant.ts`: assistant detection, config generation, menu building, launch commands
+  - [x] `binaryExists(name)` — checks PATH via `which`
+  - [x] `getAvailableAssistants()` — returns `["opencode", "claude", "code"]` filtered by PATH
+  - [x] `getScoderAvailable()` — checks for `robchallen/scoder` on PATH
+  - [x] `generateOpencodeConfig(opts)` — generates `opencode.json` structure with provider config, model entries, context/output limits
+  - [x] `generateCopilotEnv(port, model)` — `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+  - [x] `generateClaudeEnv(port, model)` — `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+  - [x] `buildAssistantMenuOptions(assistants, hasScoder)` — interleaves direct + scoder options
+  - [x] `getLaunchCommand(assistant, useScoder)` — returns `{binary, args}` for tmux launch
+- [x] `launchAssistantMenu()` in `src/commands/start.ts` — interactive menu loop with cwd display, change-dir `[-1]`, exit `0`
+- [x] Config written to project cwd (project overrides global in opencode precedence chain)
+- [x] Launched in remote tmux window with `cd <cwd>` preamble, fallback to local tmux
+- [x] `--no-launch` flag in CLI and `--mock` flag preserved for testing without GPU
+- [x] 56 tests across 5 files: assistant (24), launch-assistant (12), assistant-menu (14), f26-integration (6), f26-menu (14)
 
 ### F2.7 — Dry-run verification
 

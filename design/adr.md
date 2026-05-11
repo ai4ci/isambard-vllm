@@ -379,3 +379,40 @@ Additionally, `uv` uses a package cache to enable hard links into the venv (avoi
 - `ivllm start` makes one additional SSH call at startup to list installed versions (negligible overhead; no Slurm API calls).
 - Users who previously set `vllmVersion` in their config will find it ignored after upgrade; they should clean it out with `ivllm config` (or delete the key from `~/.config/ivllm/config.json` manually).
 
+---
+
+## ADR-015: AI coding assistant integration via interactive menu at `ivllm start`
+
+**Status**: Accepted
+
+**Context**: After vLLM reaches running state, users need to connect an AI coding assistant (opencode, Claude Code, GitHub Copilot) to the local endpoint. Previously this required manually creating a config file (`opencode.json` or setting env vars) before launching the assistant.
+
+**Decision**: `ivllm start` presents an interactive menu when the vLLM server is healthy:
+
+1. Detects available assistant binaries on PATH (`opencode`, `claude`, `code`, `scoder`)
+2. Displays current working directory and numbered menu options
+3. Writes/configures the appropriate settings for the chosen assistant:
+   - **opencode**: writes `opencode.json` to cwd (config precedence: project overrides global; managed config highest priority)
+   - **copilot**: sets `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`, plus `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+   - **claude**: sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+4. Optionally launches via **scoder** (`robchallen/scoder`) with `--llm-port <port>` flag for sandboxed workspace with localhost access
+5. Launches in a new tmux window, loops back on exit
+6. `[-1]` changes the working directory for subsequent launches; `[0]` shows the config snippet
+7. `--no-launch` flag suppresses the menu entirely (show snippet only)
+
+All three assistants use the same env var pattern for the LLM endpoint (`ANTHROPIC_BASE_URL=http://localhost:<port>`), but copilot requires additional `ANTHROPIC_BASE_URL=http://localhost:4000` to reach its own proxy, and `CLAUDE_MODEL=meta-llama/<model>:free` to select the correct model variant.
+
+**Rationale**:
+- An interactive menu at session start is the most user-friendly approach — no manual config required.
+- Scoder provides network sandboxing via bubblewrap + pasta; it does not auto-direct assistants to localhost, so env vars must still be set explicitly.
+- Config precedence: `opencode.json` in the project cwd follows opencode's documented precedence chain (project overrides global `~/.config/opencode/opencode.json`; managed config from MDM overrides everything).
+- Menu loops back on assistant exit — useful for launching multiple assistants or switching between models.
+- `--no-launch` supports automated/testing workflows where config generation is needed without interactive launch.
+
+**Consequences**:
+- `ivllm start` is now a long-running foreground process with an interactive menu loop — the user must keep the terminal open.
+- `opencode.json` is written to the project cwd; users may want to add it to `.gitignore`.
+- Scoder must be installed and on PATH for sandboxed launches; the menu hides scoder options if not available.
+- The assistant runs in a new tmux window on the remote (with local fallback), so its lifecycle is separate from `ivllm start`.
+- Requires 5 additional source files and 56 tests.
+

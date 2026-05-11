@@ -121,10 +121,19 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 | `--time <hh:mm:ss>` | SLURM time limit | `4:00:00` |
 | `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
+| `--no-launch` | Skip assistant launch menu, show config snippet only | off |
 
 ### 4. Configure opencode to use Isambard
 
-Add a configuration to your agent harness (example here for opencode) as `opencode.json` in your project directory:
+After starting vLLM, `ivllm start` offers to launch your AI coding assistant with the endpoint pre-configured. When the menu appears:
+
+- Press **1** (or **4** with scoder) to launch **opencode** — writes `opencode.json` to your project directory automatically
+- Press **2** (or **5** with scoder) to launch **Claude Code** — sets env vars for the local vLLM endpoint
+- Press **3** (or **6** with scoder) to launch **GitHub Copilot** — sets env vars including `COPILOT_PROVIDER_BASE_URL`
+- Press **0** to show the config snippet only (press again to exit)
+- Press **-1** to change the launch directory
+
+> **Manual configuration (legacy):** If you prefer to configure your assistant manually, add `opencode.json` to your project directory:
 
 ```json
 {

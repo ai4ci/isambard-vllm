@@ -105,13 +105,33 @@ else:
 
 Valid `tensor-parallel-size` values: 1, 2, 4 (must divide number of attention heads evenly).
 
+## GH200 unified memory + CPU offloading
+
+The GH200 (Grace Hopper Superchip) connects CPU and GPU via NVLink-C2C — a 900 GB/s memory-coherent interconnect. This creates a single unified memory address space shared by both CPU (460 GB) and GPU (96 GB HBM3).
+
+Two mechanisms let models exceed per-GPU VRAM:
+
+**Unified virtual addressing (automatic):** The GPU transparently accesses CPU memory when page faults occur. No special config needed — it just works. The GPU memory shown by `gpu-memory-utilization` governs the GPU-side split; overflow goes to CPU memory transparently.
+
+**Explicit CPU offload (`--cpu-offload-gb`):** Reserves a fixed space in CPU memory per GPU for model weights, accessed via UVA zero-copy on-the-fly during each forward pass. Effectively increases the GPU's capacity (e.g. 24 GB GPU + 10 GB offload = 34 GB virtual).
+
+For Isambard's GH200, the NVLink-C2C interconnect (900 GB/s vs ~24 GB/s for PCIe) makes CPU offload practical with minimal latency penalty. Only consider this if the model genuinely doesn't fit on a full 4-GPU node at fp8.
+
+To enable CPU offloading in vLLM config:
+```yaml
+# cpu-offload-gb is passed via --cpu-offload-gb <n> on the vllm serve command
+# It is NOT a YAML key — it's a CLI argument passed when vllm serve starts
+# ivllm handles this internally if the config has:
+_min-vllm-version: "0.6.0"   # offload was added in v0.6.0+
+```
+
 ## Quantization
 
 If a model barely fits but is too large at bf16, suggest `fp8` quantization (halves weight memory):
 ```yaml
 quantization: fp8
 ```
-H100 has native fp8 tensor cores — minimal accuracy loss, ~2× throughput improvement.
+H100 (and GH200) has native fp8 tensor cores — minimal accuracy loss, ~2× throughput improvement.
 
 ## MoE-specific: expert parallelism
 

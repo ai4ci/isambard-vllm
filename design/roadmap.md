@@ -26,22 +26,16 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 
 ### Phase F2.6 — AI coding assistant integration via scoder
 
-When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured. Currently the code prints an opencode snippet; this phase would auto-configure assistants and launch them.
+When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured.
 
-Scoder (if available on PATH) provides network sandboxing via bubblewrap + pasta, isolating the workspace while allowing localhost access via `--llm-port`. The assistant's environment variables are passed into the sandbox. scoder autodetects port 11434 for `--llm-port`, but always specify it explicitly.
-
-Menu-based interaction:
-- Display the current working directory clearly (e.g. "Launching in /projects/b6ax/my-project")
-- Detect which assistant binary is available (`opencode`, `claude`, `code`) and which are sandboxable via scoder
-- Show a menu: "Which assistant? [1] opencode [2] claude [3] copilot [4] scoder opencode [5] scoder claude [6] scoder copilot [0] skip"
-- Set the correct env vars for the chosen assistant:
-  - **opencode**: write/update `opencode.json` in project directory (config precedence: project overrides global; managed config highest priority)
-  - **copilot**: set `COPILOT_PROVIDER_BASE_URL=http://localhost:<port>` + `COPILOT_MODEL=<model>`, plus `ANTHROPIC_BASE_URL=http://localhost:4000`, `ANTHROPIC_API_KEY=ollama`, `CLAUDE_MODEL=meta-llama/<model>:free`
-  - **claude code**: set `ANTHROPIC_BASE_URL=http://localhost:<port>` + `ANTHROPIC_API_KEY=ollama` + `CLAUDE_MODEL=meta-llama/<model>:free`
-- If scoder selected: launch via `scoder --llm-port <port> <assistant>` in a new tmux window
-- If no scoder: launch the assistant directly in a new tmux window with env vars set
-- When the assistant session exits, return to the menu (loop)
-- `--no-launch` flag to suppress auto-launch (show snippet only)
+- [x] `src/assistant.ts`: utilities for assistant detection (`binaryExists`, `getAvailableAssistants`, `getScoderAvailable`), config generation (`generateOpencodeConfig`, `generateCopilotEnv`, `generateClaudeEnv`), menu building (`buildAssistantMenuOptions`), launch command generation (`getLaunchCommand`)
+- [x] `launchAssistantMenu()` in `src/commands/start.ts`: interactive menu loop — displays cwd, detects available assistants (opencode, claude, code), shows numbered options with scoder alternatives, writes opencode.json for opencode, sets env vars for copilot/claude, launches in new tmux window, loops back on exit
+- [x] Change directory option `[-1]` — prompts for path, validates existence, updates cwd for all subsequent launches
+- [x] `--no-launch` flag — suppresses auto-launch, shows config snippet only
+- [x] Exit flow: `0` pressed once shows snippet, pressed again exits cleanly
+- [x] Scoder integration: `--llm-port <port>` flag opens localhost in sandbox; env vars passed through; scoder autodetects port 11434 but port is always specified explicitly
+- [x] Fallback: if remote tmux fails, falls back to local tmux
+- [x] 56 unit tests across 5 test files (assistant.test.ts, launch-assistant.test.ts, assistant-menu.test.ts, f26-integration.test.ts, f26-menu.test.ts)
 
 ### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
 - `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`
