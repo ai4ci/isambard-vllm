@@ -179,7 +179,9 @@ source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
 ${renderExitDiagnostics(workDir)}
-${renderExitTrap(false)} in the background — model, tensor-parallel-size, and all tuning
+${renderExitTrap(false)}
+
+# vLLM is launched via srun in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
 srun \\
   --nodes=1 \\

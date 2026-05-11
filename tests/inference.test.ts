@@ -107,6 +107,15 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain("export HF_HUB_OFFLINE=1");
   });
 
+  it("single-node: trap on_exit EXIT is not followed by prose text on the same line", () => {
+    // Regression: the exit trap block was concatenated with a comment fragment,
+    // causing bash to treat comment words as invalid signal names.
+    const script = renderInferenceScript(base);
+    const trapLine = script.split("\n").find(l => l.trimStart().startsWith("trap on_exit EXIT"));
+    expect(trapLine).toBeDefined();
+    expect(trapLine!.trim()).toBe("trap on_exit EXIT");
+  });
+
   it("serves the correct model", () => {
     expect(renderInferenceScript(base)).toContain("Qwen/Qwen2.5-0.5B-Instruct");
   });
