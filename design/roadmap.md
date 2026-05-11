@@ -28,17 +28,19 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 
 When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured. Currently the code prints an opencode snippet; this phase would auto-configure assistants and launch them.
 
-Primary approach: use **scoder** (if available on PATH) to sandbox the assistant. Scoder supports opencode, claude, and copilot as built-in presets, with a `--llm-port` flag that defaults to 11434. It uses bubblewrap + pasta for network sandboxing, automatically isolating the workspace while allowing localhost access to the vLLM port.
+Scoder (if available on PATH) provides network sandboxing via bubblewrap + pasta, isolating the workspace while allowing localhost access via `--llm-port`. The assistant's environment variables are passed into the sandbox. scoder autodetects port 11434 for `--llm-port`, but always specify it explicitly.
 
-Menu:
-- Detect which assistant binary is available (`opencode`, `claude`, `code`) and offer a menu: "Which assistant? [1] opencode [2] claude [3] copilot (skip)"
-- If scoder is available, launch via `scoder --llm-port <port> <assistant>` in a new terminal (e.g. `tmux new-window`)
-- If scoder is not available but an assistant binary is found, fall back to env var configuration:
+Menu-based interaction:
+- Display the current working directory clearly (e.g. "Launching in /projects/b6ax/my-project")
+- Detect which assistant binary is available (`opencode`, `claude`, `code`) and which are sandboxable via scoder
+- Show a menu: "Which assistant? [1] opencode [2] claude [3] copilot [4] scoder opencode [5] scoder claude [6] scoder copilot [0] skip"
+- Set the correct env vars for the chosen assistant:
   - **opencode**: write/update `opencode.json` in project directory (config precedence: project overrides global; managed config highest priority)
-  - **copilot**: set `COPILOT_PROVIDER_BASE_URL=http://localhost:<port>` + `COPILOT_MODEL=<model>`, plus `ANTHROPIC_BASE_URL=http://localhost:4000`, `ANTHROPIC_API_KEY=ollama`, `CLAUDE_MODEL=meta-llama/<model>:free` for Claude Code
+  - **copilot**: set `COPILOT_PROVIDER_BASE_URL=http://localhost:<port>` + `COPILOT_MODEL=<model>`, plus `ANTHROPIC_BASE_URL=http://localhost:4000`, `ANTHROPIC_API_KEY=ollama`, `CLAUDE_MODEL=meta-llama/<model>:free`
   - **claude code**: set `ANTHROPIC_BASE_URL=http://localhost:<port>` + `ANTHROPIC_API_KEY=ollama` + `CLAUDE_MODEL=meta-llama/<model>:free`
-  - Launch in a new terminal with correct env vars
-- If no assistant detected, show the snippet as today (no-op)
+- If scoder selected: launch via `scoder --llm-port <port> <assistant>` in a new tmux window
+- If no scoder: launch the assistant directly in a new tmux window with env vars set
+- When the assistant session exits, return to the menu (loop)
 - `--no-launch` flag to suppress auto-launch (show snippet only)
 
 ### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
