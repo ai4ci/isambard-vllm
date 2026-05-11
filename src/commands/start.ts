@@ -321,7 +321,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   const script = startArgs.mock
     ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
     : renderInferenceScript({
-        jobName, model, vllmVersion: config.vllmVersion, hfHome,
+        jobName, model, vllmVersion, hfHome,
         configFileName: configFile ? basename(configFile) : "",
         workDir: remoteWorkDir,
         serverPort, gpuCount, nodeCount, timeLimit,
