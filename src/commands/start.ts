@@ -475,11 +475,24 @@ export async function cmdStart(args: string[]): Promise<void> {
     toolCall?: boolean;
     reasoning?: boolean;
     shutdown: (reason: string, code?: number) => void;
+    changeDir?: string;
   }
 
   async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
-    const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
-    const cwd = process.cwd();
+    const { model, localPort, maxModelLen, toolCall, reasoning, shutdown, changeDir } = opts;
+    let cwd = changeDir ?? process.cwd();
+    
+    // Validate and resolve changeDir if provided
+    if (changeDir) {
+      const resolved = require("path").resolve(changeDir);
+      const { existsSync } = require("fs");
+      if (!existsSync(resolved)) {
+        console.log(`\n⚠️  Directory not found: ${changeDir}. Using current directory instead.`);
+        cwd = process.cwd();
+      } else {
+        cwd = resolved;
+      }
+    }
     
     console.log(`\n🤖 AI coding assistant launcher (in: ${cwd})`);
     
@@ -574,7 +587,10 @@ export async function cmdStart(args: string[]): Promise<void> {
       console.log(`With env: ${Object.keys(env).length > 0 ? Object.keys(env).join(", ") + "=<hidden>" : "none"}`);
 
       // Launch assistant in new tmux window
-      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}'`;
+      const launchScript = changeDir 
+        ? `cd '${changeDir}' && ${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`
+        : `${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
+      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${launchScript}'`;
       
       try {
         const result = await runRemote(config, `bash -c "${tmuxCmd}"`, { silent: true });
@@ -582,7 +598,7 @@ export async function cmdStart(args: string[]): Promise<void> {
           // Try local tmux if remote fails
           try {
             const localResult = await import("child_process").then(cp => 
-              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, cmd, ...args], { 
+              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, "bash", "-c", launchScript], { 
                 env: { ...process.env, ...env },
                 stdio: "inherit"
               })
@@ -646,6 +662,7 @@ export async function cmdStart(args: string[]): Promise<void> {
         toolCall: enableAutoToolChoice,
         reasoning: enableReasoning,
         shutdown,
+        changeDir: startArgs.changeDir,
       });
     }
 

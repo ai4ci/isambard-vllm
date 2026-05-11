@@ -21,6 +21,7 @@ export interface StartArgs {
   mock: boolean;
   dryRun: boolean;
   noLaunch: boolean;    // skip assistant launch even in non-dryRun mode
+  changeDir?: string;   // working directory to launch assistant in
 }
 
 export function parseJobDetails(raw: string): JobDetails | null {
@@ -65,6 +66,7 @@ export function parseStartArgs(args: string[]): StartArgs {
   const mock = boolFlags.has("mock");
   const dryRun = boolFlags.has("dry-run");
   const noLaunch = boolFlags.has("no-launch");
+  const changeDir = flags["change-dir"];
 
   if (mock && !flags["model"]) throw new Error("--model <model> is required in mock mode");
 
@@ -81,5 +83,6 @@ export function parseStartArgs(args: string[]): StartArgs {
     mock,
     dryRun,
     noLaunch,
+    changeDir,
   };
 }
