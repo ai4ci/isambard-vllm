@@ -103,6 +103,10 @@ describe("renderInferenceScript", () => {
     );
   });
 
+  it("sets HF_HUB_OFFLINE=1 to prevent API calls when model is already cached", () => {
+    expect(renderInferenceScript(base)).toContain("export HF_HUB_OFFLINE=1");
+  });
+
   it("serves the correct model", () => {
     expect(renderInferenceScript(base)).toContain("Qwen/Qwen2.5-0.5B-Instruct");
   });

@@ -177,10 +177,9 @@ module load brics/nccl gcc-native
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
+export HF_HUB_OFFLINE=1
 ${renderExitDiagnostics(workDir)}
-${renderExitTrap(false)}
-
-# Start vLLM in the background — model, tensor-parallel-size, and all tuning
+${renderExitTrap(false)} in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
 srun \\
   --nodes=1 \\
@@ -241,6 +240,7 @@ module load brics/nccl gcc-native
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
+export HF_HUB_OFFLINE=1
 ${renderMultiNodeExitDiagnostics(workDir)}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
