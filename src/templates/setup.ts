@@ -1,9 +1,10 @@
 export interface SetupScriptOptions {
   vllmVersion: string;
+  hfToken?: string;
 }
 
 export function renderSetupScript(opts: SetupScriptOptions): string {
-  const { vllmVersion } = opts;
+  const { vllmVersion, hfToken } = opts;
   const venvDir = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const nvhpcDir = `$PROJECTDIR/ivllm/nvhpc`;
   const nvhpcRoot = `${nvhpcDir}/Linux_aarch64/26.3`;
@@ -26,6 +27,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
 
 set -euo pipefail
 
+${hfToken ? `export HF_TOKEN=${hfToken}` : ""}
 exec > "$HOME/.config/ivllm/setup.log" 2>&1
 echo "=== ivllm-setup version 0.2.9000 ==="
 

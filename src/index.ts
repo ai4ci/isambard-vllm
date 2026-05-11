@@ -65,6 +65,7 @@ async function cmdConfig(args: string[]): Promise<void> {
   if (flags["username"]) config.username = flags["username"]!;
   if (flags["project-dir"]) config.projectDir = flags["project-dir"]!;
   if (flags["default-local-port"]) config.defaultLocalPort = parseInt(flags["default-local-port"]!, 10);
+  if (flags["hf-token"]) config.hfToken = flags["hf-token"]!;
   saveConfig(config);
   console.log("Configuration saved.");
 }

@@ -72,4 +72,17 @@ describe("Config", () => {
     config.username = "testuser";
     expect(() => assertConfigured(config)).not.toThrow();
   });
+
+  it("hfToken is not present in defaults (optional field)", () => {
+    const config = loadConfig();
+    expect((config as Record<string, unknown>)["hfToken"]).toBeUndefined();
+  });
+
+  it("hfToken round-trips through saveConfig/loadConfig", () => {
+    const config = loadConfig();
+    (config as Record<string, unknown>)["hfToken"] = "hf_testtoken123";
+    saveConfig(config as import("../src/config.ts").Config);
+    const loaded = loadConfig();
+    expect((loaded as Record<string, unknown>)["hfToken"]).toBe("hf_testtoken123");
+  });
 });

@@ -7,6 +7,7 @@ export interface Config {
   username: string;
   projectDir: string;
   defaultLocalPort: number;
+  hfToken?: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".config", "ivllm");

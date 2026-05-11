@@ -120,6 +120,16 @@ describe("renderSetupScript", () => {
     expect(script).toContain("vllm==0.10.0");
     expect(script).not.toContain("0.19.1");
   });
+
+  it("sets HF_TOKEN when hfToken is provided", () => {
+    const script = renderSetupScript({ vllmVersion: "0.19.1", hfToken: "hf_mytoken" });
+    expect(script).toContain("export HF_TOKEN=hf_mytoken");
+  });
+
+  it("does not set HF_TOKEN when hfToken is not provided", () => {
+    const script = renderSetupScript(base);
+    expect(script).not.toContain("HF_TOKEN");
+  });
 });
 
 describe("parseJobId", () => {

@@ -51,7 +51,7 @@ export async function cmdSetup(args: string[]): Promise<void> {
   }
 
   // Render and copy setup script to LOGIN
-  const script = renderSetupScript({ vllmVersion });
+  const script = renderSetupScript({ vllmVersion, hfToken: config.hfToken });
 
   const localTmp = join(tmpdir(), "ivllm-setup.slurm.sh");
   writeFileSync(localTmp, script, "utf-8");
