@@ -24,12 +24,22 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 - Revisit if bare-metal pip install proves fragile across vLLM updates.
 - See `design/implementation.md` Phase F2-alt for full implementation plan.
 
-### Phase F2.6 — opencode.ai config auto-update
-- When `ivllm start` reaches running state, search for `opencode.json` in the current directory and all parent directories (up to `$HOME`).
-- If found, read the file and upsert the `provider.isambard-vllm.models.<model>` entry with the correct context limit, `tool_call`, and `reasoning` flags derived from the vLLM config YAML.
-- If not found, continue to echo the snippet to the terminal as now (no-op for missing file).
-- Add `--no-opencode` flag to suppress auto-update behaviour.
-- Backup existing `opencode.json` before writing (`.opencode.json.bak`).
+### Phase F2.6 — AI coding assistant integration via scoder
+
+When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured. Currently the code prints an opencode snippet; this phase would auto-configure assistants and launch them.
+
+Primary approach: use **scoder** (if available on PATH) to sandbox the assistant. Scoder supports opencode, claude, and copilot as built-in presets, with a `--llm-port` flag that defaults to 11434. It uses bubblewrap + pasta for network sandboxing, automatically isolating the workspace while allowing localhost access to the vLLM port.
+
+Menu:
+- Detect which assistant binary is available (`opencode`, `claude`, `code`) and offer a menu: "Which assistant? [1] opencode [2] claude [3] copilot (skip)"
+- If scoder is available, launch via `scoder --llm-port <port> <assistant>` in a new terminal (e.g. `tmux new-window`)
+- If scoder is not available but an assistant binary is found, fall back to env var configuration:
+  - **opencode**: write/update `opencode.json` in project directory (config precedence: project overrides global; managed config highest priority)
+  - **copilot**: set `COPILOT_PROVIDER_BASE_URL=http://localhost:<port>` + `COPILOT_MODEL=<model>`, plus `ANTHROPIC_BASE_URL=http://localhost:4000`, `ANTHROPIC_API_KEY=ollama`, `CLAUDE_MODEL=meta-llama/<model>:free` for Claude Code
+  - **claude code**: set `ANTHROPIC_BASE_URL=http://localhost:<port>` + `ANTHROPIC_API_KEY=ollama` + `CLAUDE_MODEL=meta-llama/<model>:free`
+  - Launch in a new terminal with correct env vars
+- If no assistant detected, show the snippet as today (no-op)
+- `--no-launch` flag to suppress auto-launch (show snippet only)
 
 ### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
 - `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`
