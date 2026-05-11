@@ -66,6 +66,11 @@ describe("renderSetupScript", () => {
     expect(script).not.toContain("UV_CACHE_DIR=$PROJECTDIR");
   });
 
+  it("sets g+w on $PROJECTDIR/ivllm so all project members can create versioned venvs", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("chmod g+w $PROJECTDIR/ivllm");
+  });
+
   it("installs exact vllm version", () => {
     const script = renderSetupScript(base);
     expect(script).toContain("vllm==0.19.1");

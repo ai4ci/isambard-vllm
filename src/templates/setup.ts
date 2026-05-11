@@ -36,6 +36,8 @@ if ! command -v uv &>/dev/null; then
 fi
 
 mkdir -p $PROJECTDIR/ivllm
+# Ensure group-writable so other project members can install their own versioned venvs.
+chmod g+w $PROJECTDIR/ivllm
 
 # Phase A: Install NVIDIA HPC SDK 26.3 cuda_multi (provides CUDA 12.9 + 13.1)
 if [ ! -d ${nvhpcDir} ]; then
