@@ -134,9 +134,9 @@ This is spawned as a child process of `ivllm start` and killed as part of the sh
 - LOGIN nodes have internet access and are not metered against GPU allocations.
 - `$PROJECTDIR/hf` is shared parallel storage — one download serves all project members and all COMPUTE nodes.
 - `huggingface-cli` is installed as a dependency of vLLM in the existing venv, so no extra setup is needed.
-- `HF_TOKEN` is read from the LOCAL environment and forwarded via the SSH command.
+- Storing `HF_TOKEN` in `~/.config/ivllm/config.json` (via `ivllm config --hf-token`) avoids requiring the user to export an environment variable on every session; the env var is still accepted as a fallback.
 
-**Consequences**: `ivllm start` requires a `--model` argument (the HuggingFace model ID). The `HF_TOKEN` environment variable must be set on LOCAL for private or gated models. Cache check is a simple directory existence test (`$PROJECTDIR/hf/hub/models--<org>--<name>`); a failed check falls through to `huggingface-cli download`.
+**Consequences**: `ivllm start` requires a `--config` YAML containing `model:`. For gated models, run `ivllm config --hf-token <token>` once to persist the token. The token is used inline in the SSH download command and embedded in the setup SLURM script. Cache check is a simple directory existence test (`$PROJECTDIR/hf/hub/models--<org>--<name>`); a failed check falls through to `huggingface-cli download`. `HF_HUB_OFFLINE=1` is set in the inference SLURM script so the already-cached model is used without any HuggingFace API calls at inference time (prevents 429 rate-limit errors).
 
 ---
 
@@ -282,13 +282,14 @@ ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer
 - `CPATH` must include `math_libs/12.9/include` because NVHPC stores math library headers (cuBLAS, cuSPARSE, cublasLt) separately from the CUDA SDK headers — flashinfer JIT kernels include `cublasLt.h`.
 
 **Consequences**:
-- `venvPath` removed from `~/.ivllm/config.yaml`; `vllmVersion` is retained and required.
-- `ivllm start` pre-flight checks `$PROJECTDIR/ivllm/<vllmVersion>` exists on HPC; if `min-vllm-version` set in `vllm.yaml`, compares semver against configured version.
+- `venvPath` removed from `~/.ivllm/config.yaml`; `vllmVersion` was initially retained but is now also removed (see ADR-014).
+- `ivllm setup` takes the vLLM version as a positional argument (`ivllm setup 0.19.1`); `ivllm start` discovers installed versioned venvs by listing `$PROJECTDIR/ivllm/*/bin` on the remote and selects the highest that satisfies `min-vllm-version` (see ADR-014).
 - SLURM templates (single-node and multi-node) prepend the full NVHPC preamble before activating the venv and calling `vllm serve` or `ray start`.
-- `ivllm setup` is idempotent: skips HPC SDK install if `$PROJECTDIR/ivllm/nvhpc` already exists; skips venv creation if `$PROJECTDIR/ivllm/<vllmVersion>` already exists (unless `--force` passed).
+- `ivllm setup` is idempotent: skips HPC SDK install if `$PROJECTDIR/ivllm/nvhpc` already exists; skips venv creation if `$PROJECTDIR/ivllm/<vllmVersion>` already exists.
 - `fastsafetensors` and flashinfer JIT kernel build require `module load gcc-native` during setup and inference — added to both SLURM scripts.
-- HuggingFace pre-download (ADR-007) continues to use `huggingface-cli` from the versioned venv on LOGIN.
+- HuggingFace pre-download (ADR-007) uses `huggingface-cli` from the versioned venv on LOGIN.
 - `ray[default]` must be explicitly installed alongside `vllm` — vLLM does not declare it as a hard dependency.
+- `UV_CACHE_DIR` uses `$LOCALDIR` (per-user in-job scratch) rather than shared project space — see ADR-013.
 
 ---
 
@@ -328,3 +329,53 @@ The `FLASHINFER_JIT_CACHE_DIR` env var is retained alongside the symlink as belt
 **Consequences**:
 - The symlink is created at SLURM job startup on the head node. Worker nodes run in separate `srun` steps and have their own home directory view; the symlink on the head node does not automatically propagate to workers. However, Ray actor processes on the worker nodes inherit the srun daemon's environment. As long as the srun step that starts the Ray worker daemon also runs the preamble (which it does via `bash -c "source venv && ..."`), the symlink will be created on the worker node too.
 - Stale lock files from previous failed runs should be cleaned up: `rm -rf ~/.cache/flashinfer/*.lock` before the next job.
+
+---
+
+## ADR-013: Multi-user project space permissions for shared venv directory
+
+**Status**: Accepted
+
+**Context**: `$PROJECTDIR/ivllm/` is created by the first user who runs `ivllm setup`. On Isambard AI, `mkdir` creates directories with the user's umask (typically `0022` → `drwxr-sr-x`). The setgid bit on `$PROJECTDIR` ensures the group is inherited, but group write is not set. A second project member attempting to create their own versioned venv directory (e.g. `ivllm/0.19.0/`) gets `Permission denied`.
+
+Additionally, `uv` uses a package cache to enable hard links into the venv (avoiding slow file copies). If `UV_CACHE_DIR` points to a shared location in `$PROJECTDIR`, the first user creates the cache directory with no group write, blocking other users from writing to it.
+
+**Decision**:
+1. The setup SLURM script runs `chmod g+w $PROJECTDIR/ivllm` immediately after `mkdir -p $PROJECTDIR/ivllm`, so all project members can create versioned venv subdirectories.
+2. `UV_CACHE_DIR` is set to `$LOCALDIR/uv_cache` (per-user in-job scratch), not a shared location in `$PROJECTDIR`. `$LOCALDIR` is wiped at job end; the installed venv in `$PROJECTDIR/ivllm/<version>/` persists as normal.
+
+**Rationale**:
+- `chmod g+w` on the parent directory is a one-line fix that immediately unblocks all project members.
+- Using `$LOCALDIR` for the uv cache sacrifices hard-link optimisation (cache on different filesystem than venv) but correctness and multi-user safety take priority. The uv cache's main value on Lustre was avoiding NFS→Lustre copies; since each user gets a fresh `$LOCALDIR` per job, the cache is ephemeral anyway.
+
+**Consequences**:
+- `$PROJECTDIR/ivllm/` is group-writable after any user's first `ivllm setup` run.
+- uv downloads packages fresh into `$LOCALDIR/uv_cache` each setup run (no persistent shared cache). Installation time is slightly longer but remains correct.
+- Removes the previous `UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache` entry from the ADR-011 directory layout.
+
+---
+
+## ADR-014: Remove `vllmVersion` from personal config; discover installed versions at start time
+
+**Status**: Accepted
+
+**Context**: ADR-011 placed `vllmVersion` in `~/.config/ivllm/config.json` as the single source of truth for which vLLM version to use. This causes problems when multiple users share the same `$PROJECTDIR`:
+- A second user with a different `vllmVersion` in their personal config (e.g. `0.19.0`) triggers a new setup run even though `0.19.1` is already installed and is compatible.
+- `min-vllm-version` in the YAML config was already the semantic constraint — `vllmVersion` in personal config was redundant.
+
+**Decision**:
+1. Remove `vllmVersion` from `Config` interface and defaults.
+2. `ivllm setup` takes the vLLM version as a positional argument: `ivllm setup 0.19.1`. There is no default — the user must be explicit.
+3. `ivllm start` discovers installed versions at runtime by listing `$PROJECTDIR/ivllm/*/bin` on the remote. It selects the highest installed version that satisfies `min-vllm-version` from the YAML (or the highest overall if no minimum is set).
+4. If no installed version satisfies the requirement, `ivllm start` fails with a clear message: `Run: ivllm setup <version>`.
+
+**Rationale**:
+- The remote install directory is the ground truth for what is actually available; personal config was a stale cache of that truth.
+- Automatic version selection ensures that installing a newer vLLM version (`ivllm setup 0.20.0`) is immediately picked up by all users without config changes.
+- `min-vllm-version` in the per-job YAML remains the right place to express feature requirements — it is close to the model config that depends on those features.
+
+**Consequences**:
+- `--vllm-version` flag removed from `ivllm config` command.
+- `ivllm start` makes one additional SSH call at startup to list installed versions (negligible overhead; no Slurm API calls).
+- Users who previously set `vllmVersion` in their config will find it ignored after upgrade; they should clean it out with `ivllm config` (or delete the key from `~/.config/ivllm/config.json` manually).
+

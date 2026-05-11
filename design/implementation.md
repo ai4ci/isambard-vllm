@@ -155,10 +155,10 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 ### F2.1 — Config changes
 
 - [x] Remove `venvPath` from `Config` interface in `src/config.ts` (path is now derived from `vllmVersion`)
-- [x] Keep `vllmVersion` in `Config` — it determines both the pip install version and the venv directory
-- [x] Update `DEFAULTS` and config read/write to remove `venvPath`
-- [x] Remove `--venv-path` flag from `ivllm config` command; keep `--vllm-version`
-- [x] Write failing tests confirming `venvPath` is absent and `vllmVersion` is present in config schema
+- [x] Remove `vllmVersion` from `Config` interface (see ADR-014 — version is now discovered at runtime)
+- [x] Update `DEFAULTS` and config read/write to remove both `venvPath` and `vllmVersion`
+- [x] Remove `--venv-path` and `--vllm-version` flags from `ivllm config` command
+- [x] Write failing tests confirming `venvPath` and `vllmVersion` are absent from config schema
 - [x] Confirm tests fail, implement, confirm pass
 
 ### F2.2 — Setup template
@@ -265,13 +265,52 @@ Live debugging of 2-node `tp=4, pp=2` run. Each fix is iterative — one issue r
 - [x] **Deprecated Ray env vars**: `VLLM_USE_RAY_COMPILED_DAG`, `VLLM_USE_RAY_SPMD_WORKER`, `VLLM_USE_RAY_SPMD_HEAD` removed in vLLM 0.19.1. Fixed: removed from multi-node template.
 - [x] **`cublasLt.h: No such file or directory`**: NVHPC stores math library headers in `math_libs/12.9/include/` not alongside CUDA SDK headers. Fixed: `CPATH=$NVHPC_ROOT/math_libs/12.9/include` added to `NVHPC_PREAMBLE`.
 - [x] **`fused_moe_90` compile blocks Ray keepalive**: 182 nvcc invocations take ~25 min; Ray gRPC keepalive timeout fires. Fixed: redirected flashinfer JIT cache to Lustre (`FLASHINFER_JIT_CACHE_DIR`); cache persists across jobs.
-- [x] **UV cache cross-filesystem copies**: UV cache on NFS home → venv on Lustre forces slow file copies. Fixed: `UV_CACHE_DIR=$PROJECTDIR/ivllm/uv_cache` on Lustre enables hard links.
+- [x] **UV cache cross-filesystem copies**: uv cache on NFS home → venv on Lustre forces slow file copies. Fixed: `UV_CACHE_DIR=$LOCALDIR/uv_cache` (per-user in-job scratch). This also prevents permission conflicts when a second project member runs setup (see ADR-013).
 - [x] **GDN prefill kernel NFS flock ESTALE**: `FLASHINFER_JIT_CACHE_DIR` not propagated to Ray actors by `ray_env.py`. Ray actors use default `~/.cache/flashinfer` (NFS) → `fcntl.flock` returns ESTALE → warmup fails → autotuner OOM kills actor → `Socket closed`. Fixed: symlink `~/.cache/flashinfer` → Lustre in preamble (see ADR-012).
 - [x] **`NCCL_CROSS_NIC` / `NCCL_FORCE_FLUSH`**: Added per Isambard AI distributed inference guide.
 
 ### Current status
 
 - [ ] 2-node `Qwen3.5-397B-A17B-FP8` run with all fixes applied — pending next test run
+
+
+## Phase F2.10 — Production hardening and multi-user support
+
+### HuggingFace 429 rate limit (HF_HUB_OFFLINE)
+
+- [x] `huggingface-hub` calls HF API to check cache freshness even when model is fully downloaded. On shared installations this triggers 429 rate-limit errors during job startup.
+- [x] Fix: added `export HF_HUB_OFFLINE=1` to both single-node and multi-node inference SLURM templates (after `HF_HOME`). Safe because `ivllm start` always downloads the model on LOGIN before submitting the job.
+- [x] TDD: wrote failing test; implemented; 246 tests passing (v0.2.19000)
+
+### Multi-user uv cache permissions (`$LOCALDIR`)
+
+- [x] First user creates `$PROJECTDIR/ivllm/uv_cache` with `drwxr-sr-x`; second user gets `Permission denied`.
+- [x] Fix: changed `UV_CACHE_DIR` from `$PROJECTDIR/ivllm/uv_cache` to `$LOCALDIR/uv_cache` (per-user in-job scratch, wiped at job end). See ADR-013.
+- [x] TDD: updated existing test; 246 tests passing (v0.2.20000)
+
+### Group-write on shared install directory
+
+- [x] `mkdir -p $PROJECTDIR/ivllm` creates the directory with user's umask (`drwxr-sr-x`). A second project member cannot create `ivllm/0.19.0/` inside it.
+- [x] Fix: added `chmod g+w $PROJECTDIR/ivllm` immediately after `mkdir -p` in setup template.
+- [x] TDD: added test; 247 tests passing (v0.2.21000)
+
+### Remove `vllmVersion` from config; discover installed versions at start time (ADR-014)
+
+- [x] `vllmVersion` removed from `Config` interface and defaults.
+- [x] Added `semverGte` and `semverSort` to `src/semver.ts`.
+- [x] Added `selectBestVersion(installed, min)` (exported for testing) and `listInstalledVersions` to `start.ts`; the latter SSHs `ls -d $PROJECTDIR/ivllm/*/bin` and parses version segments.
+- [x] `ivllm start` discovers installed versions, filters by `min-vllm-version`, picks the highest.
+- [x] `ivllm setup` takes vLLM version as positional arg (`ivllm setup 0.19.1`); errors if omitted.
+- [x] Removed `--vllm-version` from `ivllm config`; updated USAGE.
+- [x] TDD: new `tests/select-version.test.ts`; updated `tests/semver.test.ts`, `tests/config.test.ts`, `tests/remote-ops.test.ts`; 266 tests passing (v0.2.22000)
+
+### HuggingFace token stored in config
+
+- [x] `hfToken?: string` added to `Config` interface.
+- [x] `ivllm config --hf-token <token>` saves token to `~/.config/ivllm/config.json`.
+- [x] Setup SLURM script includes `export HF_TOKEN=<token>` when configured.
+- [x] `ivllm start` model download uses `config.hfToken`; falls back to `HF_TOKEN` env var.
+- [x] TDD: added tests in `tests/config.test.ts` and `tests/setup.test.ts`; 270 tests passing (v0.2.23000)
 
 
 ## Phase F2-alt — Singularity container support (on hold)

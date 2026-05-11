@@ -8,11 +8,14 @@
 
 ### Phase F2 — CUDA forward compatibility via NVIDIA HPC SDK
 See ADR-011.
-- [x] Remove `venvPath` from `~/.ivllm/config.yaml`; keep `vllmVersion` (determines versioned venv path)
-- [x] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create versioned venv at `$PROJECTDIR/ivllm/<version>/`, pip-install vLLM (cu129 wheels) with `gcc-native`
-- [x] Add optional `min-vllm-version` field to per-job `vllm.yaml`; `ivllm start` compares against `vllmVersion` config
-- [x] Update single-node and multi-node SLURM inference templates: prepend full HPC SDK preamble (`NVHPC_ROOT`, `CUDA_HOME`, `PATH`, `CPATH`, `LD_LIBRARY_PATH`, `CC`, `CXX`, flashinfer cache symlink) before venv activation and vLLM/Ray invocations
-- [x] Update `ivllm start` pre-flight: check `$PROJECTDIR/ivllm/<vllmVersion>` exists; enforce `min-vllm-version` if set
+- [x] Remove `venvPath` from `~/.ivllm/config.yaml`
+- [x] Remove `vllmVersion` from `~/.ivllm/config.yaml`; `ivllm setup` now takes version as positional arg; `ivllm start` discovers installed versions at runtime (see ADR-014)
+- [x] Rewrite `ivllm setup` SLURM template: download HPC SDK 26.3 to `$PROJECTDIR/ivllm/nvhpc/`, create versioned venv at `$PROJECTDIR/ivllm/<version>/`, pip-install vLLM (cu129 wheels) with `gcc-native`; `chmod g+w $PROJECTDIR/ivllm` for multi-user access (ADR-013)
+- [x] Add optional `min-vllm-version` field to per-job `vllm.yaml`; `ivllm start` discovers and selects best installed version satisfying the minimum
+- [x] Update single-node and multi-node SLURM inference templates: prepend full HPC SDK preamble (`NVHPC_ROOT`, `CUDA_HOME`, `PATH`, `CPATH`, `LD_LIBRARY_PATH`, `CC`, `CXX`, flashinfer cache symlink, `HF_HUB_OFFLINE=1`) before venv activation and vLLM/Ray invocations
+- [x] Store HuggingFace token in `~/.config/ivllm/config.json`; use in model download and setup script (ADR-007 update)
+- [x] `UV_CACHE_DIR=$LOCALDIR/uv_cache` to prevent multi-user permission conflicts (ADR-013)
+- [x] Update `ivllm start` pre-flight: discover installed versions; enforce `min-vllm-version` if set
 - [x] Dry-run verification: review generated SLURM scripts
 - [x] Single-node end-to-end test on Isambard AI (Qwen2.5-0.5B-Instruct — passing)
 

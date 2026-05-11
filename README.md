@@ -14,7 +14,7 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 brew install bun` on macOS with homebrew installed)
 - A working SSH connection to the Isambard AI login node, with credentials cached in an SSH agent (key-based auth, no interactive password prompts)
 - SLURM and `jq` available on the HPC
-- A HuggingFace account and access token (`HF_TOKEN`) for gated models
+- A HuggingFace account and access token for gated models (stored via `ivllm config --hf-token`)
 
 ---
 
@@ -40,7 +40,7 @@ ivllm config --login-host <login-node>   # e.g. XXXX.aip2.isambard
 ivllm config --username <hpc-username>   # e.g. YYYY.XXXX
 ivllm config --project-dir <path>        # HPC project dir, e.g. /projects/XXXX
 ivllm config --local-port <port>         # default: 11434
-ivllm config --vllm-version <version>    # default: 0.19.1
+ivllm config --hf-token <token>          # HuggingFace token for gated models
 ```
 
 Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no arguments to view current settings.
@@ -52,10 +52,10 @@ Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no 
 ### 1. Install vLLM on the HPC (one-off)
 
 ```bash
-ivllm setup
+ivllm setup 0.19.1
 ```
 
-This submits a SLURM job on a compute node to install the NVIDIA HPC SDK 26.3 (providing CUDA 13.1 forward compatibility) and vLLM into a shared versioned directory at `$PROJECT_DIR/ivllm/`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if the install already exists.
+This submits a SLURM job on a compute node to install the NVIDIA HPC SDK 26.3 (providing CUDA 12.9 forward compatibility) and the specified vLLM version into a shared versioned directory at `$PROJECT_DIR/ivllm/0.19.1/`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if that version is already installed. To install a different version run `ivllm setup <version>` again.
 
 ### 2. vLLM config file
 
@@ -202,14 +202,13 @@ Once installed, ask your AI agent: *"Generate a vllm.yaml config for `Qwen/Qwen2
 
 ## HuggingFace token
 
-For gated models, export your token before running `ivllm start`:
+For gated models, store your token in the ivllm config:
 
 ```bash
-export HF_TOKEN=hf_...
-ivllm start my-job --config vllm.yaml
+ivllm config --hf-token hf_...
 ```
 
-The token is forwarded to the login node only for the download step; it is not written to disk or embedded in any generated script.
+The token is saved to `~/.config/ivllm/config.json`. It is forwarded to the login node during the model download step and embedded in the setup SLURM script so the HPC can authenticate to HuggingFace. It is not stored in any shared or world-readable location. If not set, `ivllm` falls back to the `HF_TOKEN` environment variable.
 
 ---
 
