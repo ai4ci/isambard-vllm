@@ -7,6 +7,7 @@ import type { ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
 import { spawnTunnel } from "../ssh.ts";
 import { runRemote } from "../ssh.ts";
+const { version: ivllmVersion } = await import("../../package.json");
 import {
   submitJob,
   pollJobStatus,
@@ -232,7 +233,7 @@ export async function cmdStart(args: string[]): Promise<void> {
   process.on("SIGINT", () => shutdown("interrupted (Ctrl+C)"));
   process.on("SIGTERM", () => shutdown("terminated"));
 
-  console.log("=== ivllm start ===");
+  console.log(`=== ivllm start (v${ivllmVersion}) ===`);
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
   console.log(`Config     : ${configFile ? `${configFile}${usingStoredConfig ? " (stored)" : ""}` : "(N/A — mock mode)"}`);
