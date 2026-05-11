@@ -256,7 +256,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
 
     console.log("Checking venv...");
-    const venvDir = `${config.projectDir}/ivllm/${config.vllmVersion}`;
+    const venvDir = `${config.projectDir}/ivllm/${vllmVersion}`;
     const { exitCode: venvCheck } = await ops.runRemote(
       `test -f ${venvDir}/bin/activate`, { silent: true }
     );
