@@ -22,6 +22,15 @@ import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
 import { semverGte, semverSort } from "../semver.ts";
 import { formatOpencodeSnippet } from "../opencode.ts";
+import {
+  getAvailableAssistants,
+  getScoderAvailable,
+  buildAssistantMenuOptions,
+  getLaunchCommand,
+  generateOpencodeConfig,
+  generateCopilotEnv,
+  generateClaudeEnv,
+} from "../assistant.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -459,6 +468,149 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
   }
 
+  interface AssistantMenuOptions {
+    model: string;
+    localPort: number;
+    maxModelLen?: number;
+    toolCall?: boolean;
+    reasoning?: boolean;
+    shutdown: (reason: string, code?: number) => void;
+  }
+
+  async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
+    const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
+    const cwd = process.cwd();
+    
+    console.log(`\n🤖 AI coding assistant launcher (in: ${cwd})`);
+    
+    const available = getAvailableAssistants();
+    const hasScoder = getScoderAvailable();
+    
+    if (available.length === 0) {
+      console.log("\nNo AI coding assistant detected on PATH.");
+      console.log("Showing opencode.ai config snippet instead:");
+      console.log(formatOpencodeSnippet({
+        model,
+        localPort,
+        maxModelLen,
+        toolCall,
+        reasoning,
+      }));
+      return;
+    }
+
+    const options = buildAssistantMenuOptions(available, hasScoder);
+
+    let running = true;
+    while (running) {
+      console.log(`\n📍 Launching in: ${cwd}`);
+      console.log("Choose an assistant (or 0 to exit):\n");
+      
+      for (const opt of options) {
+        console.log(`  [${opt.id}) ${opt.label}`);
+      }
+      console.log(`  [0] skip (show config snippet)\n`);
+
+      const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+      
+      const choice = await new Promise<string>((resolve) => {
+        rl.question("Selection: ", (answer) => {
+          resolve(answer.trim());
+          rl.close();
+        });
+      });
+
+      const choiceNum = parseInt(choice, 10);
+      
+      if (choiceNum === 0) {
+        // Show config snippet and return to menu
+        console.log("\n📋 opencode.ai config:");
+        console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
+        console.log("\n(Returning to menu...)\n");
+        continue;
+      }
+
+      const selected = options.find(o => o.id === choiceNum);
+      if (!selected) {
+        console.log(`Invalid selection: ${choice}. Please try again.\n`);
+        continue;
+      }
+
+      console.log(`\n🚀 Launching ${selected.label}...`);
+      
+      // Generate and save config for the selected assistant
+      if (selected.assistant === "opencode") {
+        // Write opencode.json config
+        const opencodeConfig = generateOpencodeConfig({ model, localPort, maxModelLen, toolCall, reasoning });
+        const configPath = join(cwd, "opencode.json");
+        try {
+          writeFileSync(configPath, JSON.stringify(opencodeConfig, null, 2), "utf-8");
+          console.log(`✅ Wrote opencode config to: ${configPath}`);
+        } catch (e) {
+          console.log(`⚠️  Failed to write config: ${(e as Error).message}`);
+        }
+      }
+
+      // Generate env vars for the assistant
+      let env: Record<string, string> = {};
+      if (selected.assistant === "copilot" || selected.assistant === "claude") {
+        // For copilot, use copilot env (includes ANTHROPIC_BASE_URL etc.)
+        // For claude, use claude env
+        const isCopilot = selected.assistant === "copilot";
+        env = isCopilot ? generateCopilotEnv(localPort, model) : generateClaudeEnv(localPort, model);
+      } else if (selected.assistant === "opencode") {
+        // opencode uses file-based config, no env vars needed
+        env = {};
+      }
+
+      // Get launch command
+      const launchCmd = getLaunchCommand(selected.assistant, selected.useScoder);
+      const cmd = launchCmd.binary;
+      const args = selected.useScoder 
+        ? ["--llm-port", String(localPort), selected.assistant]
+        : launchCmd.args;
+
+      console.log(`Running: ${cmd} ${args.join(" ")}`);
+      console.log(`With env: ${Object.keys(env).length > 0 ? Object.keys(env).join(", ") + "=<hidden>" : "none"}`);
+
+      // Launch assistant in new tmux window
+      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}'`;
+      
+      try {
+        const result = await runRemote(config, `bash -c "${tmuxCmd}"`, { silent: true });
+        if (result.exitCode !== 0) {
+          // Try local tmux if remote fails
+          try {
+            const localResult = await import("child_process").then(cp => 
+              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, cmd, ...args], { 
+                env: { ...process.env, ...env },
+                stdio: "inherit"
+              })
+            );
+            if (localResult.status !== 0) {
+              console.log(`⚠️  Failed to launch ${selected.assistant} via tmux. Try running manually.`);
+            }
+          } catch (e) {
+            console.log(`⚠️  Failed to launch ${selected.assistant}. Error: ${(e as Error).message}`);
+          }
+        }
+      } catch (e) {
+        console.log(`⚠️  Failed to launch ${selected.assistant}. Error: ${(e as Error).message}`);
+      }
+
+      console.log(`\n✅ ${selected.assistant} launched. Return to menu when done.\n`);
+      
+      // Wait for user to press Enter to return to menu
+      const rl2 = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+      await new Promise<void>((resolve) => {
+        rl2.question("Press Enter to return to menu...", () => {
+          rl2.close();
+          resolve();
+        });
+      });
+    }
+  }
+
   async function onRunning(details: JobDetails): Promise<void> {
     const computeHost = details.compute_hostname!;
 
@@ -476,16 +628,26 @@ export async function cmdStart(args: string[]): Promise<void> {
     console.log(`\n🚀 OpenAI API endpoint: http://localhost:${localPort}/v1`);
     console.log(`   Model: ${details.model ?? model}`);
 
-    console.log("\n📋 opencode.ai config snippet (add to opencode.json):");
-    console.log(formatOpencodeSnippet({
-      model: details.model ?? model,
-      localPort,
-      maxModelLen,
-      toolCall: enableAutoToolChoice,
-      reasoning: enableReasoning,
-    }));
-
-    console.log("\nType 'exit' + Enter to stop, or press Ctrl+C\n");
+    if (startArgs.noLaunch) {
+      console.log("\n📋 opencode.ai config snippet (add to opencode.json):");
+      console.log(formatOpencodeSnippet({
+        model: details.model ?? model,
+        localPort,
+        maxModelLen,
+        toolCall: enableAutoToolChoice,
+        reasoning: enableReasoning,
+      }));
+      console.log("\nType 'exit' + Enter to stop, or press Ctrl+C\n");
+    } else {
+      await launchAssistantMenu({
+        model: details.model ?? model,
+        localPort,
+        maxModelLen,
+        toolCall: enableAutoToolChoice,
+        reasoning: enableReasoning,
+        shutdown,
+      });
+    }
 
     // Re-register "exit" handler on the same readline interface for the running phase
     const rl2 = createInterface({ input: process.stdin, terminal: false });

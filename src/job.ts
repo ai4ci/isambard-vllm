@@ -20,6 +20,7 @@ export interface StartArgs {
   serverPort: number;
   mock: boolean;
   dryRun: boolean;
+  noLaunch: boolean;    // skip assistant launch even in non-dryRun mode
 }
 
 export function parseJobDetails(raw: string): JobDetails | null {
@@ -63,6 +64,7 @@ export function parseStartArgs(args: string[]): StartArgs {
 
   const mock = boolFlags.has("mock");
   const dryRun = boolFlags.has("dry-run");
+  const noLaunch = boolFlags.has("no-launch");
 
   if (mock && !flags["model"]) throw new Error("--model <model> is required in mock mode");
 
@@ -78,5 +80,6 @@ export function parseStartArgs(args: string[]): StartArgs {
     serverPort: flags["server-port"] ? parseInt(flags["server-port"], 10) : 8000,
     mock,
     dryRun,
+    noLaunch,
   };
 }

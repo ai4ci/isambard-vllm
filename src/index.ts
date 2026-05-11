@@ -23,6 +23,11 @@ Options:
   --version, -v           Show version
 
 Run 'ivllm <command> --help' for command-specific options.
+
+For command-specific help, run:
+  ivllm start --help      Start options (including --no-launch)
+  ivllm setup --help      Setup options
+  ivllm config --help     Config options
 `.trim();
 
 switch (command) {
