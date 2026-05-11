@@ -7,7 +7,6 @@ export interface Config {
   username: string;
   projectDir: string;
   defaultLocalPort: number;
-  vllmVersion: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".config", "ivllm");
@@ -18,7 +17,6 @@ const DEFAULTS: Config = {
   username: "",
   projectDir: "$PROJECTDIR",
   defaultLocalPort: 11434,
-  vllmVersion: "0.19.1",
 };
 
 export function loadConfig(): Config {

@@ -19,13 +19,35 @@ import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
-import { semverLt } from "../semver.ts";
+import { semverGte, semverSort } from "../semver.ts";
 import { formatOpencodeSnippet } from "../opencode.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
 // Isambard policy: do not poll Slurm scheduler (squeue/sacct) more than once per minute
 const SLURM_POLL_INTERVAL_MS = 60_000;
+
+/**
+ * Given a list of installed vLLM versions and a minimum required version,
+ * returns the highest installed version that satisfies the minimum, or null if none do.
+ */
+export function selectBestVersion(installed: string[], minVersion: string): string | null {
+  const candidates = installed.filter(v => semverGte(v, minVersion));
+  if (candidates.length === 0) return null;
+  return semverSort(candidates)[0]!;
+}
+
+/**
+ * Lists installed vLLM versions by scanning $PROJECTDIR/ivllm/ for versioned venv directories.
+ * Returns versions that have a bin/ directory (i.e. are complete installs).
+ */
+async function listInstalledVersions(config: import("../config.ts").Config, ops: ReturnType<typeof makeRemoteOps>): Promise<string[]> {
+  const { stdout } = await ops.runRemote(
+    `ls -d ${config.projectDir}/ivllm/*/bin 2>/dev/null | sed 's|.*/ivllm/||; s|/bin||'`,
+    { silent: true }
+  );
+  return stdout.trim().split("\n").filter(v => v && /^\d+\.\d+/.test(v));
+}
 
 export async function cmdStart(args: string[]): Promise<void> {
   const config = loadConfig();
@@ -45,6 +67,14 @@ export async function cmdStart(args: string[]): Promise<void> {
   let configFile = startArgs.configFile;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
   const hfHome = `${config.projectDir}/hf`;
+
+  const remoteWorkDir = `$HOME/${jobName}`;
+  const remoteWorkDirScp = `~/${jobName}`;
+  const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
+
+  // Set up dry-run temp dir and RemoteOps (needed before version discovery)
+  const dryRunDir = startArgs.dryRun ? mkdtempSync(join(tmpdir(), "ivllm-dryrun-")) : undefined;
+  const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
 
   // Resolve config file: if --config provided, save to job store; if omitted, load from store.
   let usingStoredConfig = false;
@@ -67,18 +97,21 @@ export async function cmdStart(args: string[]): Promise<void> {
     }
   }
 
-  // Resolve model and gpuCount: for real mode, read from the vLLM config YAML.
-  // For mock mode, model comes from --model CLI flag.
+  // Resolve model, gpuCount, and vllmVersion:
+  // - real mode: read from the vLLM config YAML and discover installed versions on remote
+  // - mock mode: model comes from --model CLI flag; no remote version check
   let model: string;
   let gpuCount: number;
   let nodeCount: number;
   let maxModelLen: number | undefined;
   let enableAutoToolChoice: boolean | undefined;
   let enableReasoning: boolean | undefined;
+  let vllmVersion: string;
   if (startArgs.mock) {
     model = startArgs.model!;
     gpuCount = startArgs.gpuCount ?? 1;
     nodeCount = 1;
+    vllmVersion = "mock";
   } else {
     let yamlConfig;
     try {
@@ -99,25 +132,29 @@ export async function cmdStart(args: string[]): Promise<void> {
     enableAutoToolChoice = yamlConfig.enableAutoToolChoice;
     enableReasoning = yamlConfig.enableReasoning;
 
-    // F2.5: enforce min-vllm-version from config
-    if (yamlConfig.minVllmVersion) {
-      if (semverLt(config.vllmVersion, yamlConfig.minVllmVersion)) {
-        console.error(
-          `Error: config requires vLLM >= ${yamlConfig.minVllmVersion} but ivllm is configured to use ${config.vllmVersion}.\n` +
-          `  Update 'vllm-version' in your ivllm config or use 'ivllm config --vllm-version <version>'.`
-        );
+    // Resolve which installed vLLM version to use based on min-vllm-version from the model config.
+    // Scan the remote for installed versioned venvs and pick the highest that satisfies the minimum.
+    const minVersion = yamlConfig.minVllmVersion;
+    const installed = await listInstalledVersions(config, ops);
+    if (installed.length === 0) {
+      console.error(`Error: No vLLM installation found at ${config.projectDir}/ivllm/.`);
+      console.error(minVersion
+        ? `  Run: ivllm setup ${minVersion}`
+        : `  Run: ivllm setup <version>`);
+      process.exit(1);
+    }
+    if (minVersion) {
+      const best = selectBestVersion(installed, minVersion);
+      if (!best) {
+        console.error(`Error: config requires vLLM >= ${minVersion} but installed versions are: ${installed.join(", ")}`);
+        console.error(`  Run: ivllm setup ${minVersion}`);
         process.exit(1);
       }
+      vllmVersion = best;
+    } else {
+      vllmVersion = semverSort(installed)[0]!;
     }
   }
-
-  const remoteWorkDir = `$HOME/${jobName}`;     // for SSH commands (remote shell expands $HOME)
-  const remoteWorkDirScp = `~/${jobName}`;      // for scp destinations (~ is reliably expanded by scp/sftp; $HOME is not)
-  const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
-
-  // Set up dry-run temp dir and RemoteOps
-  const dryRunDir = startArgs.dryRun ? mkdtempSync(join(tmpdir(), "ivllm-dryrun-")) : undefined;
-  const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
 
   // Session state for shutdown sequence
   let shuttingDown = false;

@@ -12,14 +12,20 @@ const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler
 const REMOTE_SCRIPT_PATH = "~/.config/ivllm/setup.slurm.sh";
 const REMOTE_LOG_PATH = "~/.config/ivllm/setup.log";
 
-export async function cmdSetup(_args: string[]): Promise<void> {
+export async function cmdSetup(args: string[]): Promise<void> {
+  const vllmVersion = args[0];
+  if (!vllmVersion || vllmVersion.startsWith("--")) {
+    console.error("Error: vLLM version is required.");
+    console.error("Usage: ivllm setup <version>  (e.g. ivllm setup 0.19.1)");
+    process.exit(1);
+  }
   const config = loadConfig();
   try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
 
   console.log("=== ivllm setup ===");
   console.log(`Login node  : ${config.loginHost}`);
-  console.log(`vLLM        : ${config.vllmVersion}`);
-  console.log(`Install dir : ${config.projectDir}/ivllm/${config.vllmVersion}`);
+  console.log(`vLLM        : ${vllmVersion}`);
+  console.log(`Install dir : ${config.projectDir}/ivllm/${vllmVersion}`);
   console.log("");
 
   // Pre-flight: check SSH connectivity
@@ -32,22 +38,20 @@ export async function cmdSetup(_args: string[]): Promise<void> {
   console.log("✓ SSH connectivity OK");
 
   // Check if versioned venv already exists
-  const venvDir = `${config.projectDir}/ivllm/${config.vllmVersion}`;
+  const venvDir = `${config.projectDir}/ivllm/${vllmVersion}`;
   const { exitCode: venvCheck } = await runRemote(
     config,
     `test -d ${venvDir}/bin`,
     { silent: true }
   );
   if (venvCheck === 0) {
-    console.log(`✓ vLLM ${config.vllmVersion} already installed at ${venvDir}`);
+    console.log(`✓ vLLM ${vllmVersion} already installed at ${venvDir}`);
     console.log("  Delete the directory first to reinstall.");
     return;
   }
 
   // Render and copy setup script to LOGIN
-  const script = renderSetupScript({
-    vllmVersion: config.vllmVersion,
-  });
+  const script = renderSetupScript({ vllmVersion });
 
   const localTmp = join(tmpdir(), "ivllm-setup.slurm.sh");
   writeFileSync(localTmp, script, "utf-8");
@@ -119,7 +123,7 @@ export async function cmdSetup(_args: string[]): Promise<void> {
       process.exit(1);
     }
 
-    console.log(`✓ vLLM ${config.vllmVersion} installation complete`);
+    console.log(`✓ vLLM ${vllmVersion} installation complete`);
     const versionLine = log.split("\n").find(l => l.startsWith("vllm"));
     if (versionLine) console.log(`  ${versionLine}`);
   } finally {

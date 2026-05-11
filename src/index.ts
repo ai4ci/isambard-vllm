@@ -13,7 +13,7 @@ const USAGE = `
 Usage: ivllm <command> [options]
 
 Commands:
-  setup                   Install vLLM on the HPC (one-off)
+  setup <version>         Install vLLM <version> on the HPC (one-off, e.g. ivllm setup 0.19.1)
   start <job>             Start an inference session and monitor it
   status [job]            Show status of a job (or all jobs)
   stop <job>              Stop a job and clean up (recovery)
@@ -65,7 +65,6 @@ async function cmdConfig(args: string[]): Promise<void> {
   if (flags["username"]) config.username = flags["username"]!;
   if (flags["project-dir"]) config.projectDir = flags["project-dir"]!;
   if (flags["default-local-port"]) config.defaultLocalPort = parseInt(flags["default-local-port"]!, 10);
-  if (flags["vllm-version"]) config.vllmVersion = flags["vllm-version"]!;
   saveConfig(config);
   console.log("Configuration saved.");
 }

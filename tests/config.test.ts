@@ -22,8 +22,8 @@ describe("Config", () => {
   it("loadConfig returns defaults when no config file exists", () => {
     const config = loadConfig();
     expect(config.defaultLocalPort).toBe(11434);
-    expect(config.vllmVersion).toBe("0.19.1");
     expect(config.loginHost).toBe("");
+    expect((config as Record<string, unknown>)["vllmVersion"]).toBeUndefined();
     expect((config as Record<string, unknown>)["venvPath"]).toBeUndefined();
   });
 
