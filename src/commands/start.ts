@@ -475,11 +475,12 @@ export async function cmdStart(args: string[]): Promise<void> {
     toolCall?: boolean;
     reasoning?: boolean;
     shutdown: (reason: string, code?: number) => void;
+    _showSnippet?: boolean;  // internal state for menu exit flow
   }
 
   async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
     const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
-    const cwd = process.cwd();
+    let cwd = process.cwd();
     
     console.log(`\n🤖 AI coding assistant launcher (in: ${cwd})`);
     
@@ -509,7 +510,9 @@ export async function cmdStart(args: string[]): Promise<void> {
       for (const opt of options) {
         console.log(`  [${opt.id}) ${opt.label}`);
       }
-      console.log(`  [0] skip (show config snippet)\n`);
+      console.log(`  [0] skip (show config snippet)`);
+      console.log(`  [-] change directory`);
+      console.log(`  [0] exit\n`);
 
       const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
       
@@ -522,11 +525,42 @@ export async function cmdStart(args: string[]): Promise<void> {
 
       const choiceNum = parseInt(choice, 10);
       
+      if (choiceNum === -1) {
+        // Change directory
+        console.log("\nCurrent directory:", cwd);
+        const rlCd = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+        const newDir = await new Promise<string>((resolve) => {
+          rlCd.question("Enter directory path (or press Enter to keep current): ", (answer) => {
+            resolve(answer.trim());
+            rlCd.close();
+          });
+        });
+        
+        if (newDir) {
+          const resolved = require("path").resolve(newDir);
+          const { existsSync } = require("fs");
+          if (existsSync(resolved)) {
+            cwd = resolved;
+            console.log(`✅ Changed directory to: ${cwd}\n`);
+          } else {
+            console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
+          }
+        }
+        continue;
+      }
+      
       if (choiceNum === 0) {
-        // Show config snippet and return to menu
+        // Exit or show config snippet (0 pressed twice: first shows snippet, second exits)
+        if (opts._showSnippet) {
+          console.log("\nGoodbye.\n");
+          running = false;
+          continue;
+        }
+        // First 0: show snippet and remember
+        opts._showSnippet = true;
         console.log("\n📋 opencode.ai config:");
         console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
-        console.log("\n(Returning to menu...)\n");
+        console.log("\nPress 0 again to exit, or -1 to change directory.\n");
         continue;
       }
 
@@ -573,8 +607,9 @@ export async function cmdStart(args: string[]): Promise<void> {
       console.log(`Running: ${cmd} ${args.join(" ")}`);
       console.log(`With env: ${Object.keys(env).length > 0 ? Object.keys(env).join(", ") + "=<hidden>" : "none"}`);
 
-      // Launch assistant in new tmux window
-      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}'`;
+      // Launch assistant in new tmux window, cd to cwd first
+      const launchScript = `cd '${cwd}' && ${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
+      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${launchScript}'`;
       
       try {
         const result = await runRemote(config, `bash -c "${tmuxCmd}"`, { silent: true });
@@ -582,7 +617,7 @@ export async function cmdStart(args: string[]): Promise<void> {
           // Try local tmux if remote fails
           try {
             const localResult = await import("child_process").then(cp => 
-              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, cmd, ...args], { 
+              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, "bash", "-c", launchScript], { 
                 env: { ...process.env, ...env },
                 stdio: "inherit"
               })
