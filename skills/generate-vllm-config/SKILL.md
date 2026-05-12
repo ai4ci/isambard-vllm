@@ -52,7 +52,7 @@ If the model card is not accessible or the parameter count cannot be determined,
 
 ### 3. Look up the official vLLM recipe (if available)
 
-vLLM recipes can be queried using the huggingface model-id and hardware. Isambard AI;s GH200 fals between H100 and H200 in terms of specifications:
+vLLM recipes can be queried using the huggingface model-id and hardware. Isambard AI's GH200 fals between H100 and H200 in terms of specifications:
 
 e.g.:
 
@@ -60,6 +60,7 @@ e.g.:
 `https://recipes.vllm.ai/<model-id>?hardware=h200`
 
 Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100).
+Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVIDIA NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB is usable for each CPU), and 384 GB of GPU memory. In total, there is 844 GB of CPU + GPU memory per node.
 
 If a recipe exists:
 - Note the minimum vLLM version that supports the model
@@ -107,20 +108,12 @@ Use `--cpu-offload-gb` if:
 model: meta-llama/Llama-3.1-70B
 tensor-parallel-size: 1               # 70B @ bf16 ≈ 140 GB; exceeds single 96GB GPU
 # On single GPU with offload:
-#   cpu-offload-gb: 50                  # reserves 50 GB CPU memory (passed as CLI arg)
-#   gpu-memory-utilization: 0.90        # uses ~86 GB GPU (140-50 = 90 GB, close to limit)
-```
-
-**Important:** `--cpu-offload-gb` is a vLLM serve CLI argument, not a YAML config key. The agent should note this when generating the config:
-
-```yaml
-# Note: --cpu-offload-gb <n> is passed as a CLI argument to vllm serve,
-# not as a YAML key. Report this to the user.
-# min-vllm-version: "0.6.0"             # if using offload
+cpu-offload-gb: 50                  # reserves 50 GB CPU memory (passed as CLI arg)
+gpu-memory-utilization: 0.90        # uses ~86 GB GPU (140-50 = 90 GB, close to limit)
 ```
 
 When reporting to the user, include:
-- "CPU offload: --cpu-offload-gb <N> (CLI arg, not in YAML)"
+- "CPU offload: cpu-offload-gb <N>"
 - "Requires fast CPU-GPU interconnect (NVLink-C2C on GH200)"
 - "Minimum vLLM version: 0.6.0+"
 
@@ -205,7 +198,7 @@ For MoE models, all expert weights must reside in GPU memory simultaneously even
 
 **Key facts from NVIDIA's GH200 unified memory research:**
 - NVLink-C2C connects CPU and GPU at 900 GB/s — 7× PCIe Gen 5 bandwidth, memory-coherent
-- Creates a single unified memory address space: CPU (480 GB) + GPU (96 GB) share one page table
+- Creates a single unified memory address space: CPU (120 GB) + GPU (96 GB) share one page table and 4x superchips per node
 - `--cpu-offload-gb` uses UVA (Unified Virtual Addressing) for zero-copy access — weights are loaded from CPU memory to GPU memory on-the-fly during each forward pass
 - The offload parameter is "virtual GPU memory" — e.g., 24 GB GPU + 10 GB offload = 34 GB virtual capacity
 - Requires fast CPU-GPU interconnect (NVLink-C2C on GH200 makes this practical)
@@ -227,7 +220,6 @@ For MoE models, all expert weights must reside in GPU memory simultaneously even
 **When NOT to suggest:**
 - Multi-node is appropriate (better throughput)
 - fp8 quantization solves the problem
-- Offload backend not available (vLLM ≥ 0.6.0)
 
 **Note:** `--cpu-offload-gb` maps to `cpu-offload-gb` in YAML config — all vLLM CLI arguments work as YAML keys (with `--` stripped).
 
