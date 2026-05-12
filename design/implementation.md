@@ -229,7 +229,7 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
 
 - [x] `src/assistant.ts`: assistant detection, config generation, menu building, launch commands
   - [x] `binaryExists(name)` — checks PATH via `which`
-  - [x] `getAvailableAssistants()` — returns `["opencode", "claude", "code"]` filtered by PATH
+  - [x] `getAvailableAssistants()` — returns assistant binaries filtered by PATH
   - [x] `getScoderAvailable()` — checks for `robchallen/scoder` on PATH
   - [x] `generateOpencodeConfig(opts)` — generates `opencode.json` structure with provider config, model entries, context/output limits
   - [x] `generateCopilotEnv(port, model)` — `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
@@ -237,10 +237,36 @@ Path layout (derived from `vllmVersion` config, not separately configurable):
   - [x] `buildAssistantMenuOptions(assistants, hasScoder)` — interleaves direct + scoder options
   - [x] `getLaunchCommand(assistant, useScoder)` — returns `{binary, args}` for tmux launch
 - [x] `launchAssistantMenu()` in `src/commands/start.ts` — interactive menu loop with cwd display, change-dir `[-1]`, exit `0`
-- [x] Config written to project cwd (project overrides global in opencode precedence chain)
+- [x] Runtime config generated for assistant launch
 - [x] Launched in remote tmux window with `cd <cwd>` preamble, fallback to local tmux
 - [x] `--no-launch` flag in CLI and `--mock` flag preserved for testing without GPU
 - [x] 56 tests across 5 files: assistant (24), launch-assistant (12), assistant-menu (14), f26-integration (6), f26-menu (14)
+
+### F2.6b — Launcher wrapper UX and sbx support
+
+- [x] Write failing tests for wrapper-aware launch planning in `tests/assistant.test.ts` and `tests/launch-assistant.test.ts`:
+  - [x] direct launch command renders shell-ready env exports + assistant binary
+  - [x] scoder launch command renders `scoder --llm-port <port> <assistant>`
+  - [x] sbx launch command renders `sbx exec -it -w <cwd> -e ... <sandbox> <agent>`
+  - [x] OpenCode uses `OPENCODE_CONFIG_CONTENT` in all wrappers
+  - [x] sandbox name is derived from agent + workspace basename when no existing sandbox is found
+- [x] Refactor `src/assistant.ts` into wrapper-aware planning helpers:
+  - [x] assistant types (`opencode`, `claude`, `copilot`)
+  - [x] wrapper types (`none`, `scoder`, `sbx`)
+  - [x] `generateAssistantEnv(assistant, opts)` shared entry point
+  - [x] command planning helpers for display/launch plus sandbox naming and creation commands
+- [x] Replace the flat launch menu in `src/commands/start.ts` with the 3-layer flow:
+  - [x] layer 1 target menu
+  - [x] layer 2 wrapper menu
+  - [x] layer 3 action menu (`launch now`, `show command`, `back`)
+- [x] Show the copy-paste command before auto-launch and allow “show command only” without starting the agent
+- [x] Add sbx-specific helpers:
+  - [x] detect `sbx` on PATH
+  - [x] list existing sandboxes (`sbx ls --json`) and resolve by agent + workspace
+  - [x] create a sandbox with `sbx create --name <agent>-<basename> <agent> <cwd>` when missing
+- [x] Use `host.docker.internal:<port>` only for the `sbx` wrapper; preserve `localhost:<port>` for direct/scoder launches
+- [x] Fail clearly when sbx launch prerequisites are missing (for example command not found or sandbox creation failure), but do not attempt to edit `sbx policy`
+- [x] Confirm focused assistant tests pass, then run the full suite
 
 ### F2.7 — Dry-run verification
 

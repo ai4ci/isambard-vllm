@@ -29,13 +29,26 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured.
 
 - [x] `src/assistant.ts`: utilities for assistant detection (`binaryExists`, `getAvailableAssistants`, `getScoderAvailable`), config generation (`generateOpencodeConfig`, `generateCopilotEnv`, `generateClaudeEnv`), menu building (`buildAssistantMenuOptions`), launch command generation (`getLaunchCommand`)
-- [x] `launchAssistantMenu()` in `src/commands/start.ts`: interactive menu loop — displays cwd, detects available assistants (opencode, claude, code), shows numbered options with scoder alternatives, writes opencode.json for opencode, sets env vars for copilot/claude, launches in new tmux window, loops back on exit
+- [x] `launchAssistantMenu()` in `src/commands/start.ts`: initial interactive menu loop — displays cwd, detects available assistants, offers direct/scoder launch options, configures assistant env, launches in new tmux window, loops back on exit
 - [x] Change directory option `[-1]` — prompts for path, validates existence, updates cwd for all subsequent launches
 - [x] `--no-launch` flag — suppresses auto-launch, shows config snippet only
 - [x] Exit flow: `0` pressed once shows snippet, pressed again exits cleanly
 - [x] Scoder integration: `--llm-port <port>` flag opens localhost in sandbox; env vars passed through; scoder autodetects port 11434 but port is always specified explicitly
 - [x] Fallback: if remote tmux fails, falls back to local tmux
 - [x] 56 unit tests across 5 test files (assistant.test.ts, launch-assistant.test.ts, assistant-menu.test.ts, f26-integration.test.ts, f26-menu.test.ts)
+
+### Phase F2.6b — Launcher wrapper UX and sbx support
+
+- [x] Replace the flattened assistant menu with a 3-layer flow:
+  1. target (`change directory` / `OpenCode` / `Copilot` / `Claude` / `shutdown ivllm`)
+  2. wrapper (`none` / `scoder` / `sbx` / `back`)
+  3. action (`launch now` / `show command` / `back`)
+- [x] Always render a shell-ready copy-paste command, including environment variables, for every wrapper mode
+- [x] Keep OpenCode on `OPENCODE_CONFIG_CONTENT` runtime overrides instead of writing `opencode.json`
+- [x] Add `sbx` wrapper support using `sbx exec -it -w <cwd> -e ... <sandbox> <agent>`
+- [x] Resolve sandboxes by agent + workspace, creating them with `sbx create --name <agent>-<basename>` when absent
+- [x] Treat `sbx policy allow network localhost:<port>` as a documented user prerequisite; do not mutate sandbox policy automatically
+- [x] Preserve direct launch and scoder auto-launch behaviour after command display
 
 ### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
 - `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`

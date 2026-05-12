@@ -3,8 +3,8 @@
  * Detects available assistants, generates config/env vars for each.
  */
 
-import { existsSync } from "fs";
 import { spawnSync } from "child_process";
+import { basename } from "path";
 
 export interface AssistantConfig {
   name: string;
@@ -18,6 +18,45 @@ export interface AssistantOption {
   assistant: string;
   useScoder: boolean;
 }
+
+export interface OpencodeConfigOptions {
+  model: string;
+  localPort: number;
+  maxModelLen?: number;
+  toolCall?: boolean;
+  reasoning?: boolean;
+  endpointHost?: string;
+}
+
+export type AssistantName = "opencode" | "claude" | "copilot";
+export type LaunchWrapper = "none" | "scoder" | "sbx";
+
+export interface AssistantDefinition {
+  name: AssistantName;
+  label: string;
+}
+
+export interface AssistantEnvOptions extends OpencodeConfigOptions {}
+
+export interface LaunchCommandOptions extends AssistantEnvOptions {
+  assistant: AssistantName;
+  wrapper: LaunchWrapper;
+  cwd: string;
+  sandboxName?: string;
+}
+
+export interface SbxSandbox {
+  name: string;
+  agent: string;
+  workspace: string;
+  status?: string;
+}
+
+export const ASSISTANTS: AssistantDefinition[] = [
+  { name: "opencode", label: "OpenCode" },
+  { name: "copilot", label: "GitHub Copilot" },
+  { name: "claude", label: "Claude Code" },
+];
 
 /**
  * Check if a binary exists on PATH.
@@ -34,7 +73,7 @@ export function binaryExists(name: string): boolean {
  * Get the list of assistant binaries available on PATH.
  */
 export function getAvailableAssistants(): string[] {
-  const candidates = ["opencode", "claude", "code"];
+  const candidates = ["opencode", "claude", "copilot"];
   return candidates.filter(binaryExists);
 }
 
@@ -46,18 +85,38 @@ export function getScoderAvailable(): boolean {
 }
 
 /**
- * Generate environment variables for opencode.json configuration.
+ * Check if sbx is available on PATH.
  */
-export function generateOpencodeConfig(
-  opts: {
-    model: string;
-    localPort: number;
-    maxModelLen?: number;
-    toolCall?: boolean;
-    reasoning?: boolean;
-  }
-): Record<string, unknown> {
+export function getSbxAvailable(): boolean {
+  return binaryExists("sbx");
+}
+
+export function getAssistantLabel(assistant: AssistantName): string {
+  return ASSISTANTS.find((item) => item.name === assistant)?.label ?? assistant;
+}
+
+export function getAvailableWrappers(
+  assistant: AssistantName,
+  availableAssistants: string[],
+  hasScoder: boolean,
+  hasSbx: boolean
+): LaunchWrapper[] {
+  const wrappers: LaunchWrapper[] = [];
+  const hasLocalAssistant = availableAssistants.includes(assistant);
+
+  if (hasLocalAssistant) wrappers.push("none");
+  if (hasLocalAssistant && hasScoder) wrappers.push("scoder");
+  if (hasSbx) wrappers.push("sbx");
+
+  return wrappers;
+}
+
+/**
+ * Generate OpenCode config content for ivllm launches.
+ */
+export function generateOpencodeConfig(opts: OpencodeConfigOptions): Record<string, unknown> {
   const context = opts.maxModelLen ?? 4096;
+  const endpointHost = opts.endpointHost ?? "localhost";
 
   const modelEntry: Record<string, unknown> = {
     name: `${opts.model} (Isambard)`,
@@ -73,7 +132,7 @@ export function generateOpencodeConfig(
         npm: "@ai-sdk/openai-compatible",
         name: "Isambard vLLM Server",
         options: {
-          baseURL: `http://localhost:${opts.localPort}/v1`,
+          baseURL: `http://${endpointHost}:${opts.localPort}/v1`,
           apiKey: "EMPTY",
         },
         models: {
@@ -81,6 +140,15 @@ export function generateOpencodeConfig(
         },
       },
     },
+  };
+}
+
+/**
+ * Generate runtime environment overrides for OpenCode.
+ */
+export function generateOpencodeEnv(opts: OpencodeConfigOptions): Record<string, string> {
+  return {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(generateOpencodeConfig(opts)),
   };
 }
 
@@ -106,6 +174,130 @@ export function generateClaudeEnv(localPort: number, model: string): Record<stri
     ANTHROPIC_API_KEY: "ollama",
     CLAUDE_MODEL: `meta-llama/${model}:free`,
   };
+}
+
+export function generateAssistantEnv(
+  assistant: AssistantName,
+  opts: AssistantEnvOptions
+): Record<string, string> {
+  const endpointHost = opts.endpointHost ?? "localhost";
+
+  switch (assistant) {
+    case "opencode":
+      return generateOpencodeEnv({ ...opts, endpointHost });
+    case "copilot":
+      return {
+        ...generateCopilotEnv(opts.localPort, opts.model),
+        COPILOT_PROVIDER_BASE_URL: `http://${endpointHost}:${opts.localPort}`,
+      };
+    case "claude":
+      return {
+        ...generateClaudeEnv(opts.localPort, opts.model),
+        ANTHROPIC_BASE_URL: `http://${endpointHost}:${opts.localPort}`,
+      };
+  }
+}
+
+export function buildSandboxName(assistant: AssistantName, cwd: string): string {
+  const workspace = basename(cwd).replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${assistant}-${workspace || "workspace"}`;
+}
+
+export function buildSandboxCreateCommand(assistant: AssistantName, cwd: string, sandboxName?: string): string {
+  const name = sandboxName ?? buildSandboxName(assistant, cwd);
+  return `sbx create --name ${shellQuote(name)} ${assistant} ${shellQuote(cwd)}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function formatInlineEnv(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(" ");
+}
+
+export function buildLaunchCommand(opts: LaunchCommandOptions): string {
+  const endpointHost = opts.wrapper === "sbx" ? "host.docker.internal" : "localhost";
+  const env = generateAssistantEnv(opts.assistant, { ...opts, endpointHost });
+  const agentCommand = `${opts.assistant} --continue`;
+
+  if (opts.wrapper === "sbx") {
+    const sandboxName = opts.sandboxName ?? buildSandboxName(opts.assistant, opts.cwd);
+    const envFlags = Object.entries(env)
+      .map(([key, value]) => `-e ${shellQuote(`${key}=${value}`)}`)
+      .join(" ");
+    return `sbx exec -it -w ${shellQuote(opts.cwd)} ${envFlags} ${sandboxName} ${agentCommand}`.trim();
+  }
+
+  const envPrefix = formatInlineEnv(env);
+  const base = opts.wrapper === "scoder"
+    ? `scoder --llm-port ${opts.localPort} ${agentCommand}`
+    : agentCommand;
+  return `cd ${shellQuote(opts.cwd)} && ${envPrefix} ${base}`.trim();
+}
+
+export function parseSbxSandboxes(raw: string): SbxSandbox[] {
+  if (!raw.trim()) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  const rows = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>)["sandboxes"])
+      ? (parsed as Record<string, unknown>)["sandboxes"]
+      : [];
+
+  return rows
+    .map((row) => {
+      const record = row as Record<string, unknown>;
+      const name = String(record["name"] ?? record["Name"] ?? record["sandbox"] ?? record["SANDBOX"] ?? "");
+      const agent = String(record["agent"] ?? record["Agent"] ?? record["AGENT"] ?? "");
+      const workspace = String(record["workspace"] ?? record["Workspace"] ?? record["WORKSPACE"] ?? "");
+      const status = String(record["status"] ?? record["Status"] ?? record["STATUS"] ?? "");
+
+      if (!name || !agent || !workspace) return null;
+      return { name, agent, workspace, status: status || undefined } satisfies SbxSandbox;
+    })
+    .filter((row): row is SbxSandbox => row !== null);
+}
+
+export function listSbxSandboxes(): SbxSandbox[] {
+  const result = spawnSync("sbx", ["ls", "--json"], {
+    encoding: "utf-8",
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr?.trim() || "sbx ls --json failed");
+  }
+  return parseSbxSandboxes(result.stdout);
+}
+
+export function findMatchingSandbox(sandboxes: SbxSandbox[], assistant: AssistantName, cwd: string): SbxSandbox | null {
+  return sandboxes.find((sandbox) => sandbox.agent === assistant && sandbox.workspace === cwd) ?? null;
+}
+
+export function ensureSbxSandbox(assistant: AssistantName, cwd: string): { sandboxName: string; created: boolean } {
+  const sandboxes = listSbxSandboxes();
+  const existing = findMatchingSandbox(sandboxes, assistant, cwd);
+  if (existing) {
+    return { sandboxName: existing.name, created: false };
+  }
+
+  const sandboxName = buildSandboxName(assistant, cwd);
+  const result = spawnSync("sbx", ["create", "--name", sandboxName, assistant, cwd], {
+    encoding: "utf-8",
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    throw new Error(`sbx create failed for ${sandboxName}`);
+  }
+  return { sandboxName, created: true };
 }
 
 /**
@@ -141,7 +333,7 @@ export function getLaunchCommand(
   useScoder: boolean
 ): { binary: string; args: string[] } {
   if (useScoder) {
-    return { binary: "scoder", args: [assistant] };
+    return { binary: "scoder", args: [assistant, "--continue"] };
   }
-  return { binary: assistant, args: [] };
+  return { binary: assistant, args: ["--continue"] };
 }

@@ -385,34 +385,35 @@ Additionally, `uv` uses a package cache to enable hard links into the venv (avoi
 
 **Status**: Accepted
 
-**Context**: After vLLM reaches running state, users need to connect an AI coding assistant (opencode, Claude Code, GitHub Copilot) to the local endpoint. Previously this required manually creating a config file (`opencode.json` or setting env vars) before launching the assistant.
+**Context**: After vLLM reaches running state, users need to connect an AI coding assistant (OpenCode, Claude Code, GitHub Copilot) to the local endpoint. The first assistant launcher flattened the choices into a single menu and treated OpenCode as a file-writing workflow (`opencode.json` in the project). That does not scale cleanly to additional wrappers (for example `sbx`) or to per-session runtime overrides.
 
-**Decision**: `ivllm start` presents an interactive menu when the vLLM server is healthy:
+**Decision**: `ivllm start` presents a three-layer interactive launcher when the vLLM server is healthy:
 
-1. Detects available assistant binaries on PATH (`opencode`, `claude`, `code`, `scoder`)
-2. Displays current working directory and numbered menu options
-3. Writes/configures the appropriate settings for the chosen assistant:
-   - **opencode**: writes `opencode.json` to cwd (config precedence: project overrides global; managed config highest priority)
-   - **copilot**: sets `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`, plus `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
-   - **claude**: sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
-4. Optionally launches via **scoder** (`robchallen/scoder`) with `--llm-port <port>` flag for sandboxed workspace with localhost access
-5. Launches in a new tmux window, loops back on exit
-6. `[-1]` changes the working directory for subsequent launches; `[0]` shows the config snippet
-7. `--no-launch` flag suppresses the menu entirely (show snippet only)
+1. **Layer 1 — target**: change directory, launch OpenCode, launch Copilot, launch Claude, or shut down `ivllm`.
+2. **Layer 2 — wrapper**: choose direct launch, `scoder`, `sbx`, or go back.
+3. **Layer 3 — action**: launch now, show copy-paste command, or go back.
+4. Runtime configuration is injected per launch:
+   - **opencode**: `OPENCODE_CONFIG_CONTENT=<json>` (highest practical runtime precedence; no project file write)
+   - **copilot**: `COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`, plus compatibility env vars required by the CLI integration
+   - **claude**: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+5. The launcher always renders the full shell-ready command, including environment variables, before or alongside any automatic launch so the user can copy, paste, and customise it manually.
+6. **scoder** remains a wrapper around the assistant command and receives the explicit `--llm-port <port>` argument.
+7. **sbx** launches by reusing or creating a sandbox for the selected agent/workspace, then running the agent via `sbx exec -it -w <cwd> -e ... <sandbox> <agent>`.
+8. `sbx` network policy remains a **user-managed prerequisite**: the user must have allowed `localhost:<ivllm-port>` before sandbox launch. `ivllm` must not edit global `sbx policy` state.
+9. `--no-launch` still suppresses the menu entirely and shows the manual config snippet only.
 
-All three assistants use the same env var pattern for the LLM endpoint (`ANTHROPIC_BASE_URL=http://localhost:<port>`), but copilot requires additional `ANTHROPIC_BASE_URL=http://localhost:4000` to reach its own proxy, and `CLAUDE_MODEL=meta-llama/<model>:free` to select the correct model variant.
+For `sbx`, the endpoint inside the sandbox is `http://host.docker.internal:<port>` (or `/v1` for OpenCode). For direct and `scoder` launches, the endpoint remains `http://localhost:<port>`.
 
 **Rationale**:
-- An interactive menu at session start is the most user-friendly approach — no manual config required.
-- Scoder provides network sandboxing via bubblewrap + pasta; it does not auto-direct assistants to localhost, so env vars must still be set explicitly.
-- Config precedence: `opencode.json` in the project cwd follows opencode's documented precedence chain (project overrides global `~/.config/opencode/opencode.json`; managed config from MDM overrides everything).
-- Menu loops back on assistant exit — useful for launching multiple assistants or switching between models.
-- `--no-launch` supports automated/testing workflows where config generation is needed without interactive launch.
+- Separating **assistant**, **wrapper**, and **action** keeps the UI scalable as more wrappers or agent types are added.
+- Runtime env injection is a better fit than persistent config writes for per-session `ivllm` state (port, selected model, wrapper-specific hostname).
+- `OPENCODE_CONFIG_CONTENT` matches OpenCode's config precedence better than writing `opencode.json` into the workspace.
+- Showing the exact command lowers friction for advanced users without forcing `ivllm` to proxy arbitrary downstream agent flags.
+- `sbx exec -e ...` is the correct boundary for per-launch sandbox env injection; these values should not be written into persistent sandbox state.
 
 **Consequences**:
-- `ivllm start` is now a long-running foreground process with an interactive menu loop — the user must keep the terminal open.
-- `opencode.json` is written to the project cwd; users may want to add it to `.gitignore`.
-- Scoder must be installed and on PATH for sandboxed launches; the menu hides scoder options if not available.
-- The assistant runs in a new tmux window on the remote (with local fallback), so its lifecycle is separate from `ivllm start`.
-- Requires 5 additional source files and 56 tests.
-
+- `ivllm start` remains a long-running foreground process with an interactive launcher loop — the user must keep the terminal open.
+- Launch code must generate wrapper-aware commands for three modes (direct, `scoder`, `sbx`) instead of a single binary+args pair.
+- OpenCode launch no longer needs to modify workspace files for the normal path.
+- `sbx` support depends on discovering/reusing a sandbox name derived from agent + workspace, and may need sandbox creation before the first launch.
+- The user is responsible for `sbx policy allow network localhost:<port>`; if missing, `ivllm` should fail clearly rather than trying to edit policy.

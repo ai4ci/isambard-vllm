@@ -61,13 +61,13 @@ describe("F2.6 — env vars work with cwd", () => {
 describe("F2.6 — launch command works in any cwd", () => {
   it("launch command doesn't include cwd in args", () => {
     const cmd = getLaunchCommand("opencode", false);
-    expect(cmd.args.length).toBe(0);
+    expect(cmd.args).toEqual(["--continue"]);
     expect(cmd.binary).toBe("opencode");
   });
 
   it("scoder launch command doesn't include cwd in args", () => {
     const cmd = getLaunchCommand("claude", true);
-    expect(cmd.args).toEqual(["claude"]);
+    expect(cmd.args).toEqual(["claude", "--continue"]);
     expect(cmd.binary).toBe("scoder");
   });
 });

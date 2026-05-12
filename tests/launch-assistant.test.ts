@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import {
   generateOpencodeConfig,
+  generateOpencodeEnv,
   generateCopilotEnv,
   generateClaudeEnv,
   buildAssistantMenuOptions,
@@ -25,6 +26,19 @@ describe("F2.6 — generateOpencodeConfig returns valid JSON", () => {
     expect(json).toContain("8192");
     expect(json).toContain("tool_call");
     expect(json).toContain("reasoning");
+  });
+});
+
+describe("F2.6 — generateOpencodeEnv sets runtime override", () => {
+  it("stores opencode JSON in OPENCODE_CONFIG_CONTENT", () => {
+    const env = generateOpencodeEnv({
+      model: "Qwen/Qwen3.6-35B-A3B",
+      localPort: 11434,
+      maxModelLen: 8192,
+    });
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeString();
+    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    expect(parsed.provider["isambard-vllm"].options.baseURL).toBe("http://localhost:11434/v1");
   });
 });
 
@@ -76,13 +90,13 @@ describe("F2.6 — getLaunchCommand produces correct args", () => {
   it("returns scoder + assistant for sandboxed launch", () => {
     const cmd = getLaunchCommand("opencode", true);
     expect(cmd.binary).toBe("scoder");
-    expect(cmd.args).toContain("opencode");
+    expect(cmd.args).toEqual(["opencode", "--continue"]);
   });
 
   it("returns direct command for non-scoder launch", () => {
     const cmd = getLaunchCommand("claude", false);
     expect(cmd.binary).toBe("claude");
-    expect(cmd.args).toEqual([]);
+    expect(cmd.args).toEqual(["--continue"]);
   });
 });
 

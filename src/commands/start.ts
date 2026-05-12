@@ -1,9 +1,9 @@
 import { readFileSync, existsSync } from "fs";
 import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import { tmpdir } from "os";
 import { createInterface } from "readline";
-import type { ChildProcess } from "child_process";
+import { spawnSync, type ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
 import { spawnTunnel } from "../ssh.ts";
 import { runRemote } from "../ssh.ts";
@@ -23,13 +23,20 @@ import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, s
 import { semverGte, semverSort } from "../semver.ts";
 import { formatOpencodeSnippet } from "../opencode.ts";
 import {
+  ASSISTANTS,
+  type AssistantName,
+  type LaunchWrapper,
   getAvailableAssistants,
   getScoderAvailable,
-  buildAssistantMenuOptions,
-  getLaunchCommand,
-  generateOpencodeConfig,
-  generateCopilotEnv,
-  generateClaudeEnv,
+  getSbxAvailable,
+  getAssistantLabel,
+  getAvailableWrappers,
+  buildLaunchCommand,
+  buildSandboxName,
+  buildSandboxCreateCommand,
+  listSbxSandboxes,
+  findMatchingSandbox,
+  ensureSbxSandbox,
 } from "../assistant.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -475,20 +482,50 @@ export async function cmdStart(args: string[]): Promise<void> {
     toolCall?: boolean;
     reasoning?: boolean;
     shutdown: (reason: string, code?: number) => void;
-    _showSnippet?: boolean;  // internal state for menu exit flow
+  }
+
+  interface MenuOption<T extends string> {
+    key: T;
+    label: string;
+    input: string;
+  }
+
+  async function promptInput(question: string): Promise<string> {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(question, (value) => {
+        resolve(value.trim());
+        rl.close();
+      });
+    });
+    return answer;
+  }
+
+  async function promptMenu<const T extends string>(title: string, options: readonly MenuOption<T>[]): Promise<T> {
+    while (true) {
+      console.log(title);
+      for (const option of options) {
+        console.log(`  [${option.input}] ${option.label}`);
+      }
+      console.log("");
+
+      const answer = await promptInput("Selection: ");
+      const selected = options.find((option) => option.input === answer);
+      if (selected) return selected.key;
+
+      console.log(`Invalid selection: ${answer || "(empty)"}. Please try again.\n`);
+    }
   }
 
   async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
     const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
     let cwd = process.cwd();
-    
-    console.log(`\n🤖 AI coding assistant launcher (in: ${cwd})`);
-    
-    const available = getAvailableAssistants();
+    const availableAssistants = getAvailableAssistants();
     const hasScoder = getScoderAvailable();
-    
-    if (available.length === 0) {
-      console.log("\nNo AI coding assistant detected on PATH.");
+    const hasSbx = getSbxAvailable();
+
+    if (availableAssistants.length === 0 && !hasSbx) {
+      console.log("\nNo supported assistant launchers detected on PATH.");
       console.log("Showing opencode.ai config snippet instead:");
       console.log(formatOpencodeSnippet({
         model,
@@ -500,149 +537,163 @@ export async function cmdStart(args: string[]): Promise<void> {
       return;
     }
 
-    const options = buildAssistantMenuOptions(available, hasScoder);
+    while (true) {
+      const targetChoice = await promptMenu(
+        `\n🤖 AI coding assistant launcher\n📍 Working directory: ${cwd}\n\nChoose an assistant target:\n`,
+        [
+          { key: "opencode", label: "OpenCode", input: "1" },
+          { key: "copilot", label: "GitHub Copilot", input: "2" },
+          { key: "claude", label: "Claude Code", input: "3" },
+          { key: "change-dir", label: "Change directory", input: "d" },
+          { key: "show-snippet", label: "Show OpenCode config snippet", input: "s" },
+          { key: "shutdown", label: "Shutdown ivllm", input: "0" },
+        ] as const
+      );
 
-    let running = true;
-    while (running) {
-      console.log(`\n📍 Launching in: ${cwd}`);
-      console.log("Choose an assistant (or 0 to exit):\n");
-      
-      for (const opt of options) {
-        console.log(`  [${opt.id}) ${opt.label}`);
-      }
-      console.log(`  [0] skip (show config snippet)`);
-      console.log(`  [-] change directory`);
-      console.log(`  [0] exit\n`);
+      if (targetChoice === "change-dir") {
+        const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
+        if (!newDir) continue;
 
-      const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-      
-      const choice = await new Promise<string>((resolve) => {
-        rl.question("Selection: ", (answer) => {
-          resolve(answer.trim());
-          rl.close();
-        });
-      });
-
-      const choiceNum = parseInt(choice, 10);
-      
-      if (choiceNum === -1) {
-        // Change directory
-        console.log("\nCurrent directory:", cwd);
-        const rlCd = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-        const newDir = await new Promise<string>((resolve) => {
-          rlCd.question("Enter directory path (or press Enter to keep current): ", (answer) => {
-            resolve(answer.trim());
-            rlCd.close();
-          });
-        });
-        
-        if (newDir) {
-          const resolved = require("path").resolve(newDir);
-          const { existsSync } = require("fs");
-          if (existsSync(resolved)) {
-            cwd = resolved;
-            console.log(`✅ Changed directory to: ${cwd}\n`);
-          } else {
-            console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
-          }
-        }
-        continue;
-      }
-      
-      if (choiceNum === 0) {
-        // Exit or show config snippet (0 pressed twice: first shows snippet, second exits)
-        if (opts._showSnippet) {
-          console.log("\nGoodbye.\n");
-          running = false;
+        const nextCwd = resolve(newDir);
+        if (!existsSync(nextCwd)) {
+          console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
           continue;
         }
-        // First 0: show snippet and remember
-        opts._showSnippet = true;
-        console.log("\n📋 opencode.ai config:");
+        cwd = nextCwd;
+        console.log(`✅ Changed directory to: ${cwd}\n`);
+        continue;
+      }
+
+      if (targetChoice === "show-snippet") {
+        console.log("\n📋 opencode.ai config snippet:");
         console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
-        console.log("\nPress 0 again to exit, or -1 to change directory.\n");
+        console.log("");
         continue;
       }
 
-      const selected = options.find(o => o.id === choiceNum);
-      if (!selected) {
-        console.log(`Invalid selection: ${choice}. Please try again.\n`);
+      if (targetChoice === "shutdown") {
+        await shutdown("user requested exit");
+        return;
+      }
+
+      const assistant = targetChoice;
+      const wrappers = getAvailableWrappers(assistant, availableAssistants, hasScoder, hasSbx);
+
+      if (wrappers.length === 0) {
+        console.log(`\n⚠️  No launch wrappers are available for ${getAssistantLabel(assistant)}.`);
+        console.log("Install the local assistant binary for direct/scoder launch, or install sbx for sandbox launch.\n");
         continue;
       }
 
-      console.log(`\n🚀 Launching ${selected.label}...`);
-      
-      // Generate and save config for the selected assistant
-      if (selected.assistant === "opencode") {
-        // Write opencode.json config
-        const opencodeConfig = generateOpencodeConfig({ model, localPort, maxModelLen, toolCall, reasoning });
-        const configPath = join(cwd, "opencode.json");
+      const wrapperChoice = await promptMenu(
+        `\n🎯 Target: ${getAssistantLabel(assistant)}\n📍 Working directory: ${cwd}\n\nChoose a wrapper:\n`,
+        [
+          ...wrappers.map((wrapper, index) => ({
+            key: wrapper,
+            label: wrapper === "none" ? "Direct launch" : wrapper.toUpperCase(),
+            input: String(index + 1),
+          })),
+          { key: "back", label: "Back", input: "0" },
+        ] as const
+      );
+
+      if (wrapperChoice === "back") continue;
+
+      const wrapper = wrapperChoice;
+      const action = await promptMenu(
+        `\n🚀 ${getAssistantLabel(assistant)} via ${wrapper === "none" ? "direct launch" : wrapper.toUpperCase()}\n\nChoose an action:\n`,
+        [
+          { key: "launch", label: "Launch now", input: "1" },
+          { key: "show", label: "Show copy-paste command", input: "2" },
+          { key: "back", label: "Back", input: "0" },
+        ] as const
+      );
+
+      if (action === "back") continue;
+
+      let sandboxName = wrapper === "sbx" ? buildSandboxName(assistant, cwd) : undefined;
+      let showCommands: string[];
+
+      if (wrapper === "sbx") {
         try {
-          writeFileSync(configPath, JSON.stringify(opencodeConfig, null, 2), "utf-8");
-          console.log(`✅ Wrote opencode config to: ${configPath}`);
-        } catch (e) {
-          console.log(`⚠️  Failed to write config: ${(e as Error).message}`);
+          const existing = findMatchingSandbox(listSbxSandboxes(), assistant, cwd);
+          sandboxName = existing?.name ?? sandboxName;
+          const launchCommand = buildLaunchCommand({
+            assistant,
+            wrapper,
+            cwd,
+            model,
+            localPort,
+            maxModelLen,
+            toolCall,
+            reasoning,
+            sandboxName,
+          });
+          showCommands = existing
+            ? [launchCommand]
+            : [buildSandboxCreateCommand(assistant, cwd, sandboxName), launchCommand];
+        } catch (error) {
+          console.log(`\n⚠️  Failed to inspect sbx sandboxes: ${(error as Error).message}\n`);
+          continue;
         }
+      } else {
+        showCommands = [
+          buildLaunchCommand({
+            assistant,
+            wrapper,
+            cwd,
+            model,
+            localPort,
+            maxModelLen,
+            toolCall,
+            reasoning,
+          }),
+        ];
       }
 
-      // Generate env vars for the assistant
-      let env: Record<string, string> = {};
-      if (selected.assistant === "copilot" || selected.assistant === "claude") {
-        // For copilot, use copilot env (includes ANTHROPIC_BASE_URL etc.)
-        // For claude, use claude env
-        const isCopilot = selected.assistant === "copilot";
-        env = isCopilot ? generateCopilotEnv(localPort, model) : generateClaudeEnv(localPort, model);
-      } else if (selected.assistant === "opencode") {
-        // opencode uses file-based config, no env vars needed
-        env = {};
+      console.log("\n📋 Command:");
+      for (const command of showCommands) {
+        console.log(command);
       }
+      console.log("");
 
-      // Get launch command
-      const launchCmd = getLaunchCommand(selected.assistant, selected.useScoder);
-      const cmd = launchCmd.binary;
-      const args = selected.useScoder 
-        ? ["--llm-port", String(localPort), selected.assistant]
-        : launchCmd.args;
+      if (action === "show") continue;
 
-      console.log(`Running: ${cmd} ${args.join(" ")}`);
-      console.log(`With env: ${Object.keys(env).length > 0 ? Object.keys(env).join(", ") + "=<hidden>" : "none"}`);
-
-      // Launch assistant in new tmux window, cd to cwd first
-      const launchScript = `cd '${cwd}' && ${cmd} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
-      const tmuxCmd = `tmux new-window -n ${selected.assistant} '${launchScript}'`;
-      
       try {
-        const result = await runRemote(config, `bash -c "${tmuxCmd}"`, { silent: true });
-        if (result.exitCode !== 0) {
-          // Try local tmux if remote fails
-          try {
-            const localResult = await import("child_process").then(cp => 
-              cp.spawnSync("tmux", ["new-window", "-n", selected.assistant, "bash", "-c", launchScript], { 
-                env: { ...process.env, ...env },
-                stdio: "inherit"
-              })
-            );
-            if (localResult.status !== 0) {
-              console.log(`⚠️  Failed to launch ${selected.assistant} via tmux. Try running manually.`);
-            }
-          } catch (e) {
-            console.log(`⚠️  Failed to launch ${selected.assistant}. Error: ${(e as Error).message}`);
+        if (wrapper === "sbx") {
+          const ensured = ensureSbxSandbox(assistant, cwd);
+          sandboxName = ensured.sandboxName;
+          if (ensured.created) {
+            console.log(`✅ Created sandbox: ${sandboxName}`);
           }
         }
-      } catch (e) {
-        console.log(`⚠️  Failed to launch ${selected.assistant}. Error: ${(e as Error).message}`);
+
+        const launchCommand = buildLaunchCommand({
+          assistant,
+          wrapper,
+          cwd,
+          model,
+          localPort,
+          maxModelLen,
+          toolCall,
+          reasoning,
+          sandboxName,
+        });
+
+        const tmuxResult = spawnSync("tmux", ["new-window", "-n", assistant, "bash", "-lc", launchCommand], {
+          stdio: "inherit",
+        });
+        if (tmuxResult.status !== 0) {
+          console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)} in tmux. Run the command above manually.`);
+          continue;
+        }
+      } catch (error) {
+        console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
+        continue;
       }
 
-      console.log(`\n✅ ${selected.assistant} launched. Return to menu when done.\n`);
-      
-      // Wait for user to press Enter to return to menu
-      const rl2 = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-      await new Promise<void>((resolve) => {
-        rl2.question("Press Enter to return to menu...", () => {
-          rl2.close();
-          resolve();
-        });
-      });
+      console.log(`\n✅ ${getAssistantLabel(assistant)} launched. Return to menu when done.\n`);
+      await promptInput("Press Enter to return to menu...");
     }
   }
 
@@ -664,7 +715,7 @@ export async function cmdStart(args: string[]): Promise<void> {
     console.log(`   Model: ${details.model ?? model}`);
 
     if (startArgs.noLaunch) {
-      console.log("\n📋 opencode.ai config snippet (add to opencode.json):");
+      console.log("\n📋 opencode.ai config snippet:");
       console.log(formatOpencodeSnippet({
         model: details.model ?? model,
         localPort,

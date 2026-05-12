@@ -3,9 +3,18 @@ import {
   binaryExists,
   getAvailableAssistants,
   getScoderAvailable,
+  getSbxAvailable,
   generateOpencodeConfig,
+  generateOpencodeEnv,
+  generateAssistantEnv,
   generateCopilotEnv,
   generateClaudeEnv,
+  getAvailableWrappers,
+  buildSandboxName,
+  buildSandboxCreateCommand,
+  parseSbxSandboxes,
+  findMatchingSandbox,
+  buildLaunchCommand,
   buildAssistantMenuOptions,
   getLaunchCommand,
 } from "../src/assistant.ts";
@@ -63,6 +72,20 @@ describe("generateOpencodeConfig", () => {
   });
 });
 
+describe("generateOpencodeEnv", () => {
+  it("sets OPENCODE_CONFIG_CONTENT", () => {
+    const env = generateOpencodeEnv({ model: "test/model", localPort: 8080 });
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeDefined();
+  });
+
+  it("encodes the same config shape used for manual snippets", () => {
+    const env = generateOpencodeEnv({ model: "test/model", localPort: 8080, toolCall: true });
+    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    expect(parsed.provider["isambard-vllm"].options.baseURL).toBe("http://localhost:8080/v1");
+    expect(parsed.provider["isambard-vllm"].models["test/model"].tool_call).toBe(true);
+  });
+});
+
 describe("generateCopilotEnv", () => {
   it("includes COPILOT_PROVIDER_BASE_URL", () => {
     const env = generateCopilotEnv(11434, "test-model");
@@ -87,6 +110,122 @@ describe("generateCopilotEnv", () => {
   it("includes CLAUDE_MODEL with meta-llama prefix", () => {
     const env = generateCopilotEnv(11434, "llama-3.3-70b-instruct");
     expect(env.CLAUDE_MODEL).toBe("meta-llama/llama-3.3-70b-instruct:free");
+  });
+});
+
+describe("getSbxAvailable", () => {
+  it("returns a boolean", () => {
+    expect(typeof getSbxAvailable()).toBe("boolean");
+  });
+});
+
+describe("generateAssistantEnv", () => {
+  it("uses OPENCODE_CONFIG_CONTENT for opencode", () => {
+    const env = generateAssistantEnv("opencode", { model: "test/model", localPort: 11434 });
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeDefined();
+  });
+
+  it("switches opencode baseURL host for sandbox launches", () => {
+    const env = generateAssistantEnv("opencode", {
+      model: "test/model",
+      localPort: 11434,
+      endpointHost: "host.docker.internal",
+    });
+    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    expect(parsed.provider["isambard-vllm"].options.baseURL).toBe("http://host.docker.internal:11434/v1");
+  });
+
+  it("uses host.docker.internal for claude when requested", () => {
+    const env = generateAssistantEnv("claude", {
+      model: "test-model",
+      localPort: 11434,
+      endpointHost: "host.docker.internal",
+    });
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://host.docker.internal:11434");
+  });
+});
+
+describe("buildSandboxName", () => {
+  it("uses assistant name plus workspace basename", () => {
+    expect(buildSandboxName("copilot", "/home/test/isambard-vllm")).toBe("copilot-isambard-vllm");
+  });
+});
+
+describe("buildSandboxCreateCommand", () => {
+  it("renders sbx create with derived sandbox name", () => {
+    expect(buildSandboxCreateCommand("copilot", "/home/test/isambard-vllm"))
+      .toContain("sbx create --name 'copilot-isambard-vllm' copilot '/home/test/isambard-vllm'");
+  });
+});
+
+describe("getAvailableWrappers", () => {
+  it("includes direct and scoder for local assistant binaries", () => {
+    expect(getAvailableWrappers("claude", ["claude"], true, false)).toEqual(["none", "scoder"]);
+  });
+
+  it("includes sbx even when the assistant is not installed locally", () => {
+    expect(getAvailableWrappers("copilot", [], false, true)).toEqual(["sbx"]);
+  });
+});
+
+describe("parseSbxSandboxes", () => {
+  it("parses sbx ls json output", () => {
+    const sandboxes = parseSbxSandboxes(JSON.stringify([
+      {
+        name: "copilot-isambard-vllm",
+        agent: "copilot",
+        workspace: "/home/test/isambard-vllm",
+        status: "running",
+      },
+    ]));
+    expect(sandboxes[0]?.name).toBe("copilot-isambard-vllm");
+    expect(sandboxes[0]?.agent).toBe("copilot");
+  });
+});
+
+describe("findMatchingSandbox", () => {
+  it("finds a sandbox by agent and workspace", () => {
+    const sandbox = findMatchingSandbox([
+      { name: "copilot-isambard-vllm", agent: "copilot", workspace: "/home/test/isambard-vllm" },
+      { name: "claude-other", agent: "claude", workspace: "/home/test/other" },
+    ], "copilot", "/home/test/isambard-vllm");
+    expect(sandbox?.name).toBe("copilot-isambard-vllm");
+  });
+});
+
+describe("buildLaunchCommand", () => {
+  const opts = {
+    assistant: "claude" as const,
+    wrapper: "none" as const,
+    cwd: "/tmp/my project",
+    model: "test-model",
+    localPort: 11434,
+  };
+
+  it("renders a direct launch command with cwd and env vars", () => {
+    const command = buildLaunchCommand(opts);
+    expect(command).toContain("cd '/tmp/my project' &&");
+    expect(command).toContain("ANTHROPIC_BASE_URL='http://localhost:11434'");
+    expect(command).toContain(" claude --continue");
+  });
+
+  it("renders a scoder launch command with explicit llm port", () => {
+    const command = buildLaunchCommand({ ...opts, assistant: "opencode", wrapper: "scoder" });
+    expect(command).toContain("OPENCODE_CONFIG_CONTENT=");
+    expect(command).toContain("scoder --llm-port 11434 opencode --continue");
+  });
+
+  it("renders an sbx launch command with sandbox env injection", () => {
+    const command = buildLaunchCommand({
+      ...opts,
+      assistant: "copilot",
+      wrapper: "sbx",
+      cwd: "/home/test/isambard-vllm",
+    });
+    expect(command).toContain("sbx exec -it");
+    expect(command).toContain("-w '/home/test/isambard-vllm'");
+    expect(command).toContain("-e 'COPILOT_PROVIDER_BASE_URL=http://host.docker.internal:11434'");
+    expect(command).toContain("copilot-isambard-vllm copilot --continue");
   });
 });
 
@@ -147,12 +286,12 @@ describe("getLaunchCommand", () => {
   it("returns scoder command for scoder launch", () => {
     const cmd = getLaunchCommand("claude", true);
     expect(cmd.binary).toBe("scoder");
-    expect(cmd.args).toEqual(["claude"]);
+    expect(cmd.args).toEqual(["claude", "--continue"]);
   });
 
   it("returns direct command for non-scoder launch", () => {
     const cmd = getLaunchCommand("opencode", false);
     expect(cmd.binary).toBe("opencode");
-    expect(cmd.args).toEqual([]);
+    expect(cmd.args).toEqual(["--continue"]);
   });
 });

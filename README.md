@@ -123,15 +123,25 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
 | `--no-launch` | Skip assistant launch menu, show config snippet only | off |
 
-### 4. Configure opencode to use Isambard
+### 4. Launch an AI coding assistant
 
 After starting vLLM, `ivllm start` offers to launch your AI coding assistant with the endpoint pre-configured. When the menu appears:
 
-- Press **1** (or **4** with scoder) to launch **opencode** — writes `opencode.json` to your project directory automatically
-- Press **2** (or **5** with scoder) to launch **Claude Code** — sets env vars for the local vLLM endpoint
-- Press **3** (or **6** with scoder) to launch **GitHub Copilot** — sets env vars including `COPILOT_PROVIDER_BASE_URL`
-- Press **0** to show the config snippet only (press again to exit)
-- Press **-1** to change the launch directory
+- **Layer 1 — target**: choose **OpenCode**, **GitHub Copilot**, **Claude Code**, change directory, show the OpenCode config snippet, or shut down `ivllm`
+- **Layer 2 — wrapper**: choose **direct launch**, **scoder**, or **sbx** (only wrappers available on your machine are shown)
+- **Layer 3 — action**: choose **launch now** or **show copy-paste command**
+
+For every wrapper, `ivllm` prints the full shell-ready command before launching so you can copy, paste, and tweak it manually if needed.
+
+#### sbx prerequisite
+
+If you launch through **sbx**, Docker Sandboxes must be allowed to reach the host-side `ivllm` endpoint first:
+
+```bash
+sbx policy allow network localhost:11434
+```
+
+Replace `11434` with your configured local port if different. `ivllm` does **not** edit global `sbx policy` rules automatically.
 
 > **Manual configuration (legacy):** If you prefer to configure your assistant manually, add `opencode.json` to your project directory:
 
@@ -265,4 +275,3 @@ bun run start     # run CLI directly
 ```
 
 Tests use TDD — all tests are in `tests/` and cover config, job argument parsing, SLURM script generation, and remote operation dry-run behaviour.
-
