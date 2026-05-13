@@ -9,6 +9,11 @@ describe("formatOpencodeSnippet", () => {
     expect(out["$schema"]).toBe("https://opencode.ai/config.json");
   });
 
+  it("sets the default model to isambard-vllm/<model>", () => {
+    const out = JSON.parse(formatOpencodeSnippet(base));
+    expect(out.model).toBe("isambard-vllm/google/gemma-4-31B-it");
+  });
+
   it("includes provider key isambard-vllm", () => {
     const out = JSON.parse(formatOpencodeSnippet(base));
     expect(out.provider["isambard-vllm"]).toBeDefined();

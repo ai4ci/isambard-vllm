@@ -19,6 +19,7 @@ export function formatOpencodeSnippet(opts: OpencodeSnippetOptions): string {
 
   const snippet = {
     "$schema": "https://opencode.ai/config.json",
+    model: `isambard-vllm/${model}`,
     provider: {
       "isambard-vllm": {
         npm: "@ai-sdk/openai-compatible",

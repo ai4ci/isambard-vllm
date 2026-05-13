@@ -93,6 +93,18 @@ export async function cmdStart(args: string[]): Promise<void> {
   const dryRunDir = startArgs.dryRun ? mkdtempSync(join(tmpdir(), "ivllm-dryrun-")) : undefined;
   const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
 
+  // ── Pre-flight ──────────────────────────────────────────────────────────────
+  // Check SSH connectivity early, before any remote operations
+  if (!startArgs.dryRun) {
+    console.log("Checking SSH connectivity...");
+    const { exitCode: sshCheck } = await ops.runRemote("echo ok", { silent: true });
+    if (sshCheck !== 0) {
+      console.error("Error: Cannot connect to login node.");
+      process.exit(1);
+    }
+    console.log("✓ SSH connectivity OK");
+  }
+
   // Resolve config file: if --config provided, save to job store; if omitted, load from store.
   let usingStoredConfig = false;
   if (!startArgs.mock) {
@@ -260,18 +272,8 @@ export async function cmdStart(args: string[]): Promise<void> {
   console.log(`Local port : ${localPort}  |  Server port: ${serverPort}`);
   console.log("");
 
-  // ── Pre-flight ──────────────────────────────────────────────────────────────
-  if (startArgs.dryRun) {
-    console.log("[dry-run] SSH connectivity check skipped");
-    console.log("[dry-run] Venv check skipped");
-  } else {
-    console.log("Checking SSH connectivity...");
-    const { exitCode: sshCheck } = await ops.runRemote("echo ok", { silent: true });
-    if (sshCheck !== 0) {
-      console.error("Error: Cannot connect to login node.");
-      process.exit(1);
-    }
-
+  // ── Venv check (after SSH is confirmed working) ─────────────────────────────
+  if (!startArgs.dryRun) {
     console.log("Checking venv...");
     const venvDir = `${config.projectDir}/ivllm/${vllmVersion}`;
     const { exitCode: venvCheck } = await ops.runRemote(
@@ -281,7 +283,7 @@ export async function cmdStart(args: string[]): Promise<void> {
       console.error(`Error: vLLM venv not found at ${venvDir}. Run 'ivllm setup' first.`);
       process.exit(1);
     }
-    console.log("✓ Pre-flight checks passed");
+    console.log("✓ Venv check passed");
   }
 
   // ── Model download ───────────────────────────────────────────────────────────

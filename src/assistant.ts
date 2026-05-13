@@ -283,7 +283,29 @@ export function listSbxSandboxes(): SbxSandbox[] {
 }
 
 export function findMatchingSandbox(sandboxes: SbxSandbox[], assistant: AssistantName, cwd: string): SbxSandbox | null {
-  return sandboxes.find((sandbox) => sandbox.agent === assistant && sandbox.workspace === cwd) ?? null;
+  // Normalize the input cwd for comparison
+  const normalizedCwd = cwd.trim();
+  
+  return sandboxes.find((sandbox) => {
+    // Normalize the sandbox fields for comparison
+    const normalizedAgent = sandbox.agent?.toLowerCase() ?? '';
+    const normalizedWorkspace = sandbox.workspace?.trim() ?? '';
+    
+    // Check for exact match first
+    if (normalizedAgent === assistant.toLowerCase() && normalizedWorkspace === normalizedCwd) {
+      return true;
+    }
+    
+    // Check if workspace matches when ignoring trailing slashes
+    const workspaceWithoutTrailingSlash = normalizedWorkspace.replace(/\/+$/, '');
+    const cwdWithoutTrailingSlash = normalizedCwd.replace(/\/+$/, '');
+    if (normalizedAgent === assistant.toLowerCase() && 
+        workspaceWithoutTrailingSlash === cwdWithoutTrailingSlash) {
+      return true;
+    }
+    
+    return false;
+  }) ?? null;
 }
 
 export function ensureSbxSandbox(assistant: AssistantName, cwd: string): { sandboxName: string; created: boolean } {
