@@ -45,7 +45,7 @@ describe("F2.6 — generateOpencodeEnv sets runtime override", () => {
 describe("F2.6 — generateCopilotEnv sets correct env vars", () => {
   it("sets COPILOT_PROVIDER_BASE_URL to localhost with correct port", () => {
     const env = generateCopilotEnv(11434, "Qwen3.6-35B-A3B");
-    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434");
+    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434/v1");
   });
 
   it("sets COPILOT_MODEL to model name", () => {
@@ -53,9 +53,9 @@ describe("F2.6 — generateCopilotEnv sets correct env vars", () => {
     expect(env.COPILOT_MODEL).toBe("Qwen3.6-35B-A3B");
   });
 
-  it("sets ANTHROPIC_BASE_URL to localhost:4000 for Copilot proxy", () => {
+  it("does not set ANTHROPIC_BASE_URL for Copilot", () => {
     const env = generateCopilotEnv(11434, "Qwen3.6-35B-A3B");
-    expect(env.ANTHROPIC_BASE_URL).toBe("http://localhost:4000");
+    expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
   });
 });
 
@@ -65,9 +65,12 @@ describe("F2.6 — generateClaudeEnv sets correct env vars", () => {
     expect(env.ANTHROPIC_BASE_URL).toBe("http://localhost:8000");
   });
 
-  it("sets CLAUDE_MODEL with meta-llama prefix", () => {
+  it("maps Claude default model env vars to the configured model", () => {
     const env = generateClaudeEnv(11434, "llama-3.3-70b");
-    expect(env.CLAUDE_MODEL).toBe("meta-llama/llama-3.3-70b:free");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("llama-3.3-70b");
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("llama-3.3-70b");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("llama-3.3-70b");
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("llama-3.3-70b");
   });
 });
 
@@ -90,13 +93,13 @@ describe("F2.6 — getLaunchCommand produces correct args", () => {
   it("returns scoder + assistant for sandboxed launch", () => {
     const cmd = getLaunchCommand("opencode", true);
     expect(cmd.binary).toBe("scoder");
-    expect(cmd.args).toEqual(["opencode", "--continue"]);
+    expect(cmd.args).toEqual(["opencode"]);
   });
 
   it("returns direct command for non-scoder launch", () => {
     const cmd = getLaunchCommand("claude", false);
     expect(cmd.binary).toBe("claude");
-    expect(cmd.args).toEqual(["--continue"]);
+    expect(cmd.args).toEqual([]);
   });
 });
 

@@ -76,13 +76,10 @@ describe("F2.6 — Assistant config generation", () => {
 
   it("copilot env vars include correct URL and model", () => {
     const env = {
-      COPILOT_PROVIDER_BASE_URL: "http://localhost:11434",
+      COPILOT_PROVIDER_BASE_URL: "http://localhost:11434/v1",
       COPILOT_MODEL: "test-model",
-      ANTHROPIC_BASE_URL: "http://localhost:4000",
-      ANTHROPIC_API_KEY: "ollama",
-      CLAUDE_MODEL: "meta-llama/test-model:free",
     };
-    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434");
+    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434/v1");
     expect(env.COPILOT_MODEL).toBe("test-model");
   });
 
@@ -90,10 +87,14 @@ describe("F2.6 — Assistant config generation", () => {
     const env = {
       ANTHROPIC_BASE_URL: "http://localhost:11434",
       ANTHROPIC_API_KEY: "ollama",
-      CLAUDE_MODEL: "meta-llama/test-model:free",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "test-model",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "test-model",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "test-model",
+      CLAUDE_CODE_SUBAGENT_MODEL: "test-model",
     };
     expect(env.ANTHROPIC_BASE_URL).toBe("http://localhost:11434");
-    expect(env.CLAUDE_MODEL).toBe("meta-llama/test-model:free");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("test-model");
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("test-model");
   });
 });
 

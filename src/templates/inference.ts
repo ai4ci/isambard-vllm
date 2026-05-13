@@ -35,15 +35,22 @@ if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
 fi
 ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer`;
 
-function renderExitDiagnostics(workDir: string): string {
-  return `WORK_DIR="${workDir}"
-SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
+function renderExitDiagnostics(_workDir: string): string {
+  return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
 
 persist_slurm_accounting() {
   if command -v sacct >/dev/null 2>&1; then
     sacct -j "$SLURM_JOB_ID" --format=${SACCT_DIAGNOSTICS_FORMAT} > "$SLURM_ACCOUNTING_FILE" 2>&1 || true
   fi
 }`;
+}
+
+function renderWorkDirSetup(workDir: string): string {
+  return `WORK_DIR="${workDir}"
+mkdir -p "$WORK_DIR"
+if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
+  ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"
+fi`;
 }
 
 function renderMultiNodeExitDiagnostics(workDir: string): string {
@@ -156,6 +163,7 @@ exec > "${workDir}/${jobName}.slurm.log" 2>&1
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
+VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 SERVER_PORT=${serverPort}
 COMPUTE_HOSTNAME=$(hostname)
 
@@ -178,8 +186,10 @@ ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
+${renderWorkDirSetup(workDir)}
 ${renderExitDiagnostics(workDir)}
 ${renderExitTrap(false)}
+cd "$WORK_DIR"
 
 # vLLM is launched via srun in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
@@ -217,6 +227,7 @@ exec > "${workDir}/${jobName}.slurm.log" 2>&1
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
+VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 SERVER_PORT=${serverPort}
 GPUS_PER_NODE=${gpusPerNode}
 HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
@@ -243,6 +254,7 @@ ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
+${renderWorkDirSetup(workDir)}
 ${renderMultiNodeExitDiagnostics(workDir)}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
@@ -298,7 +310,7 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node 1 \\
-  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
+  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
   &
 VLLM_PID=$!
 

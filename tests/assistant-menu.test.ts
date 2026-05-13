@@ -49,7 +49,7 @@ describe("F2.6 — opencode config includes cwd", () => {
 describe("F2.6 — env vars work with cwd", () => {
   it("copilot env works regardless of cwd", () => {
     const env = generateCopilotEnv(11434, "test");
-    expect(env.COPILOT_PROVIDER_BASE_URL).toContain("localhost:11434");
+    expect(env.COPILOT_PROVIDER_BASE_URL).toContain("localhost:11434/v1");
   });
 
   it("claude env works regardless of cwd", () => {
@@ -61,13 +61,13 @@ describe("F2.6 — env vars work with cwd", () => {
 describe("F2.6 — launch command works in any cwd", () => {
   it("launch command doesn't include cwd in args", () => {
     const cmd = getLaunchCommand("opencode", false);
-    expect(cmd.args).toEqual(["--continue"]);
+    expect(cmd.args).toEqual([]);
     expect(cmd.binary).toBe("opencode");
   });
 
   it("scoder launch command doesn't include cwd in args", () => {
     const cmd = getLaunchCommand("claude", true);
-    expect(cmd.args).toEqual(["claude", "--continue"]);
+    expect(cmd.args).toEqual(["claude"]);
     expect(cmd.binary).toBe("scoder");
   });
 });

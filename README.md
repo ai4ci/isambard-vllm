@@ -84,6 +84,7 @@ Ready-to-use example configs for popular models are in the [`examples/`](example
 | [`qwen3.5-long-context.yaml`](examples/qwen3.5-long-context.yaml) | Qwen/Qwen3.5-35B-A3B | Hybrid MoE 35B, long context, single node |
 | [`gemma-4-31B-it.yaml`](examples/gemma-4-31B-it.yaml) | google/gemma-4-31B-it | Dense 31B multimodal, single node |
 | [`gpt-oss-120b.yaml`](examples/gpt-oss-120b.yaml) | openai/gpt-oss-120b | MoE 117B MXFP4, single node |
+| [`nemotron-3-super-120B-A12B-BF16.yaml`](examples/nemotron-3-super-120B-A12B-BF16.yaml) | nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | Dense 120B reasoning/tool model, single node, requires shared parser plugin |
 | [`minimax-m2.5.yaml`](examples/minimax-m2.5.yaml) | MiniMaxAI/MiniMax-M2.5 | MoE 230B, multi-node |
 
 ### 3. Start an inference session

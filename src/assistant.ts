@@ -157,11 +157,8 @@ export function generateOpencodeEnv(opts: OpencodeConfigOptions): Record<string,
  */
 export function generateCopilotEnv(localPort: number, model: string): Record<string, string> {
   return {
-    COPILOT_PROVIDER_BASE_URL: `http://localhost:${localPort}`,
+    COPILOT_PROVIDER_BASE_URL: `http://localhost:${localPort}/v1`,
     COPILOT_MODEL: model,
-    ANTHROPIC_BASE_URL: "http://localhost:4000",
-    ANTHROPIC_API_KEY: "ollama",
-    CLAUDE_MODEL: `meta-llama/${model}:free`,
   };
 }
 
@@ -172,7 +169,10 @@ export function generateClaudeEnv(localPort: number, model: string): Record<stri
   return {
     ANTHROPIC_BASE_URL: `http://localhost:${localPort}`,
     ANTHROPIC_API_KEY: "ollama",
-    CLAUDE_MODEL: `meta-llama/${model}:free`,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+    CLAUDE_CODE_SUBAGENT_MODEL: model,
   };
 }
 
@@ -188,7 +188,7 @@ export function generateAssistantEnv(
     case "copilot":
       return {
         ...generateCopilotEnv(opts.localPort, opts.model),
-        COPILOT_PROVIDER_BASE_URL: `http://${endpointHost}:${opts.localPort}`,
+        COPILOT_PROVIDER_BASE_URL: `http://${endpointHost}:${opts.localPort}/v1`,
       };
     case "claude":
       return {
@@ -218,10 +218,14 @@ function formatInlineEnv(env: Record<string, string>): string {
     .join(" ");
 }
 
+function getAssistantArgs(assistant: string): string[] {
+  return assistant === "copilot" ? ["--continue"] : [];
+}
+
 export function buildLaunchCommand(opts: LaunchCommandOptions): string {
   const endpointHost = opts.wrapper === "sbx" ? "host.docker.internal" : "localhost";
   const env = generateAssistantEnv(opts.assistant, { ...opts, endpointHost });
-  const agentCommand = `${opts.assistant} --continue`;
+  const agentCommand = [opts.assistant, ...getAssistantArgs(opts.assistant)].join(" ");
 
   if (opts.wrapper === "sbx") {
     const sandboxName = opts.sandboxName ?? buildSandboxName(opts.assistant, opts.cwd);
@@ -333,7 +337,7 @@ export function getLaunchCommand(
   useScoder: boolean
 ): { binary: string; args: string[] } {
   if (useScoder) {
-    return { binary: "scoder", args: [assistant, "--continue"] };
+    return { binary: "scoder", args: [assistant, ...getAssistantArgs(assistant)] };
   }
-  return { binary: assistant, args: ["--continue"] };
+  return { binary: assistant, args: getAssistantArgs(assistant) };
 }

@@ -89,7 +89,7 @@ describe("generateOpencodeEnv", () => {
 describe("generateCopilotEnv", () => {
   it("includes COPILOT_PROVIDER_BASE_URL", () => {
     const env = generateCopilotEnv(11434, "test-model");
-    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434");
+    expect(env.COPILOT_PROVIDER_BASE_URL).toBe("http://localhost:11434/v1");
   });
 
   it("includes COPILOT_MODEL", () => {
@@ -97,19 +97,19 @@ describe("generateCopilotEnv", () => {
     expect(env.COPILOT_MODEL).toBe("test-model");
   });
 
-  it("includes ANTHROPIC_BASE_URL", () => {
+  it("does not include ANTHROPIC_BASE_URL", () => {
     const env = generateCopilotEnv(11434, "test-model");
-    expect(env.ANTHROPIC_BASE_URL).toBe("http://localhost:4000");
+    expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
   });
 
-  it("includes ANTHROPIC_API_KEY set to ollama", () => {
+  it("does not include ANTHROPIC_API_KEY", () => {
     const env = generateCopilotEnv(11434, "test-model");
-    expect(env.ANTHROPIC_API_KEY).toBe("ollama");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
-  it("includes CLAUDE_MODEL with meta-llama prefix", () => {
+  it("does not include CLAUDE_MODEL", () => {
     const env = generateCopilotEnv(11434, "llama-3.3-70b-instruct");
-    expect(env.CLAUDE_MODEL).toBe("meta-llama/llama-3.3-70b-instruct:free");
+    expect(env.CLAUDE_MODEL).toBeUndefined();
   });
 });
 
@@ -142,6 +142,7 @@ describe("generateAssistantEnv", () => {
       endpointHost: "host.docker.internal",
     });
     expect(env.ANTHROPIC_BASE_URL).toBe("http://host.docker.internal:11434");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("test-model");
   });
 });
 
@@ -206,13 +207,19 @@ describe("buildLaunchCommand", () => {
     const command = buildLaunchCommand(opts);
     expect(command).toContain("cd '/tmp/my project' &&");
     expect(command).toContain("ANTHROPIC_BASE_URL='http://localhost:11434'");
-    expect(command).toContain(" claude --continue");
+    expect(command).toContain("ANTHROPIC_DEFAULT_SONNET_MODEL='test-model'");
+    expect(command).toContain("ANTHROPIC_DEFAULT_OPUS_MODEL='test-model'");
+    expect(command).toContain("ANTHROPIC_DEFAULT_HAIKU_MODEL='test-model'");
+    expect(command).toContain("CLAUDE_CODE_SUBAGENT_MODEL='test-model'");
+    expect(command).toContain(" claude");
+    expect(command).not.toContain("claude --continue");
   });
 
   it("renders a scoder launch command with explicit llm port", () => {
     const command = buildLaunchCommand({ ...opts, assistant: "opencode", wrapper: "scoder" });
     expect(command).toContain("OPENCODE_CONFIG_CONTENT=");
-    expect(command).toContain("scoder --llm-port 11434 opencode --continue");
+    expect(command).toContain("scoder --llm-port 11434 opencode");
+    expect(command).not.toContain("opencode --continue");
   });
 
   it("renders an sbx launch command with sandbox env injection", () => {
@@ -224,7 +231,7 @@ describe("buildLaunchCommand", () => {
     });
     expect(command).toContain("sbx exec -it");
     expect(command).toContain("-w '/home/test/isambard-vllm'");
-    expect(command).toContain("-e 'COPILOT_PROVIDER_BASE_URL=http://host.docker.internal:11434'");
+    expect(command).toContain("-e 'COPILOT_PROVIDER_BASE_URL=http://host.docker.internal:11434/v1'");
     expect(command).toContain("copilot-isambard-vllm copilot --continue");
   });
 });
@@ -240,9 +247,12 @@ describe("generateClaudeEnv", () => {
     expect(env.ANTHROPIC_API_KEY).toBe("ollama");
   });
 
-  it("includes CLAUDE_MODEL with meta-llama prefix", () => {
+  it("maps all default Anthropic model env vars to the configured model", () => {
     const env = generateClaudeEnv(11434, "llama-3.5-70b");
-    expect(env.CLAUDE_MODEL).toBe("meta-llama/llama-3.5-70b:free");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("llama-3.5-70b");
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("llama-3.5-70b");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("llama-3.5-70b");
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("llama-3.5-70b");
   });
 });
 
@@ -286,12 +296,12 @@ describe("getLaunchCommand", () => {
   it("returns scoder command for scoder launch", () => {
     const cmd = getLaunchCommand("claude", true);
     expect(cmd.binary).toBe("scoder");
-    expect(cmd.args).toEqual(["claude", "--continue"]);
+    expect(cmd.args).toEqual(["claude"]);
   });
 
   it("returns direct command for non-scoder launch", () => {
     const cmd = getLaunchCommand("opencode", false);
     expect(cmd.binary).toBe("opencode");
-    expect(cmd.args).toEqual(["--continue"]);
+    expect(cmd.args).toEqual([]);
   });
 });

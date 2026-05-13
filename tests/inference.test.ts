@@ -107,6 +107,20 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain("export HF_HUB_OFFLINE=1");
   });
 
+  it("symlinks shared plugins into the job work directory when present", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('if [ -d "$PROJECTDIR/ivllm/plugins" ]; then');
+    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"');
+  });
+
+  it("changes into the job work directory before starting vllm serve", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('cd "$WORK_DIR"');
+    const idxCd = script.indexOf('cd "$WORK_DIR"');
+    const idxServe = script.indexOf("vllm serve");
+    expect(idxCd).toBeLessThan(idxServe);
+  });
+
   it("single-node: trap on_exit EXIT is not followed by prose text on the same line", () => {
     // Regression: the exit trap block was concatenated with a comment fragment,
     // causing bash to treat comment words as invalid signal names.
@@ -272,6 +286,11 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(script).toContain('collect_exit_diagnostics()');
   });
 
+  it("symlinks shared plugins into the multi-node job work directory when present", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"');
+  });
+
   it("wraps ray start commands in bash -c to guarantee venv PATH on compute nodes", () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('bash -c "source');
@@ -303,6 +322,11 @@ describe("renderInferenceScript (multi-node)", () => {
   it("runs vllm serve via srun --overlap on the head node", () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain("srun --overlap");
+  });
+
+  it("changes into the job work directory before multi-node vllm serve", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain(`bash -c "cd ${multiNodeBase.workDir}`);
   });
 
   it("uses HEAD_NODE as the compute_hostname", () => {
