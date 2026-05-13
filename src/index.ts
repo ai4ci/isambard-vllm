@@ -3,6 +3,7 @@ import { cmdSetup } from "./commands/setup.ts";
 import { cmdStart } from "./commands/start.ts";
 import { cmdStatus } from "./commands/status.ts";
 import { cmdStop } from "./commands/stop.ts";
+import { cmdAgent } from "./commands/agent.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 
 const { version } = await import("../package.json");
@@ -18,6 +19,7 @@ Commands:
   status [job]            Show status of a job (or all jobs)
   stop <job>              Stop a job and clean up (recovery)
   config                  Show or set configuration
+  agent <assistant>       Launch AI assistant connected to local vLLM server
 
 Options:
   --version, -v           Show version
@@ -27,6 +29,7 @@ Run 'ivllm <command> --help' for command-specific options.
 For command-specific help, run:
   ivllm start --help      Start options (including --no-launch)
   ivllm setup --help      Setup options
+  ivllm agent --help      Agent options (including --port)
   ivllm config --help     Config options
 `.trim();
 
@@ -50,6 +53,9 @@ switch (command) {
     break;
   case "config":
     await cmdConfig(args);
+    break;
+  case "agent":
+    await cmdAgent(args);
     break;
   default:
     console.log(USAGE);
