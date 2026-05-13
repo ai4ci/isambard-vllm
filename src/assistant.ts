@@ -105,16 +105,18 @@ export function getAvailableWrappers(
   const wrappers: LaunchWrapper[] = [];
   const hasLocalAssistant = availableAssistants.includes(assistant);
 
-  // For Pi, we don't have local binaries to launch, so skip launcher options
-  if (assistant === "pi") {
-    // Pi is configuration-only, so we don't offer launch wrappers
-    // Users will need to manually copy the config to ~/.pi/agent/models.json
-    return [];
+  // For Pi, we allow wrappers even if the binary isn't installed
+  // since it's primarily configuration-based
+  if (assistant === "pi" || hasLocalAssistant) {
+    wrappers.push("none");
+    if (hasScoder) {
+      wrappers.push("scoder");
+    }
   }
-
-  if (hasLocalAssistant) wrappers.push("none");
-  if (hasLocalAssistant && hasScoder) wrappers.push("scoder");
-  if (hasSbx) wrappers.push("sbx");
+  
+  if (hasSbx) {
+    wrappers.push("sbx");
+  }
 
   return wrappers;
 }
