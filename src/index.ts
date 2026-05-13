@@ -19,7 +19,7 @@ Commands:
   status [job]            Show status of a job (or all jobs)
   stop <job>              Stop a job and clean up (recovery)
   config                  Show or set configuration
-  agent <assistant>       Launch AI assistant connected to local vLLM server
+  agent                   Launch AI assistant connected to local vLLM server (interactive menu)
 
 Options:
   --version, -v           Show version
