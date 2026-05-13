@@ -1,6 +1,6 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, copyFileSync, mkdirSync } from "fs";
 import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
-import { join, basename, resolve } from "path";
+import { join, basename, resolve, dirname } from "path";
 import { tmpdir } from "os";
 import { createInterface } from "readline";
 import { spawnSync, type ChildProcess } from "child_process";
@@ -37,6 +37,7 @@ import {
   listSbxSandboxes,
   findMatchingSandbox,
   ensureSbxSandbox,
+  generatePiModelsConfig,
 } from "../assistant.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -541,9 +542,66 @@ Examples:
     }
   }
 
-  async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
-    const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
-    let cwd = process.cwd();
+   async function updatePiModelsConfig(
+     opts: OpencodeConfigOptions,
+     cwd: string
+   ): Promise<void> {
+     const piConfigPath = join(process.env.HOME || '', '.pi', 'agent', 'models.json');
+     const piConfigDir = dirname(piConfigPath);
+     
+     // Ensure the directory exists
+     if (!existsSync(piConfigDir)) {
+       mkdirSync(piConfigDir, { recursive: true });
+     }
+     
+     // Read existing config or create empty structure
+     let existingConfig: unknown = {};
+     if (existsSync(piConfigPath)) {
+       try {
+         const fileContent = readFileSync(piConfigPath, 'utf-8');
+         existingConfig = JSON.parse(fileContent);
+       } catch (error) {
+         console.log(`⚠️  Warning: Could not parse existing ${piConfigPath}. Creating new config.`);
+         existingConfig = {};
+       }
+     }
+     
+     // Backup existing config if it exists and is not empty
+     if (existsSync(piConfigPath)) {
+       const backupPath = `${piConfigPath}.backup-${Date.now()}`;
+       try {
+         copyFileSync(piConfigPath, backupPath);
+         console.log(`📋 Backed up existing config to ${backupPath}`);
+       } catch (error) {
+         console.log(`⚠️  Warning: Could not backup existing config: ${error.message}`);
+       }
+     }
+     
+     // Generate the new Pi config for isambard-vllm
+     const newPiProviderConfig = generatePiModelsConfig(opts);
+     
+     // Merge with existing config
+     const mergedConfig: Record<string, unknown> = {
+       ...(existingConfig as Record<string, unknown>),
+       providers: {
+         ...((existingConfig as Record<string, unknown>).providers || {}),
+         ...newPiProviderConfig.providers
+       }
+     };
+     
+     // Write the updated config
+     try {
+       writeFileSync(piConfigPath, JSON.stringify(mergedConfig, null, 2) + '\n');
+       console.log(`✅ Updated ${piConfigPath} with isambard-vllm configuration`);
+     } catch (error) {
+       console.error(`❌ Failed to write to ${piConfigPath}: ${error.message}`);
+       throw error;
+     }
+   }
+
+   async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
+     const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
+     let cwd = process.cwd();
     const availableAssistants = getAvailableAssistants();
     const hasScoder = getScoderAvailable();
     const hasSbx = getSbxAvailable();
@@ -696,43 +754,54 @@ Examples:
       }
       console.log("");
 
-      if (action === "show") continue;
+       if (action === "show") continue;
 
-      try {
-        if (wrapper === "sbx") {
-          const ensured = ensureSbxSandbox(assistant, cwd);
-          sandboxName = ensured.sandboxName;
-          if (ensured.created) {
-            console.log(`✅ Created sandbox: ${sandboxName}`);
-          }
-        }
+       try {
+         // Special handling for Pi: update models.json before launching
+         if (assistant === "pi") {
+           await updatePiModelsConfig({
+             model,
+             localPort,
+             maxModelLen,
+             toolCall,
+             reasoning
+           }, cwd);
+         }
 
-        const launchCommand = buildLaunchCommand({
-          assistant,
-          wrapper,
-          cwd,
-          model,
-          localPort,
-          maxModelLen,
-          toolCall,
-          reasoning,
-          sandboxName,
-        });
+         if (wrapper === "sbx") {
+           const ensured = ensureSbxSandbox(assistant, cwd);
+           sandboxName = ensured.sandboxName;
+           if (ensured.created) {
+             console.log(`✅ Created sandbox: ${sandboxName}`);
+           }
+         }
 
-        const tmuxResult = spawnSync("tmux", ["new-window", "-n", assistant, "bash", "-lc", launchCommand], {
-          stdio: "inherit",
-        });
-        if (tmuxResult.status !== 0) {
-          console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)} in tmux. Run the command above manually.`);
-          continue;
-        }
-      } catch (error) {
-        console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
-        continue;
-      }
+         const launchCommand = buildLaunchCommand({
+           assistant,
+           wrapper,
+           cwd,
+           model,
+           localPort,
+           maxModelLen,
+           toolCall,
+           reasoning,
+           sandboxName,
+         });
 
-      console.log(`\n✅ ${getAssistantLabel(assistant)} launched. Return to menu when done.\n`);
-      await promptInput("Press Enter to return to menu...");
+         const tmuxResult = spawnSync("tmux", ["new-window", "-n", assistant, "bash", "-lc", launchCommand], {
+           stdio: "inherit",
+         });
+         if (tmuxResult.status !== 0) {
+           console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)} in tmux. Run the command above manually.`);
+           continue;
+         }
+       } catch (error) {
+         console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
+         continue;
+       }
+
+       console.log(`\n✅ ${getAssistantLabel(assistant)} launched. Return to menu when done.\n`);
+       await promptInput("Press Enter to return to menu...");
     }
   }
 
