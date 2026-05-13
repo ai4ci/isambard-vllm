@@ -14,7 +14,7 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 brew install bun` on macOS with homebrew installed)
 - A working SSH connection to the Isambard AI login node, with credentials cached in an SSH agent (key-based auth, no interactive password prompts)
 - SLURM and `jq` available on the HPC
-- A HuggingFace account and access token for gated models (stored via `ivllm config --hf-token`)
+- A HuggingFace account and access token for gated models (stored via `ivllm config --hf-token`). Hugging Face access token can be created from the [Access Token](https://huggingface.co/settings/tokens) page
 
 ---
 
@@ -28,6 +28,24 @@ bun link          # makes `ivllm` available on your PATH
 ```
 
 > If `bun link` doesn't put the binary on your PATH, add `~/.bun/bin` to your shell's `PATH`.
+<details>
+<summary>
+Click to see how to do so
+</summary>
+   
+> **zsh**
+> ```zsh
+> echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.zshrc
+> source ~/.zshrc
+> ```
+>
+> **bash**
+> ```bash
+> echo 'export PATH="$HOME/.bun/bin:$PATH"' >> ~/.bashrc
+> source ~/.bashrc
+> ```
+> 
+</details>
 
 ---
 
