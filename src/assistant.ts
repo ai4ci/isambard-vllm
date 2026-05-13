@@ -247,9 +247,10 @@ export function generateAssistantEnv(
   }
 }
 
-export function buildSandboxName(assistant: AssistantName, cwd: string): string {
+export function buildSandboxName(assistant: AssistantName | undefined, cwd: string): string {
+  const assistantName = assistant ?? "opencode";
   const workspace = basename(cwd).replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `${assistant}-${workspace || "workspace"}`;
+  return `${assistantName}-${workspace || "workspace"}`;
 }
 
 export function buildSandboxCreateCommand(assistant: AssistantName, cwd: string, sandboxName?: string): string {

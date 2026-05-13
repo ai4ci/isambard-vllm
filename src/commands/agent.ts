@@ -219,7 +219,7 @@ async function launchAssistant(opts: {
         toolCall: opts.toolCall,
         reasoning: opts.reasoning,
         sandboxName: wrapper === "sbx" ? 
-          (opts.assistant === "pi" ? "pi-isambard-vllm" : `${opts.assistant}-${require("path").basename(cwd)}`) : 
+          (assistant === "pi" ? "pi-isambard-vllm" : `${assistant}-${require("path").basename(cwd)}`) : 
           undefined
       });
       
