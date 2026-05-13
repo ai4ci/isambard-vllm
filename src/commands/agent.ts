@@ -9,7 +9,8 @@ import {
   getScoderAvailable,
   getSbxAvailable
 } from "../assistant.ts";
-import { spawnSync } from "child_process";
+import type { AssistantName, LaunchWrapper } from "../assistant.ts";
+import { spawn, spawnSync } from "child_process";
 import { join } from "path";
 import { existsSync, mkdirSync, writeFileSync, copyFileSync, readFileSync } from "fs";
 
@@ -18,6 +19,7 @@ interface V1ModelsResponse {
   data: Array<{
     id: string;
     [key: string]: any;
+    max_model_len?: number;
   }>;
 }
 
@@ -46,18 +48,25 @@ Examples:
   // Parse port argument
   let port: number | undefined;
   
-  // Look for --port=<value> or --port <value>
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--port=")) {
-      port = parseInt(args[i].split("=")[1], 10);
-      args.splice(i, 1);
-      break;
-    } else if (args[i] === "--port" && i + 1 < args.length) {
-      port = parseInt(args[i + 1], 10);
-      args.splice(i, 2);
-      break;
+    // Look for --port=<value> or --port <value>
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg !== undefined && arg.startsWith("--port=")) {
+        const portStr = arg.split("=")[1];
+        if (portStr !== undefined && portStr !== "") {
+          port = parseInt(portStr, 10);
+          args.splice(i, 1);
+          break;
+        }
+      } else if (arg === "--port" && i + 1 < args.length) {
+        const portStr = args[i + 1];
+        if (portStr !== undefined && portStr !== "") {
+          port = parseInt(portStr, 10);
+          args.splice(i, 2);
+          break;
+        }
+      }
     }
-  }
   
   // If port not specified, get from config or use default
   if (port === undefined) {
@@ -70,52 +79,56 @@ Examples:
     }
   }
   
-  // Validate that at least one assistant is available
-  const availableAssistants = getAvailableAssistants();
-  if (availableAssistants.length === 0) {
-    console.error("❌ No AI assistants available. Install at least one of: opencode, claude, copilot");
-    process.exit(1);
-  }
-  
-  // Query model info from vLLM server
-  console.log(`🔍 Querying localhost:${port}/v1/models for available models...`);
-  let modelId: string;
-  try {
-    const response = await fetch(`http://localhost:${port}/v1/models`, {
-      // Note: In Bun, fetch is available globally
-      // Adding timeout would require additional wrapper, but we'll keep it simple for now
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+   // Validate that at least one assistant is available
+   const availableAssistants = getAvailableAssistants();
+   if (availableAssistants.length === 0) {
+     console.error("❌ No AI assistants available. Install at least one of: opencode, claude, copilot");
+     process.exit(1);
+   }
+   
+   // Query model info from vLLM server
+   console.log(`🔍 Querying localhost:${port}/v1/models for available models...`);
+   let modelId: string;
+   let maxModelLen: number | undefined;
+   try {
+     const response = await fetch(`http://localhost:${port}/v1/models`, {
+       // Note: In Bun, fetch is available globally
+       // Adding timeout would require additional wrapper, but we'll keep it simple for now
+     });
+     
+     if (!response.ok) {
+       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+     }
+     
+       const json = await response.json() as V1ModelsResponse;
+      
+      if (json.object !== "list" || !Array.isArray(json.data) || json.data.length === 0) {
+        throw new Error("Invalid response format: expected non-empty data array");
+      }
+      
+      const firstModel = json.data[0];
+      if (!firstModel || !firstModel.id) {
+        throw new Error("Invalid response format: missing model id in first item");
+      }
+      
+      modelId = firstModel.id;
+      // Extract max_model_len if available, otherwise undefined
+      maxModelLen = firstModel.max_model_len ?? undefined;
+     console.log(`📦 Found model: ${modelId}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to query model info: ${error.message}`);
+      console.error("   Make sure a vLLM server is running and accessible at localhost:${port}/v1");
+      process.exit(1);
     }
-    
-    const json: V1ModelsResponse = await response.json();
-    
-    if (json.object !== "list" || !Array.isArray(json.data) || json.data.length === 0) {
-      throw new Error("Invalid response format: expected non-empty data array");
-    }
-    
-    if (!json.data[0].id) {
-      throw new Error("Invalid response format: missing model id in first item");
-    }
-    
-    modelId = json.data[0].id;
-    console.log(`📦 Found model: ${modelId}`);
-  } catch (error) {
-    console.error(`❌ Failed to query model info: ${error.message}`);
-    console.error("   Make sure a vLLM server is running and accessible at localhost:${port}/v1");
-    process.exit(1);
-  }
-  
-  // Prepare launch options (reasoning and toolCall default to true as requested)
-  const launchOpts = {
-    model: modelId,
-    localPort: port,
-    maxModelLen: undefined, // We could extract this from model permissions if needed
-    toolCall: true,
-    reasoning: true
-  };
+   
+   // Prepare launch options (reasoning and toolCall default to true as requested)
+   const launchOpts = {
+     model: modelId,
+     localPort: port,
+     maxModelLen: maxModelLen, // Extract from vLLM model info if available
+     toolCall: true,
+     reasoning: true
+   };
   
   // Launch the assistant menu (assistant will be selected via menu)
   await launchAssistant({
@@ -154,49 +167,49 @@ async function launchAssistant(opts: {
       ] as const
     );
     
-    if (targetChoice === "change-dir") {
-      const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
-      if (!newDir) continue;
-      
-      const nextCwd = require("path").resolve(newDir);
-      if (!existsSync(nextCwd)) {
-        console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
-        continue;
-      }
-      cwd = nextCwd;
-      console.log(`✅ Changed directory to: ${cwd}\n`);
-      continue;
-    }
-    
-    if (targetChoice === "shutdown") {
-      opts.shutdown();
-      return;
-    }
-    
-    const assistant = targetChoice;
-    const wrappers = getAvailableWrappers(assistant, availableAssistants, hasScoder, hasSbx);
-    
-    if (wrappers.length === 0) {
-      console.log(`\n⚠️  No launch wrappers are available for ${getAssistantLabel(assistant)}.`);
-      console.log("Install the local assistant binary for direct/scoder launch, or install sbx for sandbox launch.\n");
-      continue;
-    }
-    
-    const wrapperChoice = await promptWrapperMenu(
-      `\n🎯 Target: ${getAssistantLabel(assistant)}\n📍 Working directory: ${cwd}\n\nChoose a wrapper:\n`,
-      [
-        ...wrappers.map((wrapper, index) => ({
-          key: wrapper,
-          label: wrapper === "none" ? "Direct launch" : wrapper.toUpperCase(),
-          input: String(index + 1),
-        })),
-        { key: "back", label: "Back", input: "0" },
-      ] as const
-    );
-    
-    if (wrapperChoice === "back") continue;
-    
-    const wrapper = wrapperChoice;
+     if (targetChoice === "change-dir") {
+       const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
+       if (!newDir) continue;
+       
+       const nextCwd = require("path").resolve(newDir);
+       if (!existsSync(nextCwd)) {
+         console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
+         continue;
+       }
+       cwd = nextCwd;
+       console.log(`✅ Changed directory to: ${cwd}\n`);
+       continue;
+     }
+     
+     if (targetChoice === "shutdown") {
+       opts.shutdown();
+       return;
+     }
+     
+     const assistant = targetChoice as AssistantName;
+     const wrappers = getAvailableWrappers(assistant, availableAssistants, hasScoder, hasSbx);
+     
+     if (wrappers.length === 0) {
+       console.log(`\n⚠️  No launch wrappers are available for ${getAssistantLabel(assistant)}.`);
+       console.log("Install the local assistant binary for direct/scoder launch, or install sbx for sandbox launch.\n");
+       continue;
+     }
+     
+     const wrapperChoice = await promptWrapperMenu(
+       `\n🎯 Target: ${getAssistantLabel(assistant)}\n📍 Working directory: ${cwd}\n\nChoose a wrapper:\n`,
+       [
+         ...wrappers.map((wrapper, index) => ({
+           key: wrapper,
+           label: wrapper === "none" ? "Direct launch" : wrapper.toUpperCase(),
+           input: String(index + 1),
+         })),
+         { key: "back", label: "Back", input: "0" },
+       ] as const
+     );
+     
+     if (wrapperChoice === "back") continue;
+     
+     const wrapper = wrapperChoice as LaunchWrapper;
     const action = await promptActionMenu(
       `\n🚀 ${getAssistantLabel(assistant)} via ${wrapper === "none" ? "direct launch" : wrapper.toUpperCase()}\n\nChoose an action:\n`,
       [
@@ -265,20 +278,21 @@ async function launchAssistant(opts: {
         sandboxName
       });
       
-      console.log(`\n🚀 Launching ${getAssistantLabel(assistant)}...`);
-      
-      const tmuxResult = spawnSync("tmux", ["new-window", "-n", assistant, "bash", "-lc", launchCommand], {
-        stdio: "inherit",
-      });
-      
-      if (tmuxResult.status !== 0) {
-        console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)} in tmux. Run the command above manually.`);
-        console.log(`Command: ${launchCommand}`);
-        continue;
-      }
-      
-      console.log(`\n✅ ${getAssistantLabel(assistant)} launched. Return to menu when done.`);
-      await promptInput("Press Enter to return to menu...");
+       console.log(`\n🚀 Launching ${getAssistantLabel(assistant)}...`);
+       
+       // Run the command directly (blocking)
+       const result = spawnSync("bash", ["-lc", launchCommand], {
+         stdio: "inherit",
+       });
+       
+       if (result.status !== 0) {
+         console.log(`⚠️  ${getAssistantLabel(assistant)} exited with code ${result.status}`);
+       } else {
+         console.log(`\n✅ ${getAssistantLabel(assistant)} exited successfully`);
+       }
+       
+       // Return to menu automatically after command completes
+       continue;
     } catch (error) {
       console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
       continue;
@@ -331,31 +345,31 @@ async function updatePiModelsConfigForLaunch(
     try {
       copyFileSync(piConfigPath, backupPath);
       console.log(`📋 Backed up existing config to ${backupPath}`);
-    } catch (error) {
-      console.log(`⚠️  Warning: Could not backup existing config: ${error.message}`);
-    }
+     } catch (error: any) {
+       console.log(`⚠️  Warning: Could not backup existing config: ${error.message}`);
+     }
   }
   
-  // Generate the new Pi config for isambard-vllm
-  const newPiProviderConfig = generatePiModelsConfig(opts);
-  
-  // Merge with existing config
-  const mergedConfig: Record<string, unknown> = {
-    ...(existingConfig as Record<string, unknown>),
-    providers: {
-      ...((existingConfig as Record<string, unknown>).providers || {}),
-      ...newPiProviderConfig.providers
-    }
-  };
-  
-  // Write the updated config
-  try {
-    writeFileSync(piConfigPath, JSON.stringify(mergedConfig, null, 2) + '\n');
-    console.log(`✅ Updated ${piConfigPath} with isambard-vllm configuration`);
-  } catch (error) {
-    console.error(`❌ Failed to write to ${piConfigPath}: ${error.message}`);
-    throw error;
-  }
+   // Generate the new Pi config for isambard-vllm
+   const newPiProviderConfig = generatePiModelsConfig(opts) as Record<string, unknown>;
+   
+   // Merge with existing config
+   const mergedConfig: Record<string, unknown> = {
+     ...(existingConfig as Record<string, unknown>),
+     providers: {
+       ...((existingConfig as Record<string, unknown>).providers || {}),
+       ...(newPiProviderConfig.providers || {})
+     }
+   };
+   
+   // Write the updated config
+   try {
+     writeFileSync(piConfigPath, JSON.stringify(mergedConfig, null, 2) + '\n');
+     console.log(`✅ Updated ${piConfigPath} with isambard-vllm configuration`);
+   } catch (error: any) {
+     console.error(`❌ Failed to write to ${piConfigPath}: ${error.message}`);
+     throw error;
+   }
 }
 
 /**

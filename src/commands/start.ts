@@ -776,32 +776,34 @@ Examples:
            }
          }
 
-         const launchCommand = buildLaunchCommand({
-           assistant,
-           wrapper,
-           cwd,
-           model,
-           localPort,
-           maxModelLen,
-           toolCall,
-           reasoning,
-           sandboxName,
-         });
+          const launchCommand = buildLaunchCommand({
+            assistant,
+            wrapper,
+            cwd,
+            model,
+            localPort,
+            maxModelLen,
+            toolCall,
+            reasoning,
+            sandboxName,
+          });
 
-         const tmuxResult = spawnSync("tmux", ["new-window", "-n", assistant, "bash", "-lc", launchCommand], {
-           stdio: "inherit",
-         });
-         if (tmuxResult.status !== 0) {
-           console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)} in tmux. Run the command above manually.`);
-           continue;
-         }
-       } catch (error) {
-         console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
-         continue;
-       }
-
-       console.log(`\n✅ ${getAssistantLabel(assistant)} launched. Return to menu when done.\n`);
-       await promptInput("Press Enter to return to menu...");
+           console.log(`\n🚀 Launching ${getAssistantLabel(assistant)}...`);
+           
+           // Run the command directly (blocking)
+           const result = spawnSync("bash", ["-lc", launchCommand], {
+             stdio: "inherit",
+           });
+           
+           if (result.status !== 0) {
+             console.log(`⚠️  ${getAssistantLabel(assistant)} exited with code ${result.status}`);
+           } else {
+             console.log(`\n✅ ${getAssistantLabel(assistant)} exited successfully`);
+           }
+        } catch (error) {
+          console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
+          continue;
+        }
     }
   }
 

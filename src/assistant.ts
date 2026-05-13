@@ -28,7 +28,7 @@ export interface OpencodeConfigOptions {
   endpointHost?: string;
 }
 
-export type AssistantName = "opencode" | "claude" | "copilot";
+export type AssistantName = "opencode" | "claude" | "copilot" | "pi";
 export type LaunchWrapper = "none" | "scoder" | "sbx";
 
 export interface AssistantDefinition {
@@ -67,7 +67,7 @@ export function binaryExists(name: string): boolean {
     shell: true,
     encoding: "utf-8",
   });
-  return result.status === 0 && result.output[1]?.trim().length > 0;
+  return result.status === 0 && result.output[1] != null && result.output[1].trim().length > 0;
 }
 
 /**
@@ -137,6 +137,7 @@ export function generateOpencodeConfig(opts: OpencodeConfigOptions): Record<stri
 
   return {
     "$schema": "https://opencode.ai/config.json",
+    model: `isambard-vllm/${opts.model}`,
     provider: {
       "isambard-vllm": {
         npm: "@ai-sdk/openai-compatible",
@@ -246,6 +247,9 @@ export function generateAssistantEnv(
         ...generateClaudeEnv(opts.localPort, opts.model),
         ANTHROPIC_BASE_URL: `http://${endpointHost}:${opts.localPort}`,
       };
+    case "pi":
+      // Pi assistant works via configuration files, not environment variables
+      return {};
   }
 }
 
@@ -265,12 +269,12 @@ function shellQuote(value: string): string {
 }
 
 function formatInlineEnv(env: Record<string, string>): string {
-  return Object.entries(env)
+  return Object.entries(env ?? {})
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ");
 }
 
-function getAssistantArgs(assistant: string): string[] {
+function getAssistantArgs(assistant: AssistantName): string[] {
   return assistant === "copilot" ? ["--continue"] : [];
 }
 
@@ -304,10 +308,10 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
     return [];
   }
 
-  const rows = Array.isArray(parsed)
+  const rows: unknown[] = Array.isArray(parsed)
     ? parsed
     : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>)["sandboxes"])
-      ? (parsed as Record<string, unknown>)["sandboxes"]
+      ? (parsed as Record<string, unknown>)["sandboxes"] as unknown[]
       : [];
 
   return rows
@@ -319,7 +323,7 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
       const status = String(record["status"] ?? record["Status"] ?? record["STATUS"] ?? "");
 
       if (!name || !agent || !workspace) return null;
-      return { name, agent, workspace, status: status || undefined } satisfies SbxSandbox;
+      return { name, agent, workspace, status: status || undefined } as SbxSandbox;
     })
     .filter((row): row is SbxSandbox => row !== null);
 }
@@ -407,7 +411,7 @@ export function buildAssistantMenuOptions(
  * Get the binary name and args for launching an assistant.
  */
 export function getLaunchCommand(
-  assistant: string,
+  assistant: AssistantName,
   useScoder: boolean
 ): { binary: string; args: string[] } {
   if (useScoder) {

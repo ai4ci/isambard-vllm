@@ -18,7 +18,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
-    "skills-npm": "^1.1.1"
+    "skills-npm": "^1.1.1",
+    "ts-node": "^10.9.2"
   },
   "peerDependencies": {
     "typescript": "^5"
