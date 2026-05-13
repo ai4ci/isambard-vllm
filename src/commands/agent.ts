@@ -28,29 +28,23 @@ export async function cmdAgent(args: string[]): Promise<void> {
   // Handle help flag
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Usage: ivllm agent [options] <assistant>
+Usage: ivllm agent [options]
 
 Options:
   --port <port>       Port of the local vLLM server (default: 11434 or from ivllm config)
   --help, -h          Show this help message
 
-Assistants:
-  opencode            Launch OpenCode assistant
-  pi                  Launch Pi assistant (updates ~/.pi/agent/models.json)
-  copilot             Launch GitHub Copilot assistant
-  claude              Launch Claude Code assistant
+Launches an interactive menu to select and launch an AI assistant connected to a local vLLM server.
 
 Examples:
-  ivllm agent --port 11434 opencode
-  ivllm agent pi
-  ivllm agent --port 8000 claude
+  ivllm agent --port 11434
+  ivllm agent
 `);
     return;
   }
 
   // Parse port argument
   let port: number | undefined;
-  let assistantIndex = 0;
   
   // Look for --port=<value> or --port <value>
   for (let i = 0; i < args.length; i++) {
@@ -76,15 +70,12 @@ Examples:
     }
   }
   
-  // Get assistant name (first non-flag argument)
-  const assistantArg = args[0];
-  if (!assistantArg) {
-    console.error("Error: Assistant name required");
-    console.error("Usage: ivllm agent [--port=<port>] <opencode|pi|copilot|claude>");
+  // Validate that at least one assistant is available
+  const availableAssistants = getAvailableAssistants();
+  if (availableAssistants.length === 0) {
+    console.error("❌ No AI assistants available. Install at least one of: opencode, claude, copilot");
     process.exit(1);
   }
-  
-  const assistantName = assistantArg as "opencode" | "pi" | "copilot" | "claude";
   
   // Query model info from vLLM server
   console.log(`🔍 Querying localhost:${port}/v1/models for available models...`);
@@ -117,13 +108,6 @@ Examples:
     process.exit(1);
   }
   
-  // Validate assistant is available
-  const availableAssistants = getAvailableAssistants();
-  if (!availableAssistants.includes(assistantName)) {
-    console.error(`❌ ${getAssistantLabel(assistantName)} not available. Install it first.`);
-    process.exit(1);
-  }
-  
   // Prepare launch options (reasoning and toolCall default to true as requested)
   const launchOpts = {
     model: modelId,
@@ -133,16 +117,15 @@ Examples:
     reasoning: true
   };
   
-  // Launch the assistant
+  // Launch the assistant menu (assistant will be selected via menu)
   await launchAssistant({
     ...launchOpts,
-    assistant: assistantName,
     shutdown: () => process.exit(0)
   });
 }
 
 /**
- * Launch the specified assistant with the given options
+ * Launch an assistant with the given options (assistant selected via menu)
  */
 async function launchAssistant(opts: {
   model: string;
@@ -150,7 +133,6 @@ async function launchAssistant(opts: {
   maxModelLen?: number;
   toolCall: boolean;
   reasoning: boolean;
-  assistant: "opencode" | "pi" | "copilot" | "claude";
   shutdown: () => void;
 }): Promise<void> {
   let cwd = process.cwd();
