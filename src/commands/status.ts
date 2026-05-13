@@ -31,6 +31,22 @@ export function formatJobTable(jobs: JobDetails[]): string {
 }
 
 export async function cmdStatus(args: string[]): Promise<void> {
+  // Handle help flag
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: ivllm status [job]
+
+Options:
+  [job]                 Show status of specific job (if omitted, show all jobs)
+  --help, -h            Show this help message
+
+Examples:
+  ivllm status
+  ivllm status my-job
+`);
+    return;
+  }
+
   const config = loadConfig();
   try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
 

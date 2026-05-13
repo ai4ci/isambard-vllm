@@ -67,6 +67,28 @@ async function listInstalledVersions(config: import("../config.ts").Config, ops:
 }
 
 export async function cmdStart(args: string[]): Promise<void> {
+  // Handle help flag
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: ivllm start <job> [options]
+
+Options:
+  --config <file>       vLLM config YAML (contains model, parallelism and all serving options)
+  --local-port <n>      Local port to expose the API on (from ivllm config)
+  --gpus <n>            GPUs to request (overrides tensor-parallel-size × pipeline-parallel-size from YAML)
+  --time <hh:mm:ss>     SLURM time limit (default: 4:00:00)
+  --mock                Use mock vLLM server (no GPU needed -- for testing); requires --model
+  --dry-run             Preview generated scripts and scp commands without running anything
+  --no-launch           Skip assistant launch menu, show config snippet only
+  --help, -h            Show this help message
+
+Examples:
+  ivllm start my-job --config examples/qwen2.5-instruct.yaml
+  ivllm start test-job --mock --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
+`);
+    return;
+  }
+
   const config = loadConfig();
   try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
 

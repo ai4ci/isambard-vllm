@@ -14,6 +14,21 @@ export function parseStopArgs(args: string[]): StopArgs {
 }
 
 export async function cmdStop(args: string[]): Promise<void> {
+  // Handle help flag
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: ivllm stop <job>
+
+Options:
+  <job>                 Name of the job to stop and clean up
+  --help, -h            Show this help message
+
+Examples:
+  ivllm stop my-job
+`);
+    return;
+  }
+
   const config = loadConfig();
   try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
 

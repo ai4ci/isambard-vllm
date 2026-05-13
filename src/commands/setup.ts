@@ -13,6 +13,21 @@ const REMOTE_SCRIPT_PATH = "~/.config/ivllm/setup.slurm.sh";
 const REMOTE_LOG_PATH = "~/.config/ivllm/setup.log";
 
 export async function cmdSetup(args: string[]): Promise<void> {
+  // Handle help flag
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: ivllm setup <version>
+
+Options:
+  <version>             vLLM version to install (e.g. 0.19.1)
+  --help, -h            Show this help message
+
+Examples:
+  ivllm setup 0.19.1
+`);
+    return;
+  }
+
   const vllmVersion = args[0];
   if (!vllmVersion || vllmVersion.startsWith("--")) {
     console.error("Error: vLLM version is required.");
