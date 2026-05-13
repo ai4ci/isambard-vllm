@@ -562,43 +562,58 @@ Examples:
     }
 
     while (true) {
-      const targetChoice = await promptMenu(
-        `\n🤖 AI coding assistant launcher\n📍 Working directory: ${cwd}\n\nChoose an assistant target:\n`,
-        [
-          { key: "opencode", label: "OpenCode", input: "1" },
-          { key: "copilot", label: "GitHub Copilot", input: "2" },
-          { key: "claude", label: "Claude Code", input: "3" },
-          { key: "change-dir", label: "Change directory", input: "d" },
-          { key: "show-snippet", label: "Show OpenCode config snippet", input: "s" },
-          { key: "shutdown", label: "Shutdown ivllm", input: "0" },
-        ] as const
-      );
+       const targetChoice = await promptMenu(
+         `\n🤖 AI coding assistant launcher\n📍 Working directory: ${cwd}\n\nChoose an assistant target:\n`,
+         [
+           { key: "opencode", label: "OpenCode", input: "1" },
+           { key: "copilot", label: "GitHub Copilot", input: "2" },
+           { key: "claude", label: "Claude Code", input: "3" },
+           { key: "pi", label: "Pi (configuration only)", input: "4" },
+           { key: "change-dir", label: "Change directory", input: "d" },
+           { key: "show-snippet", label: "Show OpenCode config snippet", input: "s" },
+           { key: "shutdown", label: "Shutdown ivllm", input: "0" },
+         ] as const
+       );
 
-      if (targetChoice === "change-dir") {
-        const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
-        if (!newDir) continue;
+       if (targetChoice === "change-dir") {
+         const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
+         if (!newDir) continue;
 
-        const nextCwd = resolve(newDir);
-        if (!existsSync(nextCwd)) {
-          console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
-          continue;
-        }
-        cwd = nextCwd;
-        console.log(`✅ Changed directory to: ${cwd}\n`);
-        continue;
-      }
+         const nextCwd = resolve(newDir);
+         if (!existsSync(nextCwd)) {
+           console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
+           continue;
+         }
+         cwd = nextCwd;
+         console.log(`✅ Changed directory to: ${cwd}\n`);
+         continue;
+       }
 
-      if (targetChoice === "show-snippet") {
-        console.log("\n📋 opencode.ai config snippet:");
-        console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
-        console.log("");
-        continue;
-      }
+       if (targetChoice === "show-snippet") {
+         console.log("\n📋 opencode.ai config snippet:");
+         console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
+         console.log("");
+         continue;
+       }
 
-      if (targetChoice === "shutdown") {
-        await shutdown("user requested exit");
-        return;
-      }
+       if (targetChoice === "pi") {
+         console.log("\n📋 Pi models.json configuration:");
+         console.log(JSON.stringify(generatePiModelsConfig({
+           model,
+           localPort,
+           maxModelLen,
+           toolCall,
+           reasoning
+         }), null, 2));
+         console.log("\n💡 Copy the above to ~/.pi/agent/models.json");
+         console.log("");
+         continue;
+       }
+
+       if (targetChoice === "shutdown") {
+         await shutdown("user requested exit");
+         return;
+       }
 
       const assistant = targetChoice;
       const wrappers = getAvailableWrappers(assistant, availableAssistants, hasScoder, hasSbx);

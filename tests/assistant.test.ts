@@ -9,6 +9,7 @@ import {
   generateAssistantEnv,
   generateCopilotEnv,
   generateClaudeEnv,
+  generatePiModelsConfig,
   getAvailableWrappers,
   buildSandboxName,
   buildSandboxCreateCommand,
@@ -303,5 +304,99 @@ describe("getLaunchCommand", () => {
     const cmd = getLaunchCommand("opencode", false);
     expect(cmd.binary).toBe("opencode");
     expect(cmd.args).toEqual([]);
+  });
+
+  it("returns direct command for non-scoder launch", () => {
+    const cmd = getLaunchCommand("opencode", false);
+    expect(cmd.binary).toBe("opencode");
+    expect(cmd.args).toEqual([]);
+  });
+});
+
+describe("generatePiModelsConfig", () => {
+  const baseOpts = { model: "Qwen/Qwen2.5-0.5B-Instruct", localPort: 11434 };
+
+  it("generates correct provider structure", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config).toHaveProperty("providers");
+    expect(config.providers).toHaveProperty("isambard-vllm");
+  });
+
+  it("sets correct baseUrl", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].baseUrl).toBe("http://localhost:11434/v1");
+  });
+
+  it("sets correct apiKey", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].apiKey).toBe("EMPTY");
+  });
+
+  it("sets correct api type", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].api).toBe("openai-completions");
+  });
+
+  it("includes the model in providers", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].models.length).toBe(1);
+    expect(config.providers["isambard-vllm"].models[0].id).toBe("Qwen/Qwen2.5-0.5B-Instruct");
+  });
+
+  it("sets model name with (Isambard) suffix", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].models[0].name).toBe("Qwen/Qwen2.5-0.5B-Instruct (Isambard)");
+  });
+
+  it("sets contextWindow from maxModelLen", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, maxModelLen: 32768 });
+    expect(config.providers["isambard-vllm"].models[0].contextWindow).toBe(32768);
+  });
+
+  it("sets maxTokens equal to contextWindow", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, maxModelLen: 32768 });
+    expect(config.providers["isambard-vllm"].models[0].maxTokens).toBe(32768);
+  });
+
+  it("defaults context/maxTokens to 4096 when maxModelLen not provided", () => {
+    const config = generatePiModelsConfig({ model: "test/model", localPort: 11434 });
+    expect(config.providers["isambard-vllm"].models[0].contextWindow).toBe(4096);
+    expect(config.providers["isambard-vllm"].models[0].maxTokens).toBe(4096);
+  });
+
+  it("sets input to text-only", () => {
+    const config = generatePiModelsConfig(baseOpts);
+    expect(config.providers["isambard-vllm"].models[0].input).toEqual(["text"]);
+  });
+
+  it("includes reasoning flag when reasoning is true", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, reasoning: true });
+    expect(config.providers["isambard-vllm"].models[0].reasoning).toBe(true);
+  });
+
+  it("excludes reasoning flag when reasoning is false", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, reasoning: false });
+    expect(config.providers["isambard-vllm"].models[0].reasoning).toBe(false);
+  });
+
+  it("includes thinkingLevelMap when reasoning is true", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, reasoning: true });
+    expect(config.providers["isambard-vllm"].models[0]).toHaveProperty("thinkingLevelMap");
+    const thinkingMap = config.providers["isambard-vllm"].models[0].thinkingLevelMap;
+    expect(thinkingMap.off).toBeNull();
+    expect(thinkingMap.minimal).toBeNull();
+    expect(thinkingMap.low).toBeNull();
+    expect(thinkingMap.medium).toBeNull();
+    expect(thinkingMap.high).toBe("high");
+    expect(thinkingMap.xhigh).toBe("max");
+  });
+
+  it("omits thinkingLevelMap when reasoning is false", () => {
+    const config = generatePiModelsConfig({ ...baseOpts, reasoning: false });
+    expect(config.providers["isambard-vllm"].models[0]).not.toHaveProperty("thinkingLevelMap");
+  });
+
+  it("produces valid JSON", () => {
+    expect(() => JSON.stringify(generatePiModelsConfig(baseOpts))).not.toThrow();
   });
 });

@@ -56,6 +56,7 @@ export const ASSISTANTS: AssistantDefinition[] = [
   { name: "opencode", label: "OpenCode" },
   { name: "copilot", label: "GitHub Copilot" },
   { name: "claude", label: "Claude Code" },
+  { name: "pi", label: "Pi" },
 ];
 
 /**
@@ -104,6 +105,13 @@ export function getAvailableWrappers(
   const wrappers: LaunchWrapper[] = [];
   const hasLocalAssistant = availableAssistants.includes(assistant);
 
+  // For Pi, we don't have local binaries to launch, so skip launcher options
+  if (assistant === "pi") {
+    // Pi is configuration-only, so we don't offer launch wrappers
+    // Users will need to manually copy the config to ~/.pi/agent/models.json
+    return [];
+  }
+
   if (hasLocalAssistant) wrappers.push("none");
   if (hasLocalAssistant && hasScoder) wrappers.push("scoder");
   if (hasSbx) wrappers.push("sbx");
@@ -149,6 +157,47 @@ export function generateOpencodeConfig(opts: OpencodeConfigOptions): Record<stri
 export function generateOpencodeEnv(opts: OpencodeConfigOptions): Record<string, string> {
   return {
     OPENCODE_CONFIG_CONTENT: JSON.stringify(generateOpencodeConfig(opts)),
+  };
+}
+
+/**
+ * Generate Pi models.json configuration for vLLM integration.
+ */
+export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
+  const context = opts.maxModelLen ?? 4096;
+  
+  const modelEntry: Record<string, unknown> = {
+    id: opts.model,
+    name: `${opts.model} (Isambard)`,
+    contextWindow: context,
+    maxTokens: context,
+    input: ["text"],
+    reasoning: opts.reasoning ?? false,
+    // For OpenAI-compatible APIs like vLLM
+    api: "openai-completions"
+  };
+  
+  // Add thinking level map if reasoning is enabled
+  if (opts.reasoning) {
+    modelEntry["thinkingLevelMap"] = {
+      "off": null, // Disable thinking when not needed
+      "minimal": null,
+      "low": null,
+      "medium": null,
+      "high": "high",
+      "xhigh": "max"
+    };
+  }
+  
+  return {
+    providers: {
+      "isambard-vllm": {
+        baseUrl: `http://localhost:${opts.localPort}/v1`,
+        apiKey: "EMPTY",
+        api: "openai-completions",
+        models: [modelEntry]
+      }
+    }
   };
 }
 
