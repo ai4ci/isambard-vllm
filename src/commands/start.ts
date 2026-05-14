@@ -1,10 +1,11 @@
-import { readFileSync, existsSync, copyFileSync, mkdirSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
-import { join, basename, resolve, dirname } from "path";
+import { join, basename } from "path";
 import { tmpdir } from "os";
 import { createInterface } from "readline";
-import { spawnSync, type ChildProcess } from "child_process";
+import { type ChildProcess } from "child_process";
 import { loadConfig, assertConfigured } from "../config.ts";
+import { launchAssistant } from "./agent.ts";
 import { spawnTunnel } from "../ssh.ts";
 import { runRemote } from "../ssh.ts";
 const { version: ivllmVersion } = await import("../../package.json");
@@ -21,24 +22,6 @@ import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from ".
 import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
 import { semverGte, semverSort } from "../semver.ts";
-import { formatOpencodeSnippet } from "../opencode.ts";
-import {
-  ASSISTANTS,
-  type AssistantName,
-  type LaunchWrapper,
-  getAvailableAssistants,
-  getScoderAvailable,
-  getSbxAvailable,
-  getAssistantLabel,
-  getAvailableWrappers,
-  buildLaunchCommand,
-  buildSandboxName,
-  buildSandboxCreateCommand,
-  listSbxSandboxes,
-  findMatchingSandbox,
-  ensureSbxSandbox,
-  generatePiModelsConfig,
-} from "../assistant.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -156,8 +139,8 @@ Examples:
   let gpuCount: number;
   let nodeCount: number;
   let maxModelLen: number | undefined;
-  let enableAutoToolChoice: boolean | undefined;
-  let enableReasoning: boolean | undefined;
+  let enableAutoToolChoice: boolean;
+  let enableReasoning: boolean;
   let vllmVersion: string;
   if (startArgs.mock) {
     model = startArgs.model!;
@@ -181,8 +164,8 @@ Examples:
     gpuCount = resolved.gpuCount;
     nodeCount = resolved.nodeCount;
     maxModelLen = yamlConfig.maxModelLen;
-    enableAutoToolChoice = yamlConfig.enableAutoToolChoice;
-    enableReasoning = yamlConfig.enableReasoning;
+    enableAutoToolChoice = yamlConfig.enableAutoToolChoice ?? true;
+    enableReasoning = yamlConfig.enableReasoning ?? true;
 
     // Resolve which installed vLLM version to use based on min-vllm-version from the model config.
     // Scan the remote for installed versioned venvs and pick the highest that satisfies the minimum.
@@ -500,313 +483,6 @@ Examples:
     }
   }
 
-  interface AssistantMenuOptions {
-    model: string;
-    localPort: number;
-    maxModelLen?: number;
-    toolCall?: boolean;
-    reasoning?: boolean;
-    shutdown: (reason: string, code?: number) => void;
-  }
-
-  interface MenuOption<T extends string> {
-    key: T;
-    label: string;
-    input: string;
-  }
-
-  async function promptInput(question: string): Promise<string> {
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const answer = await new Promise<string>((resolve) => {
-      rl.question(question, (value) => {
-        resolve(value.trim());
-        rl.close();
-      });
-    });
-    return answer;
-  }
-
-  async function promptMenu<const T extends string>(title: string, options: readonly MenuOption<T>[]): Promise<T> {
-    while (true) {
-      console.log(title);
-      for (const option of options) {
-        console.log(`  [${option.input}] ${option.label}`);
-      }
-      console.log("");
-
-      const answer = await promptInput("Selection: ");
-      const selected = options.find((option) => option.input === answer);
-      if (selected) return selected.key;
-
-      console.log(`Invalid selection: ${answer || "(empty)"}. Please try again.\n`);
-    }
-  }
-
-   async function updatePiModelsConfig(
-     opts: OpencodeConfigOptions,
-     cwd: string
-   ): Promise<void> {
-     const piConfigPath = join(process.env.HOME || '', '.pi', 'agent', 'models.json');
-     const piConfigDir = dirname(piConfigPath);
-     
-     // Ensure the directory exists
-     if (!existsSync(piConfigDir)) {
-       mkdirSync(piConfigDir, { recursive: true });
-     }
-     
-     // Read existing config or create empty structure
-     let existingConfig: unknown = {};
-     if (existsSync(piConfigPath)) {
-       try {
-         const fileContent = readFileSync(piConfigPath, 'utf-8');
-         existingConfig = JSON.parse(fileContent);
-       } catch (error) {
-         console.log(`⚠️  Warning: Could not parse existing ${piConfigPath}. Creating new config.`);
-         existingConfig = {};
-       }
-     }
-     
-     // Backup existing config if it exists and is not empty
-     if (existsSync(piConfigPath)) {
-       const backupPath = `${piConfigPath}.backup-${Date.now()}`;
-       try {
-         copyFileSync(piConfigPath, backupPath);
-         console.log(`📋 Backed up existing config to ${backupPath}`);
-       } catch (error) {
-         console.log(`⚠️  Warning: Could not backup existing config: ${error.message}`);
-       }
-     }
-     
-     // Generate the new Pi config for isambard-vllm
-     const newPiProviderConfig = generatePiModelsConfig(opts);
-     
-     // Merge with existing config
-     const mergedConfig: Record<string, unknown> = {
-       ...(existingConfig as Record<string, unknown>),
-       providers: {
-         ...((existingConfig as Record<string, unknown>).providers || {}),
-         ...newPiProviderConfig.providers
-       }
-     };
-     
-     // Write the updated config
-     try {
-       writeFileSync(piConfigPath, JSON.stringify(mergedConfig, null, 2) + '\n');
-       console.log(`✅ Updated ${piConfigPath} with isambard-vllm configuration`);
-     } catch (error) {
-       console.error(`❌ Failed to write to ${piConfigPath}: ${error.message}`);
-       throw error;
-     }
-   }
-
-   async function launchAssistantMenu(opts: AssistantMenuOptions): Promise<void> {
-     const { model, localPort, maxModelLen, toolCall, reasoning, shutdown } = opts;
-     let cwd = process.cwd();
-    const availableAssistants = getAvailableAssistants();
-    const hasScoder = getScoderAvailable();
-    const hasSbx = getSbxAvailable();
-
-    if (availableAssistants.length === 0 && !hasSbx) {
-      console.log("\nNo supported assistant launchers detected on PATH.");
-      console.log("Showing opencode.ai config snippet instead:");
-      console.log(formatOpencodeSnippet({
-        model,
-        localPort,
-        maxModelLen,
-        toolCall,
-        reasoning,
-      }));
-      return;
-    }
-
-    while (true) {
-       const targetChoice = await promptMenu(
-         `\n🤖 AI coding assistant launcher\n📍 Working directory: ${cwd}\n\nChoose an assistant target:\n`,
-         [
-           { key: "opencode", label: "OpenCode", input: "1" },
-           { key: "copilot", label: "GitHub Copilot", input: "2" },
-           { key: "claude", label: "Claude Code", input: "3" },
-           { key: "pi", label: "Pi (configuration only)", input: "4" },
-           { key: "change-dir", label: "Change directory", input: "d" },
-           { key: "show-snippet", label: "Show OpenCode config snippet", input: "s" },
-           { key: "shutdown", label: "Shutdown ivllm", input: "0" },
-         ] as const
-       );
-
-       if (targetChoice === "change-dir") {
-         const newDir = await promptInput("\nEnter directory path (or press Enter to keep current): ");
-         if (!newDir) continue;
-
-         const nextCwd = resolve(newDir);
-         if (!existsSync(nextCwd)) {
-           console.log(`⚠️  Directory not found: ${newDir}. Keeping current directory.\n`);
-           continue;
-         }
-         cwd = nextCwd;
-         console.log(`✅ Changed directory to: ${cwd}\n`);
-         continue;
-       }
-
-       if (targetChoice === "show-snippet") {
-         console.log("\n📋 opencode.ai config snippet:");
-         console.log(formatOpencodeSnippet({ model, localPort, maxModelLen, toolCall, reasoning }));
-         console.log("");
-         continue;
-       }
-
-       if (targetChoice === "pi") {
-         console.log("\n📋 Pi models.json configuration:");
-         console.log(JSON.stringify(generatePiModelsConfig({
-           model,
-           localPort,
-           maxModelLen,
-           toolCall,
-           reasoning
-         }), null, 2));
-         console.log("\n💡 Copy the above to ~/.pi/agent/models.json");
-         console.log("");
-         continue;
-       }
-
-       if (targetChoice === "shutdown") {
-         await shutdown("user requested exit");
-         return;
-       }
-
-      const assistant = targetChoice;
-      const wrappers = getAvailableWrappers(assistant, availableAssistants, hasScoder, hasSbx);
-
-      if (wrappers.length === 0) {
-        console.log(`\n⚠️  No launch wrappers are available for ${getAssistantLabel(assistant)}.`);
-        console.log("Install the local assistant binary for direct/scoder launch, or install sbx for sandbox launch.\n");
-        continue;
-      }
-
-      const wrapperChoice = await promptMenu(
-        `\n🎯 Target: ${getAssistantLabel(assistant)}\n📍 Working directory: ${cwd}\n\nChoose a wrapper:\n`,
-        [
-          ...wrappers.map((wrapper, index) => ({
-            key: wrapper,
-            label: wrapper === "none" ? "Direct launch" : wrapper.toUpperCase(),
-            input: String(index + 1),
-          })),
-          { key: "back", label: "Back", input: "0" },
-        ] as const
-      );
-
-      if (wrapperChoice === "back") continue;
-
-      const wrapper = wrapperChoice;
-      const action = await promptMenu(
-        `\n🚀 ${getAssistantLabel(assistant)} via ${wrapper === "none" ? "direct launch" : wrapper.toUpperCase()}\n\nChoose an action:\n`,
-        [
-          { key: "launch", label: "Launch now", input: "1" },
-          { key: "show", label: "Show copy-paste command", input: "2" },
-          { key: "back", label: "Back", input: "0" },
-        ] as const
-      );
-
-      if (action === "back") continue;
-
-      let sandboxName = wrapper === "sbx" ? buildSandboxName(assistant, cwd) : undefined;
-      let showCommands: string[];
-
-      if (wrapper === "sbx") {
-        try {
-          const existing = findMatchingSandbox(listSbxSandboxes(), assistant, cwd);
-          sandboxName = existing?.name ?? sandboxName;
-          const launchCommand = buildLaunchCommand({
-            assistant,
-            wrapper,
-            cwd,
-            model,
-            localPort,
-            maxModelLen,
-            toolCall,
-            reasoning,
-            sandboxName,
-          });
-          showCommands = existing
-            ? [launchCommand]
-            : [buildSandboxCreateCommand(assistant, cwd, sandboxName), launchCommand];
-        } catch (error) {
-          console.log(`\n⚠️  Failed to inspect sbx sandboxes: ${(error as Error).message}\n`);
-          continue;
-        }
-      } else {
-        showCommands = [
-          buildLaunchCommand({
-            assistant,
-            wrapper,
-            cwd,
-            model,
-            localPort,
-            maxModelLen,
-            toolCall,
-            reasoning,
-          }),
-        ];
-      }
-
-      console.log("\n📋 Command:");
-      for (const command of showCommands) {
-        console.log(command);
-      }
-      console.log("");
-
-       if (action === "show") continue;
-
-       try {
-         // Special handling for Pi: update models.json before launching
-         if (assistant === "pi") {
-           await updatePiModelsConfig({
-             model,
-             localPort,
-             maxModelLen,
-             toolCall,
-             reasoning
-           }, cwd);
-         }
-
-         if (wrapper === "sbx") {
-           const ensured = ensureSbxSandbox(assistant, cwd);
-           sandboxName = ensured.sandboxName;
-           if (ensured.created) {
-             console.log(`✅ Created sandbox: ${sandboxName}`);
-           }
-         }
-
-          const launchCommand = buildLaunchCommand({
-            assistant,
-            wrapper,
-            cwd,
-            model,
-            localPort,
-            maxModelLen,
-            toolCall,
-            reasoning,
-            sandboxName,
-          });
-
-           console.log(`\n🚀 Launching ${getAssistantLabel(assistant)}...`);
-           
-           // Run the command directly (blocking)
-           const result = spawnSync("bash", ["-lc", launchCommand], {
-             stdio: "inherit",
-           });
-           
-           if (result.status !== 0) {
-             console.log(`⚠️  ${getAssistantLabel(assistant)} exited with code ${result.status}`);
-           } else {
-             console.log(`\n✅ ${getAssistantLabel(assistant)} exited successfully`);
-           }
-        } catch (error) {
-          console.log(`⚠️  Failed to launch ${getAssistantLabel(assistant)}. Error: ${(error as Error).message}`);
-          continue;
-        }
-    }
-  }
-
   async function onRunning(details: JobDetails): Promise<void> {
     const computeHost = details.compute_hostname!;
 
@@ -824,34 +500,13 @@ Examples:
     console.log(`\n🚀 OpenAI API endpoint: http://localhost:${localPort}/v1`);
     console.log(`   Model: ${details.model ?? model}`);
 
-    if (startArgs.noLaunch) {
-      console.log("\n📋 opencode.ai config snippet:");
-      console.log(formatOpencodeSnippet({
-        model: details.model ?? model,
-        localPort,
-        maxModelLen,
-        toolCall: enableAutoToolChoice,
-        reasoning: enableReasoning,
-      }));
-      console.log("\nType 'exit' + Enter to stop, or press Ctrl+C\n");
-    } else {
-      await launchAssistantMenu({
-        model: details.model ?? model,
-        localPort,
-        maxModelLen,
-        toolCall: enableAutoToolChoice,
-        reasoning: enableReasoning,
-        shutdown,
-      });
-    }
-
-    // Re-register "exit" handler on the same readline interface for the running phase
-    const rl2 = createInterface({ input: process.stdin, terminal: false });
-    rl2.on("line", (line) => {
-      if (line.trim().toLowerCase() === "exit") {
-        rl2.close();
-        shutdown("user requested exit");
-      }
+    await launchAssistant({
+      model: details.model ?? model,
+      localPort,
+      maxModelLen,
+      toolCall: enableAutoToolChoice,
+      reasoning: enableReasoning,
+      shutdown,
     });
 
     // Heartbeat loop

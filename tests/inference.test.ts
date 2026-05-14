@@ -62,12 +62,12 @@ describe("renderInferenceScript", () => {
 
   it("redirects FLASHINFER_JIT_CACHE_DIR to Lustre for reliable flock and persistent cache", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache");
+    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$WORK_DIR/ivllm/flashinfer_cache");
   });
 
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer");
+    expect(script).toContain("ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {
@@ -110,7 +110,7 @@ describe("renderInferenceScript", () => {
   it("symlinks shared plugins into the job work directory when present", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain('if [ -d "$PROJECTDIR/ivllm/plugins" ]; then');
-    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"');
+    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"');
   });
 
   it("changes into the job work directory before starting vllm serve", () => {
@@ -288,7 +288,7 @@ describe("renderInferenceScript (multi-node)", () => {
 
   it("symlinks shared plugins into the multi-node job work directory when present", () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"');
+    expect(script).toContain('ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"');
   });
 
   it("wraps ray start commands in bash -c to guarantee venv PATH on compute nodes", () => {

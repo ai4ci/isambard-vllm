@@ -22,18 +22,7 @@ export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
 # Use gcc from gcc-native module for JIT compilation (flashinfer, torch.compile).
 export CC=gcc
-export CXX=g++
-# Redirect flashinfer JIT cache to Lustre (PROJECTDIR) instead of NFS home (~/.cache).
-# NFS does not support fcntl.flock reliably; Lustre does. Cache persists across jobs.
-export FLASHINFER_JIT_CACHE_DIR=$LOCALDIR/ivllm/flashinfer_cache
-# Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
-# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
-mkdir -p $PROJECTDIR/ivllm/flashinfer_cache ~/.cache
-if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
-  cp -r ~/.cache/flashinfer/. $PROJECTDIR/ivllm/flashinfer_cache/ 2>/dev/null || true
-  rm -rf ~/.cache/flashinfer
-fi
-ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer`;
+export CXX=g++`;
 
 function renderExitDiagnostics(_workDir: string): string {
   return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
@@ -47,10 +36,22 @@ persist_slurm_accounting() {
 
 function renderWorkDirSetup(workDir: string): string {
   return `WORK_DIR="${workDir}"
-mkdir -p "$WORK_DIR"
+mkdir -p "$WORK_DIR/ivllm"
+# Look for and link the plugins directory
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
-  ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"
-fi`;
+  ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
+fi
+# Set flash infer cache to user work dir for per model caching.
+export FLASHINFER_JIT_CACHE_DIR=$WORK_DIR/ivllm/flashinfer_cache
+# Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
+# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+mkdir -p $FLASHINFER_JIT_CACHE_DIR ~/.cache
+if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
+  cp -r ~/.cache/flashinfer/. $FLASHINFER_JIT_CACHE_DIR/ 2>/dev/null || true
+  rm -rf ~/.cache/flashinfer
+  fi
+  ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer
+`;
 }
 
 function renderMultiNodeExitDiagnostics(workDir: string): string {
@@ -182,11 +183,11 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
+${renderWorkDirSetup(workDir)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderWorkDirSetup(workDir)}
 ${renderExitDiagnostics(workDir)}
 ${renderExitTrap(false)}
 cd "$WORK_DIR"
@@ -250,11 +251,11 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
+${renderWorkDirSetup(workDir)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderWorkDirSetup(workDir)}
 ${renderMultiNodeExitDiagnostics(workDir)}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))

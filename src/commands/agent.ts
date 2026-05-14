@@ -140,13 +140,13 @@ Examples:
 /**
  * Launch an assistant with the given options (assistant selected via menu)
  */
-async function launchAssistant(opts: {
+export async function launchAssistant(opts: {
   model: string;
   localPort: number;
   maxModelLen?: number;
   toolCall: boolean;
   reasoning: boolean;
-  shutdown: () => void;
+  shutdown: (reason: string, cause?: number) => void;
 }): Promise<void> {
   let cwd = process.cwd();
   const availableAssistants = getAvailableAssistants();
@@ -163,7 +163,7 @@ async function launchAssistant(opts: {
         { key: "copilot", label: "GitHub Copilot", input: "3" },
         { key: "claude", label: "Claude Code", input: "4" },
         { key: "change-dir", label: "Change directory", input: "d" },
-        { key: "shutdown", label: "Shutdown agent launcher", input: "0" },
+        { key: "shutdown", label: "Back / Exit", input: "0" },
       ] as const
     );
     
@@ -182,7 +182,7 @@ async function launchAssistant(opts: {
      }
      
      if (targetChoice === "shutdown") {
-       opts.shutdown();
+       opts.shutdown("cancelled");
        return;
      }
      
