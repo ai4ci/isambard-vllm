@@ -17,7 +17,7 @@ import {
 } from "../slurm.ts";
 import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
-import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
+import { parseJobDetails, hfCachePath, parseStartArgs, defaultHfHome, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
 import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
 import { semverGte, semverSort } from "../semver.ts";
@@ -106,7 +106,7 @@ Examples:
   const { jobName, timeLimit, serverPort } = startArgs;
   let configFile = startArgs.configFile;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
-  const hfHome = `${config.projectDir}/hf`;
+  const hfHome = defaultHfHome();
 
   const remoteWorkDir = `$HOME/${jobName}`;
   const remoteWorkDirScp = `~/${jobName}`;

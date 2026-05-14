@@ -62,12 +62,29 @@ describe("renderInferenceScript", () => {
 
   it("redirects FLASHINFER_JIT_CACHE_DIR to Lustre for reliable flock and persistent cache", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache");
+    expect(script).toContain("FLASHINFER_CACHE_ROOT=$HOME/ivllm/");
+    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$FLASHINFER_CACHE_ROOT/flashinfer_cache");
   });
 
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer");
+    expect(script).toContain("ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer");
+  });
+
+  it("checks writable directories before launching vllm", () => {
+    const script = renderInferenceScript(base);
+    expect(script).not.toContain('assert_writable_dir "$PROJECTDIR/ivllm"');
+    expect(script).toContain('assert_writable_dir "$FLASHINFER_CACHE_ROOT"');
+    expect(script).toContain('assert_writable_dir "$FLASHINFER_JIT_CACHE_DIR"');
+    expect(script).toContain('assert_writable_dir "$WORK_DIR"');
+    expect(script).toContain('assert_writable_dir "$HF_HOME"');
+  });
+
+  it("marks job failed before exiting on early writable-directory errors", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('fail_job "Required directory is not writable: $dir"');
+    expect(script).toContain('jq --arg error "$error"');
+    expect(script).toContain(".status = \"failed\"");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {
