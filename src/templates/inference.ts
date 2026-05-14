@@ -25,7 +25,7 @@ export CC=gcc
 export CXX=g++
 # Redirect flashinfer JIT cache to Lustre (PROJECTDIR) instead of NFS home (~/.cache).
 # NFS does not support fcntl.flock reliably; Lustre does. Cache persists across jobs.
-export FLASHINFER_JIT_CACHE_DIR=$PROJECTDIR/ivllm/flashinfer_cache
+export FLASHINFER_JIT_CACHE_DIR=$LOCALDIR/ivllm/flashinfer_cache
 # Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
 # FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
 mkdir -p $PROJECTDIR/ivllm/flashinfer_cache ~/.cache

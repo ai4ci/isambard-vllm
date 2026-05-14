@@ -341,7 +341,7 @@ async function updatePiModelsConfigForLaunch(
   
   // Backup existing config if it exists and is not empty
   if (existsSync(piConfigPath)) {
-    const backupPath = `${piConfigPath}.backup-${Date.now()}`;
+    const backupPath = `${piConfigPath}.bak`;
     try {
       copyFileSync(piConfigPath, backupPath);
       console.log(`📋 Backed up existing config to ${backupPath}`);
