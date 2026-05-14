@@ -25,7 +25,7 @@ export CC=gcc
 export CXX=g++
 # Redirect flashinfer JIT cache to a user-private Lustre path instead of NFS home (~/.cache).
 # NFS does not support fcntl.flock reliably; Lustre does. A per-user path avoids shared-dir ownership clashes.
-export FLASHINFER_CACHE_ROOT=$HOME/ivllm/
+export FLASHINFER_CACHE_ROOT=$WORK_DIR/ivllm/
 export FLASHINFER_JIT_CACHE_DIR=$FLASHINFER_CACHE_ROOT/flashinfer_cache
 # Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
 # FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
@@ -69,8 +69,7 @@ persist_slurm_accounting() {
 }
 
 function renderWorkDirSetup(workDir: string): string {
-  return `WORK_DIR="${workDir}"
-assert_writable_dir "$WORK_DIR"
+  return `assert_writable_dir "$WORK_DIR"
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
   ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/plugins"
 fi`;
@@ -188,6 +187,7 @@ JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 SERVER_PORT=${serverPort}
+WORK_DIR="${workDir}"
 COMPUTE_HOSTNAME=$(hostname)
 
 # Write initialising status — LOCAL already created the file with "pending";
@@ -253,6 +253,7 @@ JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 SERVER_PORT=${serverPort}
+WORK_DIR="${workDir}"
 GPUS_PER_NODE=${gpusPerNode}
 HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
 COMPUTE_HOSTNAME=$HEAD_NODE

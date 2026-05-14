@@ -62,8 +62,12 @@ describe("renderInferenceScript", () => {
 
   it("redirects FLASHINFER_JIT_CACHE_DIR to Lustre for reliable flock and persistent cache", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("FLASHINFER_CACHE_ROOT=$HOME/ivllm/");
+    expect(script).toContain("WORK_DIR=\"/home/user/my-job\"");
+    expect(script).toContain("FLASHINFER_CACHE_ROOT=$WORK_DIR/ivllm/");
     expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$FLASHINFER_CACHE_ROOT/flashinfer_cache");
+    const idxWorkDir = script.indexOf('WORK_DIR="/home/user/my-job"');
+    const idxFlashinfer = script.indexOf("FLASHINFER_CACHE_ROOT=$WORK_DIR/ivllm/");
+    expect(idxWorkDir).toBeLessThan(idxFlashinfer);
   });
 
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
@@ -76,6 +80,7 @@ describe("renderInferenceScript", () => {
     expect(script).not.toContain('assert_writable_dir "$PROJECTDIR/ivllm"');
     expect(script).toContain('assert_writable_dir "$FLASHINFER_CACHE_ROOT"');
     expect(script).toContain('assert_writable_dir "$FLASHINFER_JIT_CACHE_DIR"');
+    expect(script).toContain('assert_writable_dir "$HOME/.cache"');
     expect(script).toContain('assert_writable_dir "$WORK_DIR"');
     expect(script).toContain('assert_writable_dir "$HF_HOME"');
   });
