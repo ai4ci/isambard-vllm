@@ -41,6 +41,10 @@ export function hfCachePath(projectDir: string, model: string): string {
   return `${projectDir}/hub/${cacheKey}`;
 }
 
+export function defaultHfHome(): string {
+  return "$HOME/ivllm/hf";
+}
+
 export function parseStartArgs(args: string[]): StartArgs {
   // First positional arg is job name — it must not start with --
   const jobName = args[0] && !args[0].startsWith("--") ? args[0] : null;

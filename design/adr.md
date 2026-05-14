@@ -307,15 +307,19 @@ When Ray actors on worker nodes call flashinfer's JIT build machinery, `FileLock
 
 Setting `FLASHINFER_JIT_CACHE_DIR` to Lustre in the SLURM preamble fixes the login-node and head-node srun steps, but `ray_env.py` does not propagate `FLASHINFER_JIT_CACHE_DIR` to the worker actor processes.
 
-**Decision**: Symlink `~/.cache/flashinfer` → `$PROJECTDIR/ivllm/flashinfer_cache` (Lustre) in the SLURM preamble. This runs before any Ray actor is spawned and ensures that all processes — regardless of how they were launched and regardless of env var propagation — resolve `~/.cache/flashinfer` to Lustre.
+**Decision**: Symlink `~/.cache/flashinfer` → `$HOME/ivllm/flashinfer_cache` (user-private path) in the SLURM preamble. This runs before any Ray actor is spawned and ensures that all processes — regardless of how they were launched and regardless of env var propagation — resolve `~/.cache/flashinfer` to a writable per-user path. The script also performs an explicit writable-directory probe before launch so permission problems fail fast with a clear path.
 
 ```bash
-mkdir -p $PROJECTDIR/ivllm/flashinfer_cache ~/.cache
+export FLASHINFER_CACHE_ROOT=$HOME/ivllm/
+export FLASHINFER_JIT_CACHE_DIR=$FLASHINFER_CACHE_ROOT/flashinfer_cache
+assert_writable_dir "$FLASHINFER_CACHE_ROOT"
+assert_writable_dir "$FLASHINFER_JIT_CACHE_DIR"
+assert_writable_dir "$HOME/.cache"
 if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
-  cp -r ~/.cache/flashinfer/. $PROJECTDIR/ivllm/flashinfer_cache/ 2>/dev/null || true
+  cp -r ~/.cache/flashinfer/. $FLASHINFER_JIT_CACHE_DIR/ 2>/dev/null || true
   rm -rf ~/.cache/flashinfer
 fi
-ln -sfn $PROJECTDIR/ivllm/flashinfer_cache ~/.cache/flashinfer
+ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer
 ```
 
 The `FLASHINFER_JIT_CACHE_DIR` env var is retained alongside the symlink as belt-and-braces.

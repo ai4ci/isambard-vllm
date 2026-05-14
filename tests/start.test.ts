@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { parseJobDetails, hfCachePath, parseStartArgs } from "../src/job.ts";
+import { parseJobDetails, hfCachePath, parseStartArgs, defaultHfHome } from "../src/job.ts";
 
 describe("parseJobDetails", () => {
   it("parses a complete running job", () => {
@@ -50,6 +50,10 @@ describe("parseJobDetails", () => {
 });
 
 describe("hfCachePath", () => {
+  it("uses a per-user home cache root by default", () => {
+    expect(defaultHfHome()).toBe("$HOME/ivllm/hf");
+  });
+
   it("builds path for org/model format", () => {
     expect(hfCachePath("/projects/p/hf", "Qwen/Qwen2.5-0.5B-Instruct"))
       .toBe("/projects/p/hf/hub/models--Qwen--Qwen2.5-0.5B-Instruct");
