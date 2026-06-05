@@ -60,6 +60,13 @@ The json api is probably the easiest to read:
 
 `https://recipes.vllm.ai/<model-id>.json`
 
+The standard model page sometimes has `hardware_overrides.hopper` section.
+
+`https://recipes.vllm.ai/<model-id>/hw/h100.json` (for h100)
+
+`https://recipes.vllm.ai/<model-id>/hw/h200.json` (for h200)
+
+
 Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100), and there is usually no exact recipe for it.
 
 Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVIDIA NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB is usable for each CPU), and 384 GB of GPU memory. In total, there is 844 GB of CPU + GPU memory per node.

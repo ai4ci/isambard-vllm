@@ -37,9 +37,11 @@ if ! command -v uv &>/dev/null; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-mkdir -p $PROJECTDIR/ivllm
+mkdir -p $PROJECTDIR/ivllm $PROJECTDIR/hf
 # Ensure group-writable so other project members can install their own versioned venvs.
 chmod g+w $PROJECTDIR/ivllm
+# Ensure HuggingFace cache directory is also group-writable for shared downloads.
+chmod g+w $PROJECTDIR/hf
 
 # Phase A: Install NVIDIA HPC SDK 26.3 cuda_multi (provides CUDA 12.9 + 13.1)
 if [ ! -d ${nvhpcDir} ]; then

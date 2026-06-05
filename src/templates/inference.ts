@@ -51,6 +51,28 @@ if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
   rm -rf ~/.cache/flashinfer
   fi
   ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer
+
+# Set DeepGEMM JIT cache to SCRATCHDIR (Lustre) if available, falling back to work dir
+export DG_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/deep_gemm_cache
+# Symlink ~/.deep_gemm -> Lustre so that Ray actors (which don't inherit
+# DG_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+mkdir -p "$DG_JIT_CACHE_DIR"
+if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
+  cp -r ~/.deep_gemm/. "$DG_JIT_CACHE_DIR/" 2>/dev/null || true
+  rm -rf ~/.deep_gemm
+fi
+ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
+
+# Set DeepGEMM compiler cache to SCRATCHDIR (Lustre) if available, falling back to work dir
+export DG_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/deep_gemm_cache
+# Symlink ~/.deep_gemm -> Lustre so that Ray actors (which don't inherit
+# DG_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+mkdir -p "$DG_JIT_CACHE_DIR"
+if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
+  cp -r ~/.deep_gemm/. "$DG_JIT_CACHE_DIR/" 2>/dev/null || true
+  rm -rf ~/.deep_gemm
+fi
+ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
 `;
 }
 
@@ -161,6 +183,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 #SBATCH --exclusive
 
 exec > "${workDir}/${jobName}.slurm.log" 2>&1
+umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
@@ -225,6 +248,7 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
 #SBATCH --exclusive
 
 exec > "${workDir}/${jobName}.slurm.log" 2>&1
+umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"

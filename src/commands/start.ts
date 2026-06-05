@@ -306,8 +306,10 @@ Examples:
       console.log(`✓ Model cached at ${cachePath}`);
     } else {
       console.log(`Downloading model ${model} to ${hfHome} on login node...`);
+      // Ensure shared cache directory exists and is group-writable before downloading
+      await ops.runRemote(`mkdir -p ${hfHome} && chmod g+w ${hfHome} 2>/dev/null || true`, { silent: true });
       const hfToken = config.hfToken ?? process.env["HF_TOKEN"] ?? "";
-      const downloadCmd = `source ${config.projectDir}/ivllm/${vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} hf download ${model}`;
+      const downloadCmd = `umask 0002 && source ${config.projectDir}/ivllm/${vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} hf download ${model}`;
       const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
       if (dlCode !== 0) {
         console.error("Error: Model download failed.");

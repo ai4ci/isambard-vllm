@@ -337,6 +337,14 @@ export FLASHINFER_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/flashinfer_cache
 ```
 Using `$SCRATCHDIR` keeps compiled caches isolated per user and per project, uses Lustre (so locking/`flock` is fast and reliable), persists across runs (preventing long re-compilation wait times), and avoids using RAM-backed `$LOCALDIR` which would otherwise reduce compute node memory capacity.
 
+Furthermore, DeepGEMM's JIT compilation of FP8 GEMM kernels at startup can hit multi-node race conditions on atomic directory renames under NFS home directories (`~/.deep_gemm`), failing with `Assertion error: runtime != nullptr`. Because `DG_` prefix environment variables are also stripped by vLLM's `ray_env.py` when spawning Ray worker actors, we apply the exact same symlink pattern for DeepGEMM:
+```bash
+export DG_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/deep_gemm_cache
+# Symlink ~/.deep_gemm -> Lustre so Ray actors bypass NVRTC race conditions
+ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
+```
+This forces all JIT compiled kernels onto Lustre, bypassing NFS metadata caching latency and completely eliminating JIT initialization failures.
+
 Additionally, to ensure reliable multi-node Ray log collection on job exits/failures, the `persist_ray_logs` diagnostic script was updated to use a standard non-login `bash -c` shell and to directly embed the literal `$RAY_DESTINATION` path rather than relying on environment propagation (`--export`), which gets stripped during nested or remote `srun` step invocations. This guarantees that diagnostics successfully execute and copy remote files back to the home directory even under strict Slurm job step cancellation contexts.
 
 ---

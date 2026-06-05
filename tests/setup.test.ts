@@ -71,6 +71,11 @@ describe("renderSetupScript", () => {
     expect(script).toContain("chmod g+w $PROJECTDIR/ivllm");
   });
 
+  it("sets g+w on $PROJECTDIR/hf so all project members can share cached model weights", () => {
+    const script = renderSetupScript(base);
+    expect(script).toContain("chmod g+w $PROJECTDIR/hf");
+  });
+
   it("installs exact vllm version", () => {
     const script = renderSetupScript(base);
     expect(script).toContain("vllm==0.19.1");

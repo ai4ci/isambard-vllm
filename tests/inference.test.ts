@@ -65,9 +65,19 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/flashinfer_cache");
   });
 
+  it("redirects DG_JIT_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("DG_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/deep_gemm_cache");
+  });
+
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("ln -sfn \"$FLASHINFER_JIT_CACHE_DIR\" ~/.cache/flashinfer");
+  });
+
+  it("symlinks ~/.deep_gemm to Lustre so Ray actors inherit Lustre cache without env var", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("ln -sfn \"$DG_JIT_CACHE_DIR\" ~/.deep_gemm");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {
@@ -101,6 +111,10 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).toContain(
       "export HF_HOME=/projects/myproject/hf"
     );
+  });
+
+  it("sets umask 0002 for shared group-writable files", () => {
+    expect(renderInferenceScript(base)).toContain("umask 0002");
   });
 
   it("sets HF_HUB_OFFLINE=1 to prevent API calls when model is already cached", () => {
@@ -221,6 +235,10 @@ const multiNodeBase = {
 describe("renderInferenceScript (multi-node)", () => {
   it("sets --nodes=2 in SBATCH for 2-node job", () => {
     expect(renderInferenceScript(multiNodeBase)).toContain("#SBATCH --nodes=2");
+  });
+
+  it("sets umask 0002 for shared group-writable files", () => {
+    expect(renderInferenceScript(multiNodeBase)).toContain("umask 0002");
   });
 
   it("requests GPUs per node in SBATCH for multi-node overlap compatibility", () => {
