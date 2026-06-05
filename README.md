@@ -10,7 +10,11 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 
 ## Prerequisites
 
-- **Bun** ≥ 1.3 installed locally (`curl -fsSL https://bun.sh/install | bash` or `brew tap oven-sh/bun; brew install bun` on macOS with homebrew installed)
+- **Bun** ≥ 1.3 installed locally (the native TypeScript runtime). If you already have **Node.js / npm** installed, you can install Bun globally in seconds by running:
+  ```bash
+  npm install -g bun
+  ```
+  Otherwise, install via shell script (`curl -fsSL https://bun.sh/install | bash`) or Homebrew (`brew install oven-sh/bun/bun`).
 - A working SSH connection to the Isambard AI login node, with credentials cached in an SSH agent (key-based auth, no interactive password prompts)
 - A HuggingFace account and access token for gated models (stored via `ivllm config --hf-token`). Hugging Face access token can be created from the [Access Token](https://huggingface.co/settings/tokens) page
 
@@ -19,10 +23,17 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 ## Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/ai4ci/isambard-vllm.git
 cd isambard-vllm
+
+# Option A: Using Bun (Recommended)
 bun install
-bun link          # makes `ivllm` available on your PATH
+bun link
+
+# Option B: Using npm
+npm install
+npm link
 ```
 
 > If `bun link` doesn't put the binary on your PATH, add `~/.bun/bin` to your shell's `PATH`.
