@@ -70,6 +70,16 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("DG_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/deep_gemm_cache");
   });
 
+  it("redirects TRITON_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("TRITON_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/triton_cache");
+  });
+
+  it("redirects TORCHINDUCTOR_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("TORCHINDUCTOR_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/torchinductor_cache");
+  });
+
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("ln -sfn \"$FLASHINFER_JIT_CACHE_DIR\" ~/.cache/flashinfer");
@@ -78,6 +88,16 @@ describe("renderInferenceScript", () => {
   it("symlinks ~/.deep_gemm to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("ln -sfn \"$DG_JIT_CACHE_DIR\" ~/.deep_gemm");
+  });
+
+  it("symlinks ~/.triton to Lustre so Ray actors inherit Lustre cache without env var", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("ln -sfn \"$TRITON_CACHE_DIR\" ~/.triton");
+  });
+
+  it("symlinks ~/.cache/torchinductor to Lustre so Ray actors inherit Lustre cache without env var", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("ln -sfn \"$TORCHINDUCTOR_CACHE_DIR\" ~/.cache/torchinductor");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {

@@ -63,16 +63,26 @@ if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
 fi
 ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
 
-# Set DeepGEMM compiler cache to SCRATCHDIR (Lustre) if available, falling back to work dir
-export DG_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/deep_gemm_cache
-# Symlink ~/.deep_gemm -> Lustre so that Ray actors (which don't inherit
-# DG_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
-mkdir -p "$DG_JIT_CACHE_DIR"
-if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
-  cp -r ~/.deep_gemm/. "$DG_JIT_CACHE_DIR/" 2>/dev/null || true
-  rm -rf ~/.deep_gemm
+# Set Triton JIT cache to SCRATCHDIR (Lustre) if available, falling back to work dir
+export TRITON_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/triton_cache
+# Symlink ~/.triton -> Lustre so that Ray actors (which don't inherit
+# TRITON_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+mkdir -p "$TRITON_CACHE_DIR"
+if [ -d ~/.triton ] && [ ! -L ~/.triton ]; then
+  cp -r ~/.triton/. "$TRITON_CACHE_DIR/" 2>/dev/null || true
+  rm -rf ~/.triton
 fi
-ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
+ln -sfn "$TRITON_CACHE_DIR" ~/.triton
+
+# Set TorchInductor cache to SCRATCHDIR (Lustre) if available, falling back to work dir
+export TORCHINDUCTOR_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/torchinductor_cache
+# Symlink ~/.cache/torchinductor -> Lustre so that Ray actors also use Lustre.
+mkdir -p "$TORCHINDUCTOR_CACHE_DIR" ~/.cache
+if [ -d ~/.cache/torchinductor ] && [ ! -L ~/.cache/torchinductor ]; then
+  cp -r ~/.cache/torchinductor/. "$TORCHINDUCTOR_CACHE_DIR/" 2>/dev/null || true
+  rm -rf ~/.cache/torchinductor
+fi
+ln -sfn "$TORCHINDUCTOR_CACHE_DIR" ~/.cache/torchinductor
 `;
 }
 
