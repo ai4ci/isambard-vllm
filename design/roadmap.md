@@ -24,31 +24,20 @@ Preserved as ADR-010 for future consideration (single-node clean versioning; mul
 - Revisit if bare-metal pip install proves fragile across vLLM updates.
 - See `design/implementation.md` Phase F2-alt for full implementation plan.
 
-### Phase F2.6 — AI coding assistant integration via scoder
+### ⚠️ Phase F2.6 — AI coding assistant integration (DEPRECATED)
 
-When `ivllm start` reaches running state, offer to launch the user's AI coding assistant with the vLLM endpoint pre-configured.
+**Status:** Completed but **deprecated**. Will be spun off into separate project and rearchitected to use the Phase F3 model router.
 
-- [x] `src/assistant.ts`: utilities for assistant detection (`binaryExists`, `getAvailableAssistants`, `getScoderAvailable`), config generation (`generateOpencodeConfig`, `generateCopilotEnv`, `generateClaudeEnv`), menu building (`buildAssistantMenuOptions`), launch command generation (`getLaunchCommand`)
-- [x] `launchAssistantMenu()` in `src/commands/start.ts`: initial interactive menu loop — displays cwd, detects available assistants, offers direct/scoder launch options, configures assistant env, launches in new tmux window, loops back on exit
-- [x] Change directory option `[-1]` — prompts for path, validates existence, updates cwd for all subsequent launches
-- [x] `--no-launch` flag — suppresses auto-launch, shows config snippet only
-- [x] Exit flow: `0` pressed once shows snippet, pressed again exits cleanly
-- [x] Scoder integration: `--llm-port <port>` flag opens localhost in sandbox; env vars passed through; scoder autodetects port 11434 but port is always specified explicitly
-- [x] Fallback: if remote tmux fails, falls back to local tmux
-- [x] 56 unit tests across 5 test files (assistant.test.ts, launch-assistant.test.ts, assistant-menu.test.ts, f26-integration.test.ts, f26-menu.test.ts)
+**Original concept:** When `ivllm start` reaches running state, offer to launch AI coding assistants with vLLM endpoint pre-configured.
 
-### Phase F2.6b — Launcher wrapper UX and sbx support
+**Completed work:**
+- [x] `src/assistant.ts`: utilities for assistant detection, config generation, menu building
+- [x] `launchAssistantMenu()` in `src/commands/start.ts`: interactive menu loop
+- [x] Change directory option, `--no-launch` flag, exit flow
+- [x] Scoder and sbx wrapper support
+- [x] 56 unit tests across 5 test files
 
-- [x] Replace the flattened assistant menu with a 3-layer flow:
-  1. target (`change directory` / `OpenCode` / `Copilot` / `Claude` / `shutdown ivllm`)
-  2. wrapper (`none` / `scoder` / `sbx` / `back`)
-  3. action (`launch now` / `show command` / `back`)
-- [x] Always render a shell-ready copy-paste command, including environment variables, for every wrapper mode
-- [x] Keep OpenCode on `OPENCODE_CONFIG_CONTENT` runtime overrides instead of writing `opencode.json`
-- [x] Add `sbx` wrapper support using `sbx exec -it -w <cwd> -e ... <sandbox> <agent>`
-- [x] Resolve sandboxes by agent + workspace, creating them with `sbx create --name <agent>-<basename>` when absent
-- [x] Treat `sbx policy allow network localhost:<port>` as a documented user prerequisite; do not mutate sandbox policy automatically
-- [x] Preserve direct launch and scoder auto-launch behaviour after command display
+**Future:** Agent launcher will become a thin client that queries the model router's `/admin/provider` endpoint. See Phase F3 for details.
 
 ### ⚠ Multi-node inference via Ray (code complete; E2E debugging in progress)
 - `resolveGpuCount` returns `{ gpuCount, nodeCount }` from `pipeline-parallel-size`
@@ -62,16 +51,39 @@ When `ivllm start` reaches running state, offer to launch the user's AI coding a
 See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache races, umask permissions, and custom all-reduce) are successfully resolved, end-to-end multi-node execution validated.
 
 ### Phase F3 — Model routing server
-- Concept: Run a model router LOCAL.
-- Support multiple concurrently running `ivllm` instances on COMPUTE nodes.
-- Auto port assignment from configurable range (default 11435–11534) allowing multiple connections to COMPUTE from LOCAL
-- LOCAL model router is be a lightweight openai API compatible proxy server listening on e.g. port 11434.
-- Agent harness connects to LOCAL:11434.
-- LOCAL model router maintains registry of `vllm.json` configured models and port mapping to COMPUTE nodes if running.
-- LOCAL model router provides custom `/model/add`, `/model/delete`, `/model/status`, `/model/start`, `/model/stop`, `/model/log`  endpoints which provides details of configured models, current running status, options to add models with `vllm.json` configuration, or delete model configurations, and ability to start and stop a named model, and ability to inspect vllm logs.
-- LOCAL model router provides custom `/provider` endpoint which returns opencode compatible provider configuration based on name of models available
-- LOCAL model router provides pass through (routing) implementations of all other vllm supported openai API endpoints based on name of model.
-- LOCAL model router shutdown (Ctrl+C / `exit`) closes all COMPUTE nodes.
-- LOCAL model router automatically shuts down unused models after (e.g. 15 minute) timeout to free up COMPUTE nodes.
-- LOCAL model router automatically starts up models when requested (through model parameter of openai api calls) using cached `vllm.json` config.
-- requests to model router during model startup sequence returns a "Starting up <modelname>, please try again in a few minutes"
+
+**Status:** Design complete (see `design/phase-f3-router.md`), implementation pending.
+
+**Concept:** HTTP server that acts as an OpenAI API-compatible proxy, managing multiple vLLM instances on Isambard COMPUTE nodes. Designed for agent orchestration scenarios.
+
+**Architecture (MVP):**
+- Router runs on user's laptop at `http://localhost:11434`
+- Manages SLURM jobs via SSH to Isambard LOGIN
+- Agents connect to router, router proxies to vLLM backends on COMPUTE nodes
+- Future: router can run on LOGIN node (no SSH timeout)
+
+**Key features:**
+- `GET /v1/models` — OpenAI-compatible model discovery
+- `POST /v1/chat/completions` — Proxied to vLLM with lazy startup
+- Admin API: `/admin/models/*` for model lifecycle management
+- Model registry: `~/.config/ivllm/models.json`
+- Auto port assignment (11435–11534 pool)
+- Idle timeout per model (configurable, -1 = never shutdown)
+- Lazy startup: agent request triggers SLURM job submission
+- Hard cleanup: router shutdown cancels all managed SLURM jobs
+
+**Implementation phases:**
+- [ ] F3.1 — Project scaffold (HTTP server, config loader)
+- [ ] F3.2 — Model registry (CRUD, port pool, state tracking)
+- [ ] F3.3 — SLURM integration (reuse existing templates, SSH abstraction)
+- [ ] F3.4 — OpenAI API proxy (model listing, chat completions)
+- [ ] F3.5 — Admin API (add/remove/start/stop/logs/provider endpoints)
+- [ ] F3.6 — Lifecycle management (lazy startup, idle timeout, health checks)
+- [ ] F3.7 — CLI wrapper (`ivllm router` command)
+- [ ] F3.8 — Documentation (API reference, agent integration examples)
+- [ ] F3.9 — End-to-end testing (lazy startup, concurrent models, cleanup)
+
+**Known limitations (MVP):**
+- 12-hour SSH timeout (requires reconnection or login-node deployment)
+- No persistence (router restart loses model state)
+- Single-user (no authentication)
