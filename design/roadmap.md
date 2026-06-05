@@ -56,10 +56,10 @@ When `ivllm start` reaches running state, offer to launch the user's AI coding a
 - `ivllm start` prints `⚠ Multi-node job: N nodes requested` when applicable
 - No manual SLURM setup required — pipeline-parallel-size in the vllm.yaml is sufficient
 - Extensive environment fixes applied for Isambard AI multi-node (see Phase F2.9 in implementation.md)
-- [ ] 2-node run of Qwen3.5-397B-A17B-FP8 to confirm fully working end-to-end
+- [x] 2-node run of Qwen3.5-397B-A17B-FP8 to confirm fully working end-to-end (Tested & Validated Successfully)
 
 ### Phase F2.9 — Multi-node E2E debugging
-See implementation.md Phase F2.9 for full bug list. All known bugs fixed. Awaiting next test run to confirm.
+See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache races, umask permissions, and custom all-reduce) are successfully resolved, end-to-end multi-node execution validated.
 
 ### Phase F3 — Model routing server
 - Concept: Run a model router LOCAL.

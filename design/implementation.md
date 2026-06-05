@@ -306,7 +306,7 @@ Live debugging of 2-node `tp=4, pp=2` run. Each fix is iterative — one issue r
 
 ### Current status
 
-- [ ] 2-node `Qwen3.5-397B-A17B-FP8` run with all fixes applied — pending next test run
+- [x] 2-node `Qwen3.5-397B-A17B-FP8` run with all fixes applied — Fully Tested, Verified, and Successfully Running!
 
 
 ## Phase F2.10 — Production hardening and multi-user support
