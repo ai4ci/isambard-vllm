@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { ModelRegistry } from './model-registry.js';
 import { JobManager } from './job-manager.js';
 import { RemoteExecutor } from '../types.js';
+import * as http from 'http';
 
 interface RouterOptions {
   port?: number;
@@ -150,9 +151,20 @@ export class RouterService {
         return reply.code(500).send({ error: `Model ${modelName} is in invalid state` });
       }
 
-      // TODO: Proxy to vLLM backend
-      // For now, return placeholder
-      return reply.code(501).send({ error: 'Proxy not yet implemented' });
+      // Proxy to vLLM backend
+      try {
+        const result = await this.proxyRequest(modelName, body);
+        
+        // Update last activity timestamp
+        this.registry.updateState(modelName, { lastActivityAt: new Date() });
+        
+        return reply.code(result.statusCode).send(result.body);
+      } catch (error) {
+        this.server?.log.error(`Proxy error for ${modelName}: ${error}`);
+        return reply.code(502).send({ 
+          error: `Failed to proxy request to ${modelName}: ${error}` 
+        });
+      }
     });
 
     // Admin API: List all models
@@ -274,6 +286,57 @@ export class RouterService {
       };
     });
 
+    // Admin API: Get model health
+    server.get('/admin/models/:name/health', async (request, reply) => {
+      const { name } = request.params as { name: string };
+      const model = this.registry.getModel(name);
+
+      if (!model) {
+        return reply.code(404).send({ error: `Model '${name}' not found` });
+      }
+
+      if (model.runtime?.status !== 'running' || !model.runtime?.port) {
+        return reply.code(400).send({ error: `Model '${name}' is not running` });
+      }
+
+      try {
+        // Check health endpoint on vLLM backend
+        const nodeHostname = model.runtime.nodeHostname || 'localhost';
+        const port = model.runtime.port;
+        const healthUrl = `http://${nodeHostname}:${port}/health`;
+
+        const healthResponse = await new Promise<any>((resolve, reject) => {
+          http.get(healthUrl, { timeout: 5000 }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              try {
+                resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
+              } catch {
+                resolve({ statusCode: res.statusCode, body: { raw: data } });
+              }
+            });
+          }).on('error', reject);
+        });
+
+        // Update last checked timestamp
+        this.registry.updateState(name, { lastActivityAt: new Date() });
+
+        return {
+          status: 'healthy',
+          model: name,
+          backend: healthUrl,
+          response: healthResponse,
+        };
+      } catch (error) {
+        return reply.code(500).send({
+          status: 'unhealthy',
+          model: name,
+          error: `Health check failed: ${error}`,
+        });
+      }
+    });
+
     return server;
   }
 
@@ -284,28 +347,47 @@ export class RouterService {
     const model = this.registry.getModel(name);
     if (!model) throw new Error(`Model ${name} not found`);
 
+    this.server?.log.info(`Starting model ${name}...`);
+
     // Submit SLURM job
     await this.jobManager.submitJob(name, model.configPath);
 
     // Poll until running or failed
     let attempts = 0;
-    const maxAttempts = 120; // 10 minutes max
+    const maxAttempts = 120; // 10 minutes max (120 * 5s)
 
     while (attempts < maxAttempts) {
       await new Promise((resolve) => setTimeout(resolve, 5000)); // Poll every 5s
 
-      const status = await this.jobManager.pollJobStatus(name);
-      if (status.status === 'running') {
-        break;
-      }
-      if (status.status === 'failed' || status.status === 'timeout') {
-        throw new Error(`Model startup failed: ${status.error || 'unknown error'}`);
+      try {
+        const status = await this.jobManager.pollJobStatus(name);
+        
+        if (status.status === 'running') {
+          this.server?.log.info(`Model ${name} is now running on ${status.node_hostname || 'unknown'}:${status.server_port}`);
+          // Initialize lastActivityAt for idle timeout tracking
+          this.registry.updateState(name, { lastActivityAt: new Date() });
+          break;
+        }
+        
+        if (status.status === 'failed' || status.status === 'timeout') {
+          const errorMsg = status.error || 'unknown error';
+          this.server?.log.error(`Model ${name} startup failed: ${errorMsg}`);
+          throw new Error(`Model startup failed: ${errorMsg}`);
+        }
+
+        if (attempts % 12 === 0) { // Log progress every minute
+          this.server?.log.info(`Model ${name} still starting... (${attempts * 5}s)`);
+        }
+      } catch (error) {
+        this.server?.log.error(`Error polling ${name}: ${error}`);
+        throw error;
       }
 
       attempts++;
     }
 
     if (attempts >= maxAttempts) {
+      this.server?.log.error(`Model ${name} startup timeout after 10 minutes`);
       throw new Error('Model startup timeout');
     }
   }
@@ -332,6 +414,55 @@ export class RouterService {
           this.server?.log.error(`Failed to shutdown idle model ${model.name}: ${error}`);
         }
       }
+    });
+  }
+
+  /**
+   * Proxy a request to a vLLM backend
+   */
+  private async proxyRequest(modelName: string, body: any): Promise<{ statusCode: number; body: any }> {
+    const model = this.registry.getModel(modelName);
+    if (!model?.runtime?.port) {
+      throw new Error('Model port not available');
+    }
+
+    // For now, assume direct network access to COMPUTE node
+    // In future, may need SSH tunnel for laptop deployment
+    const nodeHostname = model.runtime.nodeHostname || 'localhost';
+    const port = model.runtime.port;
+    const url = `http://${nodeHostname}:${port}/v1/chat/completions`;
+
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify(body);
+      
+      const req = http.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+        },
+        timeout: 120000, // 2 minute timeout
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const responseBody = JSON.parse(data);
+            resolve({ statusCode: res.statusCode || 200, body: responseBody });
+          } catch {
+            resolve({ statusCode: res.statusCode || 200, body: { raw: data } });
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+
+      req.write(postData);
+      req.end();
     });
   }
 }

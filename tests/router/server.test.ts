@@ -1,7 +1,21 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { createRouterServer, shutdownServer } from '../../src/router/server.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 describe('Router Server', () => {
+  const testConfigDir = '/tmp/ivllm-test_config';
+  const testModelsFile = path.join(testConfigDir, 'models.json');
+
+  beforeEach(() => {
+    fs.mkdirSync(testConfigDir, { recursive: true });
+    fs.writeFileSync(testModelsFile, JSON.stringify({ models: [] }));
+  });
+
+  afterEach(() => {
+    fs.rmSync(testConfigDir, { recursive: true, force: true });
+  });
+
   it('starts and responds to health check', async () => {
     const server = await createRouterServer(11440); // Use non-standard port for testing
     
@@ -62,5 +76,25 @@ describe('Router Server', () => {
     
     // Server should be closed - this would throw if we tried to use it
     expect(server.server.listening).toBe(false);
+  });
+
+  it('returns 404 for unimplemented proxy endpoint in stub server', async () => {
+    const server = await createRouterServer(11444);
+    
+    try {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        body: {
+          model: 'test-model',
+          messages: [{ role: 'user', content: 'Hello' }],
+        },
+      });
+      
+      // Stub server doesn't have full router service, returns 404
+      expect(response.statusCode).toBe(404);
+    } finally {
+      await shutdownServer(server);
+    }
   });
 });
