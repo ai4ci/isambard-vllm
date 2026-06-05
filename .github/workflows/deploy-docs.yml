@@ -40,6 +40,12 @@ jobs:
       - name: Generate API Documentation
         run: bun run docs:generate
 
+    # This ensures the folder exists and bypasses the Jekyll compiler completely
+      - name: Prepare Pages Target
+        run: |
+          mkdir -p ./docs
+          touch ./docs/.nojekyll
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
