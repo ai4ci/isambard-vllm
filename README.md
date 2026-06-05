@@ -63,6 +63,22 @@ Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no 
 
 ---
 
+## Shared Project Architecture (Important for Teams)
+
+To maximize efficiency and conserve HPC storage, `isambard-vllm` uses a **shared multi-user architecture**. It is important to understand which actions are run *once per project allocation* (shared) vs. *once per individual user*:
+
+### 1. Done ONCE per Team (Shared across all project members)
+* **vLLM Setup (`ivllm setup`):** Running `ivllm setup <version>` installs the virtual environment and GPU compilation toolchains into your shared allocation (`/projects/XXXX/ivllm/`). 
+  * Once *any* teammate runs `ivllm setup`, **no other team members need to run it** for that version. Everyone instantly shares the same optimized installation!
+* **Model Downloads:** Model weights are stored in the shared Hugging Face cache at `/projects/XXXX/hf/`.
+  * When any member runs `ivllm start`, the tool checks this shared directory. If *any* teammate has already downloaded the model, it is **reused instantly by everyone**, avoiding duplicated disk space and preventing Hugging Face API rate-limiting (429) blocks.
+
+### 2. Done ONCE per Individual User (on your local machine)
+* **Tool Installation:** Each teammate runs the local installation (`bun install && bun link`) once to install the CLI tool locally.
+* **Local Configuration (`ivllm config`):** Each teammate runs `ivllm config` once on their own local machine to save their personal HPC username (e.g. `YYYY.XXXX`), host, and local port preferences.
+
+---
+
 ## Quickstart
 
 ### 1. Install vLLM on the HPC (one-off per project)
