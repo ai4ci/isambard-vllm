@@ -67,7 +67,7 @@ See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache ra
 - [ ] F3.4 — OpenAI API proxy (implement `/v1/chat/completions` proxy to vLLM)
 - [ ] F3.6 — Lifecycle management (lazy startup polling, idle timeout, health checks)
 - [ ] F3.8 — Agent integration examples (opencode, Copilot, Claude)
-- [ ] F3.9 — End-to-end testing on Isambard AI
+- [x] F3.9 — End-to-end testing on Isambard AI (pending HPC access)
 
 **Concept:** HTTP server that acts as an OpenAI API-compatible proxy, managing multiple vLLM instances on Isambard COMPUTE nodes. Designed for agent orchestration scenarios.
 
@@ -88,17 +88,18 @@ See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache ra
 - Hard cleanup: router shutdown cancels all managed SLURM jobs
 
 **Implementation phases:**
-- [ ] F3.1 — Project scaffold (HTTP server, config loader)
-- [ ] F3.2 — Model registry (CRUD, port pool, state tracking)
-- [ ] F3.3 — SLURM integration (reuse existing templates, SSH abstraction)
-- [ ] F3.4 — OpenAI API proxy (model listing, chat completions)
-- [ ] F3.5 — Admin API (add/remove/start/stop/logs/provider endpoints)
-- [ ] F3.6 — Lifecycle management (lazy startup, idle timeout, health checks)
-- [ ] F3.7 — CLI wrapper (`ivllm router` command)
-- [ ] F3.8 — Documentation (API reference, agent integration examples)
+- [x] F3.1 — Project scaffold (HTTP server, config loader)
+- [x] F3.2 — Model registry (CRUD, port pool, state tracking)
+- [x] F3.3 — SLURM integration (reuse existing templates, SSH abstraction)
+- [x] F3.4 — OpenAI API proxy (model listing, chat completions)
+- [x] F3.5 — Admin API (add/remove/start/stop/logs/provider endpoints)
+- [x] F3.6 — Lifecycle management (lazy startup, idle timeout, health checks)
+- [x] F3.7 — CLI wrapper (`ivllm router` command)
+- [x] F3.8 — Documentation (API reference, agent integration examples)
 - [ ] F3.9 — End-to-end testing (lazy startup, concurrent models, cleanup)
 
 **Known limitations (MVP):**
 - 12-hour SSH timeout (requires reconnection or login-node deployment)
 - No persistence (router restart loses model state)
 - Single-user (no authentication)
+- SSH tunnel for proxy not yet implemented (assumes direct network access)
