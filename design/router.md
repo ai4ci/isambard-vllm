@@ -398,6 +398,337 @@ curl http://localhost:11434/admin/models/<model-name>/logs
 
 **Normal behavior** — model is starting up. Retry after 30s.
 
+## Agent Integration Examples
+
+### Opencode
+
+**Setup:**
+```bash
+# Start the router
+ivllm router
+
+# Get provider configuration
+export OPENAI_BASE_URL=$(curl -s http://localhost:11434/admin/provider | jq -r '.env.OPENAI_BASE_URL')
+
+# Verify models are available
+curl -s http://localhost:11434/admin/models | jq
+```
+
+**Usage:**
+```bash
+# Run opencode with router as backend
+opencode
+
+# Or set permanently in ~/.bashrc
+echo 'export OPENAI_BASE_URL=http://127.0.0.1:11434' >> ~/.bashrc
+```
+
+**Lazy startup:** When you send a request to a stopped model with `autoStart: true`, opencode will receive a 503 response. Configure opencode to retry after 30 seconds.
+
+### GitHub Copilot (Custom Backend)
+
+**Configuration:**
+
+If using Copilot with a custom OpenAI-compatible backend, set the following in your IDE or environment:
+
+```bash
+# Environment variables
+export OPENAI_BASE_URL=http://127.0.0.1:11434
+export OPENAI_API_KEY=not-needed  # Router doesn't require auth by default
+```
+
+**VS Code Settings:**
+```json
+{
+  "github.copilot.advanced": {
+    "customModels": [
+      {
+        "name": "qwen3.5-397b",
+        "baseUrl": "http://127.0.0.1:11434",
+        "apiVersion": "v1"
+      }
+    ]
+  }
+}
+```
+
+### Claude Code
+
+**Setup:**
+```bash
+# Start router and ensure model is running
+ivllm router &
+sleep 5
+curl -X POST http://localhost:11434/admin/models/qwen3.5-397b/start
+
+# Configure Claude Code to use router
+export OPENAI_BASE_URL=http://127.0.0.1:11434
+
+# Run claude
+claude
+```
+
+**Note:** Claude Code expects OpenAI-compatible APIs. The router provides `/v1/chat/completions` which is compatible.
+
+### Custom Agent Script
+
+Example Python script for programmatic access:
+
+```python
+import requests
+import time
+
+ROUTER_URL = "http://localhost:11434"
+MODEL_NAME = "qwen3.5-397b"
+
+def chat_with_model(message: str, max_retries: int = 10):
+    """Send a message to the model with lazy startup support."""
+    
+    url = f"{ROUTER_URL}/v1/chat/completions"
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": "You are a helpful coding assistant."},
+            {"role": "user", "content": message}
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048
+    }
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, json=payload, timeout=120)
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result["choices"][0]["message"]["content"]
+            
+            elif response.status_code == 503:
+                # Model is starting up, wait and retry
+                print(f"Model starting up... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(30)
+                continue
+            
+            else:
+                raise Exception(f"Error {response.status_code}: {response.text}")
+        
+        except requests.exceptions.Timeout:
+            print(f"Request timeout, retrying... ({attempt + 1}/{max_retries})")
+            time.sleep(5)
+    
+    raise Exception("Max retries exceeded")
+
+# Usage
+if __name__ == "__main__":
+    response = chat_with_model("Explain the router architecture")
+    print(response)
+```
+
+### Automated Model Management Script
+
+Bash script for managing models:
+
+```bash
+#!/bin/bash
+# manage-models.sh
+
+ROUTER_URL="http://localhost:11434"
+
+case "$1" in
+  start)
+    echo "Starting model: $2"
+    curl -X POST "$ROUTER_URL/admin/models/$2/start"
+    ;;
+  
+  stop)
+    echo "Stopping model: $2"
+    curl -X POST "$ROUTER_URL/admin/models/$2/stop"
+    ;;
+  
+  status)
+    echo "Model status:"
+    curl -s "$ROUTER_URL/admin/models" | jq
+    ;;
+  
+  health)
+    echo "Health check for $2:"
+    curl -s "$ROUTER_URL/admin/models/$2/health" | jq
+    ;;
+  
+  logs)
+    echo "Logs for $2:"
+    curl -s "$ROUTER_URL/admin/models/$2/logs" | jq
+    ;;
+  
+  list)
+    echo "All models:"
+    curl -s "$ROUTER_URL/admin/models" | jq '.models[] | {name, status, port}'
+    ;;
+  
+  *)
+    echo "Usage: $0 {start|stop|status|health|logs|list} [model-name]"
+    exit 1
+    ;;
+esac
+```
+
+**Usage:**
+```bash
+./manage-models.sh status
+./manage-models.sh start qwen3.5-397b
+./manage-models.sh health qwen3.5-397b
+./manage-models.sh list
+```
+
+### CI/CD Integration
+
+Example GitHub Actions workflow for testing with router:
+
+```yaml
+name: Test with Isambard Router
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: self-hosted
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Start router
+        run: |
+          ivllm router &
+          sleep 5
+      
+      - name: Start test model
+        run: |
+          curl -X POST http://localhost:11434/admin/models \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "test-model",
+              "configPath": "/path/to/test-config.yaml",
+              "autoStart": true
+            }'
+          sleep 60  # Wait for model to start
+      
+      - name: Run tests
+        env:
+          OPENAI_BASE_URL: http://localhost:11434
+        run: |
+          npm test
+```
+
+## Best Practices
+
+### Model Selection Strategy
+
+**For frequently-used models:**
+- Set `idleTimeoutMinutes: -1` (never shutdown)
+- Use `autoStart: true` for instant availability
+- Example: Small models for quick tasks (Qwen3.5-0.5B)
+
+**For large, expensive models:**
+- Set `idleTimeoutMinutes: 30-60` (aggressive shutdown)
+- Use `autoStart: false` (require explicit start)
+- Example: Large models for complex tasks (Qwen3.5-397B)
+
+### Resource Optimization
+
+```json
+{
+  "models": {
+    "always-warm": {
+      "configPath": "/path/to/small-model.yaml",
+      "idleTimeoutMinutes": -1,
+      "autoStart": true
+    },
+    "on-demand": {
+      "configPath": "/path/to/large-model.yaml",
+      "idleTimeoutMinutes": 30,
+      "autoStart": true
+    },
+    "explicit-only": {
+      "configPath": "/path/to/expensive-model.yaml",
+      "idleTimeoutMinutes": 15,
+      "autoStart": false
+    }
+  }
+}
+```
+
+### Monitoring and Alerting
+
+**Health check script:**
+```bash
+#!/bin/bash
+# health-monitor.sh
+
+ROUTER_URL="http://localhost:11434"
+MODELS=("qwen3.5-397b" "qwen3.5-0.5b")
+
+for model in "${MODELS[@]}"; do
+  health=$(curl -s "$ROUTER_URL/admin/models/$model/health")
+  status=$(echo "$health" | jq -r '.status')
+  
+  if [ "$status" != "healthy" ]; then
+    echo "ALERT: $model is unhealthy"
+    # Send notification (email, Slack, etc.)
+  fi
+done
+```
+
+**Cron job for periodic checks:**
+```bash
+# Add to crontab (every 5 minutes)
+*/5 * * * * /path/to/health-monitor.sh
+```
+
+## Performance Considerations
+
+### Network Latency
+
+**Laptop deployment (SSH tunnel):**
+- Requests go: Laptop → SSH → Login node → COMPUTE node
+- Added latency: ~5-20ms per request
+- Suitable for interactive use
+
+**Login node deployment (future):**
+- Requests go: Login node → COMPUTE node
+- Lower latency: ~1-5ms per request
+- Better for high-throughput scenarios
+
+### Concurrent Models
+
+The router supports multiple concurrent models:
+- Each model runs on a separate port
+- Models can share COMPUTE nodes if resources allow
+- Port pool: 100 ports (11435-11534)
+
+**Example scenario:**
+```
+Model A: qwen3.5-0.5b  → Port 11435 → Node 1
+Model B: qwen3.5-32b   → Port 11436 → Node 2
+Model C: qwen3.5-397b  → Port 11437 → Nodes 3-4
+```
+
+### Idle Timeout Tuning
+
+**Short timeout (5-15 minutes):**
+- Pros: Frees up HPC resources quickly
+- Cons: Users wait for model startup
+- Use case: Expensive models, low usage
+
+**Long timeout (60+ minutes):**
+- Pros: Instant response for users
+- Cons: Holds HPC resources
+- Use case: Frequently-used models
+
+**No timeout (-1):**
+- Pros: Always available
+- Cons: Permanent resource usage
+- Use case: Small models, critical workflows
+
 ```bash
 # Poll until running
 watch -n 5 'curl http://localhost:11434/v1/models'
