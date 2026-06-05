@@ -1,0 +1,60 @@
+# vLLM config for deepseek-ai/DeepSeek-V4-Pro on Isambard AI
+#
+# Hardware: 4 × GH200 120GB per node (Isambard AI Phase 1/2) — ~96 GiB usable HBM3e per GPU
+# Model: 1.6T total parameters, 49B active parameters (MoE)
+# Parallelism: tp=16 (4 nodes of 4 GPUs) or tp=8 (2 nodes of 4 GPUs)
+#   - 16 GPUs (4 nodes): Recommended for comfortable KV cache headroom and longer context.
+#   - 8 GPUs (2 nodes): Tight fit but works for standard contexts.
+#   Uses Tensor + Expert Parallel (TEP) with expert layers split via EP.
+#
+# Quantization: Native FP4+FP8 mixed checkpoint (experts are in FP4, dense layers in FP8)
+#   which reduces model weights footprint to ~800 GB.
+#
+# Architecture: Mixture of Experts (MoE) with hybrid CSA+HCA attention
+#   Compressed Sparse Attention (CSA) and Heavily Compressed Attention (HCA)
+#   reduce the KV cache footprint to just 10% of V3.2.
+#   Three-tier reasoning effort: Non-think, Think High, and Think Max.
+#   Function calling: native deepseek_v4 tool-use protocol.
+#
+# Usage (16-GPU): ivllm start <job-name> --config examples/deepseek-v4-pro.yaml
+# Usage (8-GPU):  ivllm start <job-name> --config examples/deepseek-v4-pro.yaml --gpus 8
+
+model: deepseek-ai/DeepSeek-V4-Pro
+tensor-parallel-size: 16
+enable-expert-parallel: true
+
+# Weights occupy ~800 GB. 8 GPUs offer 960 GB VRAM, 16 GPUs offer 1920 GB VRAM.
+# Using FP8 KV cache is required to stay within memory limits.
+kv-cache-dtype: fp8
+block-size: 256
+
+# High context capability up to 1,000,000 tokens (recipe recommends 800K max-model-len)
+max-model-len: 800000
+gpu-memory-utilization: 0.95
+
+# Compilation and decoding optimizations
+compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY"}'
+no-enable-flashinfer-autotune: true
+cc.pass_config.fuse_allreduce_rms: "False"
+
+# Max batch parameters to protect host/GPU RAM
+max-num-seqs: 512
+max-num-batched-tokens: 512
+
+trust-remote-code: true
+
+# Thinking / reasoning — exposes explicit step-by-step reasoning
+reasoning-parser: deepseek_v4
+
+# Tool calling — DeepSeek V4 uses a custom protocol;
+# the deepseek_v4 parser handles serialisation into tool_calls objects.
+enable-auto-tool-choice: true
+tool-call-parser: deepseek_v4
+tokenizer-mode: deepseek_v4
+
+# Prefix caching — valuable for repeated system prompts and CoT contexts.
+enable-prefix-caching: true
+
+min-vllm-version: "0.22.0"
+# min-vllm-version: DeepSeek-V4-Pro support is present in vLLM 0.22.0+.
+# ivllm checks this before submitting; stripped before passing to vLLM.
