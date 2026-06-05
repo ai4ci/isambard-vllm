@@ -52,7 +52,22 @@ See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache ra
 
 ### Phase F3 — Model routing server
 
-**Status:** Design complete (see `design/phase-f3-router.md`), implementation pending.
+**Status:** Implementation in progress (see `design/router.md` for usage guide).
+
+**Core implementation complete:**
+- [x] F3.1 — Project scaffold (Fastify HTTP server, config loader) ✅
+- [x] F3.2 — Model registry (CRUD, port pool, state tracking) ✅
+- [x] F3.3 — SLURM integration (SSH executor, job manager) ✅
+- [x] F3.5 — Admin API (add/remove/start/stop/logs/provider endpoints) ✅
+- [x] F3.7 — CLI wrapper (`ivllm router` command) ✅
+- [x] Router documentation (`design/router.md`) ✅
+- [x] Unit tests (35 tests passing) ✅
+
+**Remaining work:**
+- [ ] F3.4 — OpenAI API proxy (implement `/v1/chat/completions` proxy to vLLM)
+- [ ] F3.6 — Lifecycle management (lazy startup polling, idle timeout, health checks)
+- [ ] F3.8 — Agent integration examples (opencode, Copilot, Claude)
+- [ ] F3.9 — End-to-end testing on Isambard AI
 
 **Concept:** HTTP server that acts as an OpenAI API-compatible proxy, managing multiple vLLM instances on Isambard COMPUTE nodes. Designed for agent orchestration scenarios.
 

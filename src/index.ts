@@ -4,6 +4,7 @@ import { cmdStart } from "./commands/start.ts";
 import { cmdStatus } from "./commands/status.ts";
 import { cmdStop } from "./commands/stop.ts";
 import { cmdAgent } from "./commands/agent.ts";
+import { cmdRouter } from "./commands/router.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 
 const { version } = await import("../package.json");
@@ -20,6 +21,7 @@ Commands:
   stop <job>              Stop a job and clean up (recovery)
   config                  Show or set configuration
   agent                   Launch AI assistant connected to local vLLM server (interactive menu)
+  router                  Start the model router HTTP server
 
 Options:
   --version, -v           Show version
@@ -31,6 +33,7 @@ For command-specific help, run:
   ivllm setup --help      Setup options
   ivllm agent --help      Agent options (including --port)
   ivllm config --help     Config options
+  ivllm router --help     Router options
 `.trim();
 
 switch (command) {
@@ -56,6 +59,9 @@ switch (command) {
     break;
   case "agent":
     await cmdAgent(args);
+    break;
+  case "router":
+    await cmdRouter(args);
     break;
   default:
     console.log(USAGE);
