@@ -400,6 +400,11 @@ describe("renderInferenceScript (multi-node)", () => {
     expect(script).toContain("NCCL_FORCE_FLUSH=0");
   });
 
+  it("sets VLLM_SKIP_CUSTOM_ALL_REDUCE=1 to bypass P2P and symmetric memory handshaking across nodes", () => {
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toContain("export VLLM_SKIP_CUSTOM_ALL_REDUCE=1");
+  });
+
   it("single-node template is unchanged for nodeCount=1", () => {
     const script = renderInferenceScript(base);
     expect(script).not.toContain("ray start");

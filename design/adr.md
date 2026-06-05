@@ -358,6 +358,12 @@ ln -sfn "$TORCHINDUCTOR_CACHE_DIR" ~/.cache/torchinductor
 ```
 This forces all JIT compiled kernels onto high-performance scratch space (Lustre), bypassing NFS locking/metadata caching latency and completely eliminating concurrent JIT initialization failures on multi-node runs.
 
+Additionally, to prevent P2P IPC memory handle errors (`Cuda error ... 'invalid argument'`) during inter-node communication over HPE Slingshot interconnect, we bypass vLLM's custom all-reduce kernels during multi-node runs by exporting:
+```bash
+export VLLM_SKIP_CUSTOM_ALL_REDUCE=1
+```
+This forces vLLM to use standard, fully-supported NCCL collectives for all distributed communication, ensuring extremely robust multi-node model startup.
+
 Additionally, to ensure reliable multi-node Ray log collection on job exits/failures, the `persist_ray_logs` diagnostic script was updated to use a standard non-login `bash -c` shell and to directly embed the literal `$RAY_DESTINATION` path rather than relying on environment propagation (`--export`), which gets stripped during nested or remote `srun` step invocations. This guarantees that diagnostics successfully execute and copy remote files back to the home directory even under strict Slurm job step cancellation contexts.
 
 ---

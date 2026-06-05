@@ -298,6 +298,7 @@ RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0
 export NCCL_CROSS_NIC=1
 export NCCL_FORCE_FLUSH=0
+export VLLM_SKIP_CUSTOM_ALL_REDUCE=1
 
 # Start Ray head node
 # bash -c is used to guarantee venv PATH is active on the compute node,
