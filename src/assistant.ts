@@ -6,7 +6,7 @@
 import { spawnSync } from "child_process";
 import { basename } from "path";
 
-export interface AssistantConfig {
+interface AssistantConfig {
   name: string;
   env: Record<string, string>;
   args: string[];
@@ -31,7 +31,7 @@ export interface OpencodeConfigOptions {
 export type AssistantName = "opencode" | "claude" | "copilot" | "pi";
 export type LaunchWrapper = "none" | "scoder" | "sbx";
 
-export interface AssistantDefinition {
+interface AssistantDefinition {
   name: AssistantName;
   label: string;
 }
@@ -52,7 +52,7 @@ export interface SbxSandbox {
   status?: string;
 }
 
-export const ASSISTANTS: AssistantDefinition[] = [
+const ASSISTANTS: AssistantDefinition[] = [
   { name: "opencode", label: "OpenCode" },
   { name: "copilot", label: "GitHub Copilot" },
   { name: "claude", label: "Claude Code" },
@@ -328,7 +328,7 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
     .filter((row): row is SbxSandbox => row !== null);
 }
 
-export function listSbxSandboxes(): SbxSandbox[] {
+function listSbxSandboxes(): SbxSandbox[] {
   const result = spawnSync("sbx", ["ls", "--json"], {
     encoding: "utf-8",
   });

@@ -1,0 +1,9 @@
+# Dependency and build directories
+node_modules/
+dist/
+bun.lockb
+
+# Documentation folder
+docs/
+tests/
+.opencode/

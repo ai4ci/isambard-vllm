@@ -52,14 +52,16 @@ If the model card is not accessible or the parameter count cannot be determined,
 
 ### 3. Look up the official vLLM recipe (if available)
 
-vLLM recipes can be queried using the huggingface model-id and hardware. Isambard AI's GH200 fals between H100 and H200 in terms of specifications:
+vLLM recipes can be queried using the huggingface model-id and hardware.
 
-e.g.:
+The json api is probably the easiest to read:
 
-`https://recipes.vllm.ai/<model-id>?hardware=h100`
-`https://recipes.vllm.ai/<model-id>?hardware=h200`
+`https://recipes.vllm.ai/models.json` (index)
 
-Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100).
+`https://recipes.vllm.ai/<model-id>.json`
+
+Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100), and there is usually no exact recipe for it.
+
 Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVIDIA NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB is usable for each CPU), and 384 GB of GPU memory. In total, there is 844 GB of CPU + GPU memory per node.
 
 If a recipe exists:

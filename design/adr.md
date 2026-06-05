@@ -330,6 +330,15 @@ The `FLASHINFER_JIT_CACHE_DIR` env var is retained alongside the symlink as belt
 - The symlink is created at SLURM job startup on the head node. Worker nodes run in separate `srun` steps and have their own home directory view; the symlink on the head node does not automatically propagate to workers. However, Ray actor processes on the worker nodes inherit the srun daemon's environment. As long as the srun step that starts the Ray worker daemon also runs the preamble (which it does via `bash -c "source venv && ..."`), the symlink will be created on the worker node too.
 - Stale lock files from previous failed runs should be cleaned up: `rm -rf ~/.cache/flashinfer/*.lock` before the next job.
 
+**Amendment (June 2026)**:
+To avoid group permission conflicts in shared multi-user/multi-model environments, the FlashInfer JIT cache path was relocated to use `$SCRATCHDIR` as the primary directory, with a fallback to the job's working directory (`$WORK_DIR/ivllm/flashinfer_cache`):
+```bash
+export FLASHINFER_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/flashinfer_cache
+```
+Using `$SCRATCHDIR` keeps compiled caches isolated per user and per project, uses Lustre (so locking/`flock` is fast and reliable), persists across runs (preventing long re-compilation wait times), and avoids using RAM-backed `$LOCALDIR` which would otherwise reduce compute node memory capacity.
+
+Additionally, to ensure reliable multi-node Ray log collection on job exits/failures, the `persist_ray_logs` diagnostic script was updated to use a standard non-login `bash -c` shell and to directly embed the literal `$RAY_DESTINATION` path rather than relying on environment propagation (`--export`), which gets stripped during nested or remote `srun` step invocations. This guarantees that diagnostics successfully execute and copy remote files back to the home directory even under strict Slurm job step cancellation contexts.
+
 ---
 
 ## ADR-013: Multi-user project space permissions for shared venv directory

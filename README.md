@@ -10,10 +10,8 @@ http://localhost:11434/v1   ←→   ssh tunnel   ←→   vLLM on COMPUTE node
 
 ## Prerequisites
 
-- **Bun** ≥ 1.3 installed locally (`curl -fsSL https://bun.sh/install | bash` or `brew tap oven-sh/bun;
-brew install bun` on macOS with homebrew installed)
+- **Bun** ≥ 1.3 installed locally (`curl -fsSL https://bun.sh/install | bash` or `brew tap oven-sh/bun; brew install bun` on macOS with homebrew installed)
 - A working SSH connection to the Isambard AI login node, with credentials cached in an SSH agent (key-based auth, no interactive password prompts)
-- SLURM and `jq` available on the HPC
 - A HuggingFace account and access token for gated models (stored via `ivllm config --hf-token`). Hugging Face access token can be created from the [Access Token](https://huggingface.co/settings/tokens) page
 
 ---
@@ -67,7 +65,7 @@ Settings are saved to `~/.config/ivllm/config.json`. Run `ivllm config` with no 
 
 ## Quickstart
 
-### 1. Install vLLM on the HPC (one-off)
+### 1. Install vLLM on the HPC (one-off per project)
 
 ```bash
 ivllm setup 0.19.1
@@ -75,7 +73,7 @@ ivllm setup 0.19.1
 
 This submits a SLURM job on a compute node to install the NVIDIA HPC SDK 26.3 (providing CUDA 12.9 forward compatibility) and the specified vLLM version into a shared versioned directory at `$PROJECT_DIR/ivllm/0.19.1/`. Progress is streamed to your terminal. Takes ~10–20 minutes on first run; skipped automatically if that version is already installed. To install a different version run `ivllm setup <version>` again.
 
-### 2. vLLM config file
+### 2. vLLM config file (examples provided)
 
 The LLM server is configured via a YAML config file (see the [vLLM docs](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)). The config file specifies the model and all serving parameters. Example `vllm.yaml`:
 
@@ -108,7 +106,7 @@ Ready-to-use example configs for popular models are in the [`examples/`](example
 ### 3. Start an inference session
 
 ```bash
-ivllm start my-job --config examples/qwen2.5-instruct.yaml
+ivllm start qwen2 --config examples/qwen2.5-instruct.yaml
 ```
 
 This will:
@@ -130,6 +128,12 @@ Type 'exit' + Enter to stop, or press Ctrl+C
 
 The process stays in the foreground for the lifetime of the session. Press **Ctrl+C** or type **`exit`** to cleanly cancel the SLURM job, close the tunnel, and remove the lockfile.
 
+The config file is cached so if you start the model again all you need is the name:
+
+```bash
+ivllm start qwen2
+```
+
 #### `ivllm start` options
 
 | Flag | Description | Default |
@@ -146,7 +150,7 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 
 After starting vLLM, `ivllm start` offers to launch your AI coding assistant with the endpoint pre-configured. When the menu appears:
 
-- **Layer 1 — target**: choose **OpenCode**, **GitHub Copilot**, **Claude Code**, change directory, show the OpenCode config snippet, or shut down `ivllm`
+- **Layer 1 — target**: choose **OpenCode**, **GitHub Copilot**, **Claude Code**, **Pi**, change directory, or shut down `ivllm`
 - **Layer 2 — wrapper**: choose **direct launch**, **scoder**, or **sbx** (only wrappers available on your machine are shown)
 - **Layer 3 — action**: choose **launch now** or **show copy-paste command**
 
@@ -200,7 +204,7 @@ status.
 
 ```bash
 ivllm status           # all known jobs
-ivllm status my-job    # specific job
+ivllm status qwen2    # specific job
 ```
 
 ### 6. Stop a job (recovery)
@@ -208,7 +212,7 @@ ivllm status my-job    # specific job
 If `ivllm start` exits uncleanly (e.g. terminal closed), use:
 
 ```bash
-ivllm stop my-job
+ivllm stop qwen2
 ```
 
 This cancels the SLURM job, kills any lingering tunnel process, and removes the lockfile so the job name can be reused.
@@ -219,20 +223,7 @@ This cancels the SLURM job, kills any lingering tunnel process, and removes the 
 
 `ivllm` ships an [Agent Skill](https://agentskills.io) for generating `vllm.yaml` files. If you are using an AI coding agent (Cursor, Claude, Windsurf, etc.), the skill will help the agent generate an optimised config for any HuggingFace model on Isambard AI hardware.
 
-**Install the skill** using [skills-npm](https://github.com/antfu/skills-npm). Add `isambard-vllm` as a dependency in your project and run `skills-npm`:
-
-```bash
-# In your project directory (where isambard-vllm is a dependency)
-bun add isambard-vllm
-bunx skills-npm
-```
-
-Or if you have cloned this repo and used `bun link`:
-
-```bash
-cd /path/to/isambard-vllm && bun link
-cd /your/project && bun add isambard-vllm && bunx skills-npm
-```
+**Install the skill** run `bunx skills ai4ci/isambard-vllm`, or `bunx skills-npm` once ivllm is installed:
 
 Once installed, ask your AI agent: *"Generate a vllm.yaml config for `Qwen/Qwen2.5-72B-Instruct`"*
 
@@ -279,7 +270,7 @@ ivllm start
 Preview what `ivllm start` would do without connecting to the HPC:
 
 ```bash
-ivllm start my-job --config vllm.yaml --dry-run
+ivllm start qwen2 --config vllm.yaml --dry-run
 ```
 
 The generated SLURM script and config file are saved to a local temp directory for inspection. All SSH and scp commands are printed but not executed.

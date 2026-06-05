@@ -1,0 +1,24 @@
+{
+  "$schema": "https://typedoc.org",
+  "entryPoints": [
+    "./src/index.ts"
+  ],
+  "out": "./docs",
+  "cleanOutputDir": true,
+  "excludeInternal": true,
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
+  "hideBreadcrumbs": false,
+  "hidePageTitle": false,
+  "useCodeBlocks": true,
+  "exclude": [
+    "**/*.(spec|test).ts",
+    "**/tests/**/*",
+    "**/__tests__/**/*"
+  ],
+  "skipErrorChecking": true,
+  "compilerOptions": {
+    "skipLibCheck": true
+  }
+}

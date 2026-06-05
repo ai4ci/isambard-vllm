@@ -60,14 +60,14 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("CPATH=$NVHPC_ROOT/math_libs/12.9/include:");
   });
 
-  it("redirects FLASHINFER_JIT_CACHE_DIR to Lustre for reliable flock and persistent cache", () => {
+  it("redirects FLASHINFER_JIT_CACHE_DIR to SCRATCHDIR/Lustre for reliable flock and persistent cache", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$WORK_DIR/ivllm/flashinfer_cache");
+    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/flashinfer_cache");
   });
 
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer");
+    expect(script).toContain("ln -sfn \"$FLASHINFER_JIT_CACHE_DIR\" ~/.cache/flashinfer");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {
@@ -264,7 +264,7 @@ describe("renderInferenceScript (multi-node)", () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"');
     expect(script).toContain('readlink -f /local/user/$UID/ray/session_latest');
-    expect(script).toContain('cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DESTINATION/"');
+    expect(script).toContain('cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DEST_LITERAL/"');
   });
 
   it("installs an EXIT trap so diagnostics are still collected after startup failures", () => {

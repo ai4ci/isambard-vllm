@@ -1,4 +1,4 @@
-export type JobStatus = "pending" | "initialising" | "running" | "failed" | "timeout";
+type JobStatus = "pending" | "initialising" | "running" | "failed" | "timeout";
 
 export interface JobDetails {
   status: JobStatus;

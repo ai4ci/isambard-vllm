@@ -41,16 +41,16 @@ mkdir -p "$WORK_DIR/ivllm"
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
   ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
 fi
-# Set flash infer cache to user work dir for per model caching.
-export FLASHINFER_JIT_CACHE_DIR=$WORK_DIR/ivllm/flashinfer_cache
+# Set flash infer cache to SCRATCHDIR (Lustre) if available, falling back to work dir
+export FLASHINFER_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/flashinfer_cache
 # Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
 # FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
-mkdir -p $FLASHINFER_JIT_CACHE_DIR ~/.cache
+mkdir -p "$FLASHINFER_JIT_CACHE_DIR" ~/.cache
 if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
-  cp -r ~/.cache/flashinfer/. $FLASHINFER_JIT_CACHE_DIR/ 2>/dev/null || true
+  cp -r ~/.cache/flashinfer/. "$FLASHINFER_JIT_CACHE_DIR/" 2>/dev/null || true
   rm -rf ~/.cache/flashinfer
   fi
-  ln -sfn $FLASHINFER_JIT_CACHE_DIR ~/.cache/flashinfer
+  ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer
 `;
 }
 
@@ -70,15 +70,15 @@ persist_ray_logs() {
       --nodes=1 \\
       --ntasks-per-node 1 \\
       --cpus-per-task 1 \\
-      --export=ALL,RAY_DESTINATION="$RAY_DESTINATION" \\
-      bash -lc '
+      bash -c '
         RAY_SESSION_DIR=$(readlink -f /local/user/$UID/ray/session_latest 2>/dev/null || true)
-        mkdir -p "$RAY_DESTINATION"
-        if [ -n "$RAY_SESSION_DIR" ] && [ -d "$RAY_SESSION_DIR/logs" ]; then
-          cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DESTINATION/" 2>/dev/null || true
-          printf "%s\\n" "$RAY_SESSION_DIR" > "$RAY_DESTINATION/session_dir.txt"
+        RAY_DEST_LITERAL="'"\$RAY_DESTINATION"'"
+        mkdir -p "\$RAY_DEST_LITERAL"
+        if [ -n "\$RAY_SESSION_DIR" ] && [ -d "\$RAY_SESSION_DIR/logs" ]; then
+          cp -a "\$RAY_SESSION_DIR/logs/." "\$RAY_DEST_LITERAL/" 2>/dev/null || true
+          printf "%s\\n" "\$RAY_SESSION_DIR" > "\$RAY_DEST_LITERAL/session_dir.txt"
         else
-          printf "%s\\n" "No Ray logs found at /local/user/$UID/ray/session_latest" > "$RAY_DESTINATION/missing.txt"
+          printf "%s\\n" "No Ray logs found at /local/user/$UID/ray/session_latest" > "\$RAY_DEST_LITERAL/missing.txt"
         fi
       '; then
       printf "%s\\n" "Finished Ray log archival for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"

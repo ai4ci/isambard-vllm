@@ -155,7 +155,7 @@ export async function launchAssistant(opts: {
   
   // Show assistant menu (similar to start.ts but simplified for agent command)
   while (true) {
-    const targetChoice = await promptAssistantMenu(
+    const targetChoice = await promptMenu(
       `\n🤖 AI assistant launcher\n📍 Working directory: ${cwd}\n\nChoose an assistant target:\n`,
       [
         { key: "opencode", label: "OpenCode", input: "1" },
@@ -195,7 +195,7 @@ export async function launchAssistant(opts: {
        continue;
      }
      
-     const wrapperChoice = await promptWrapperMenu(
+     const wrapperChoice = await promptMenu(
        `\n🎯 Target: ${getAssistantLabel(assistant)}\n📍 Working directory: ${cwd}\n\nChoose a wrapper:\n`,
        [
          ...wrappers.map((wrapper, index) => ({
@@ -210,7 +210,7 @@ export async function launchAssistant(opts: {
      if (wrapperChoice === "back") continue;
      
      const wrapper = wrapperChoice as LaunchWrapper;
-    const action = await promptActionMenu(
+    const action = await promptMenu(
       `\n🚀 ${getAssistantLabel(assistant)} via ${wrapper === "none" ? "direct launch" : wrapper.toUpperCase()}\n\nChoose an action:\n`,
       [
         { key: "launch", label: "Launch now", input: "1" },
@@ -375,45 +375,7 @@ async function updatePiModelsConfigForLaunch(
 /**
  * Prompt for assistant selection
  */
-async function promptAssistantMenu(title: string, options: readonly MenuOption<string>[]): Promise<string> {
-  while (true) {
-    console.log(title);
-    for (const option of options) {
-      console.log(`  [${option.input}] ${option.label}`);
-    }
-    console.log("");
-    
-    const answer = await promptInput("Selection: ");
-    const selected = options.find((option) => option.input === answer);
-    if (selected) return selected.key;
-    
-    console.log(`Invalid selection: ${answer || "(empty)"}. Please try again.\n`);
-  }
-}
-
-/**
- * Prompt for wrapper selection
- */
-async function promptWrapperMenu(title: string, options: readonly MenuOption<string>[]): Promise<string> {
-  while (true) {
-    console.log(title);
-    for (const option of options) {
-      console.log(`  [${option.input}] ${option.label}`);
-    }
-    console.log("");
-    
-    const answer = await promptInput("Selection: ");
-    const selected = options.find((option) => option.input === answer);
-    if (selected) return selected.key;
-    
-    console.log(`Invalid selection: ${answer || "(empty)"}. Please try again.\n`);
-  }
-}
-
-/**
- * Prompt for action selection
- */
-async function promptActionMenu(title: string, options: readonly MenuOption<string>[]): Promise<string> {
+async function promptMenu(title: string, options: readonly MenuOption<string>[]): Promise<string> {
   while (true) {
     console.log(title);
     for (const option of options) {

@@ -1,6 +1,6 @@
 {
   "name": "isambard-vllm",
-  "version": "0.2.23007",
+  "version": "0.2.23009",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
@@ -10,21 +10,35 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "prepare": "skills-npm"
+    "prepare": "skills-npm",
+    "lint": "eslint",
+    "format": "prettier --write -- ",
+    "format:check": "prettier --check --",
+    "docs:generate": "typedoc"
   },
   "files": [
     "skills"
   ],
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.3",
     "skills-npm": "^1.1.1",
-    "ts-node": "^10.9.2"
+    "typedoc-plugin-markdown": "^4.11.0",
+    "typescript-eslint": "^8.59.3"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "js-yaml": "^4.1.1"
+  },
+  "knip": {
+    "ignoreDependencies": [
+      "typedoc-plugin-markdown"
+    ]
   }
 }
