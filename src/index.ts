@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
-import { cmdSetup } from "./commands/setup.ts";
-import { cmdStart } from "./commands/start.ts";
-import { cmdStatus } from "./commands/status.ts";
-import { cmdStop } from "./commands/stop.ts";
-import { cmdList } from "./commands/list.ts";
-import { cmdAgent } from "./commands/agent.ts";
-import { loadConfig, saveConfig } from "./config.ts";
+import { cmdSetup } from './commands/setup.ts';
+import { cmdStart } from './commands/start.ts';
+import { cmdStatus } from './commands/status.ts';
+import { cmdStop } from './commands/stop.ts';
+import { cmdList } from './commands/list.ts';
+import { cmdAgent } from './commands/agent.ts';
+import { loadConfig, saveConfig } from './config.ts';
 
-const { version } = await import("../package.json");
+const { version } = await import('../package.json');
 
 const [, , command, ...args] = process.argv;
 
@@ -36,30 +36,30 @@ For command-specific help, run:
 `.trim();
 
 switch (command) {
-  case "--version":
-  case "-v":
+  case '--version':
+  case '-v':
     console.log(`ivllm ${version}`);
     process.exit(0);
     break;
-  case "setup":
+  case 'setup':
     await cmdSetup(args);
     break;
-  case "start":
+  case 'start':
     await cmdStart(args);
     break;
-  case "status":
+  case 'status':
     await cmdStatus(args);
     break;
-  case "stop":
+  case 'stop':
     await cmdStop(args);
     break;
-  case "list":
+  case 'list':
     await cmdList(args);
     break;
-  case "config":
+  case 'config':
     await cmdConfig(args);
     break;
-  case "agent":
+  case 'agent':
     await cmdAgent(args);
     break;
   default:
@@ -69,7 +69,7 @@ switch (command) {
 
 async function cmdConfig(args: string[]): Promise<void> {
   // Handle help flag
-  if (args.includes("--help") || args.includes("-h")) {
+  if (args.includes('--help') || args.includes('-h')) {
     console.log(`
 Usage: ivllm config [options]
 
@@ -92,17 +92,18 @@ Examples:
   const config = loadConfig();
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length - 1; i++) {
-    if (args[i]?.startsWith("--")) flags[args[i]!.slice(2)] = args[i + 1] ?? "";
+    if (args[i]?.startsWith('--')) flags[args[i]!.slice(2)] = args[i + 1] ?? '';
   }
   if (Object.keys(flags).length === 0) {
     console.log(JSON.stringify(config, null, 2));
     return;
   }
-  if (flags["login-host"]) config.loginHost = flags["login-host"]!;
-  if (flags["username"]) config.username = flags["username"]!;
-  if (flags["project-dir"]) config.projectDir = flags["project-dir"]!;
-  if (flags["default-local-port"]) config.defaultLocalPort = parseInt(flags["default-local-port"]!, 10);
-  if (flags["hf-token"]) config.hfToken = flags["hf-token"]!;
+  if (flags['login-host']) config.loginHost = flags['login-host']!;
+  if (flags['username']) config.username = flags['username']!;
+  if (flags['project-dir']) config.projectDir = flags['project-dir']!;
+  if (flags['default-local-port'])
+    config.defaultLocalPort = parseInt(flags['default-local-port']!, 10);
+  if (flags['hf-token']) config.hfToken = flags['hf-token']!;
   saveConfig(config);
-  console.log("Configuration saved.");
+  console.log('Configuration saved.');
 }

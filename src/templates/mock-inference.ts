@@ -7,9 +7,15 @@ export interface MockInferenceScriptOptions {
   startupDelaySecs?: number;
 }
 
-export function renderMockInferenceScript(opts: MockInferenceScriptOptions): string {
+export function renderMockInferenceScript(
+  opts: MockInferenceScriptOptions,
+): string {
   const {
-    jobName, model, workDir, serverPort, timeLimit,
+    jobName,
+    model,
+    workDir,
+    serverPort,
+    timeLimit,
     startupDelaySecs = 5,
   } = opts;
 

@@ -16,7 +16,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
     `$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib`,
     `$NVHPC_ROOT/math_libs/12.9/lib64`,
     `\${LD_LIBRARY_PATH:-}`,
-  ].join(":");
+  ].join(':');
 
   return `#!/bin/bash
 # ivllm-setup version 0.2.9000
@@ -27,7 +27,7 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
 
 set -euo pipefail
 
-${hfToken ? `export HF_TOKEN=${hfToken}` : ""}
+${hfToken ? `export HF_TOKEN=${hfToken}` : ''}
 exec > "$HOME/.config/ivllm/setup.log" 2>&1
 echo "=== ivllm-setup version 0.2.9000 ==="
 

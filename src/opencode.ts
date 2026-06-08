@@ -14,19 +14,19 @@ export function formatOpencodeSnippet(opts: OpencodeSnippetOptions): string {
     name: `${model} (Isambard)`,
     limit: { context, output: context },
   };
-  if (toolCall) modelEntry["tool_call"] = true;
-  if (reasoning) modelEntry["reasoning"] = true;
+  if (toolCall) modelEntry['tool_call'] = true;
+  if (reasoning) modelEntry['reasoning'] = true;
 
   const snippet = {
-    "$schema": "https://opencode.ai/config.json",
+    $schema: 'https://opencode.ai/config.json',
     model: `isambard-vllm/${model}`,
     provider: {
-      "isambard-vllm": {
-        npm: "@ai-sdk/openai-compatible",
-        name: "Isambard vLLM Server",
+      'isambard-vllm': {
+        npm: '@ai-sdk/openai-compatible',
+        name: 'Isambard vLLM Server',
         options: {
           baseURL: `http://localhost:${localPort}/v1`,
-          apiKey: "EMPTY",
+          apiKey: 'EMPTY',
         },
         models: {
           [model]: modelEntry,

@@ -1,5 +1,5 @@
-import { SACCT_DIAGNOSTICS_FORMAT } from "../slurm.ts";
-import { EnvVarEntry } from "../vllm-config.ts";
+import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
+import { EnvVarEntry } from '../vllm-config.ts';
 
 export interface InferenceScriptOptions {
   jobName: string;
@@ -28,9 +28,9 @@ export CXX=g++`;
 
 /** Renders user-supplied env vars as `export KEY="VALUE"` lines. */
 function renderEnvVars(envVars: EnvVarEntry[]): string {
-  if (envVars.length === 0) return "";
+  if (envVars.length === 0) return '';
   const lines = envVars.map((e) => `export ${e.key}="${e.value}"`);
-  return `# User-supplied environment variables\n${lines.join("\n")}\n`;
+  return `# User-supplied environment variables\n${lines.join('\n')}\n`;
 }
 
 function renderExitDiagnostics(_workDir: string): string {
@@ -131,7 +131,7 @@ persist_ray_logs() {
 }
 
 function renderExitTrap(includeRayLogs: boolean): string {
-  const maybePersistRayLogs = includeRayLogs ? "\n  persist_ray_logs" : "";
+  const maybePersistRayLogs = includeRayLogs ? '\n  persist_ray_logs' : '';
   return `collect_exit_diagnostics() {
   local reason="$1"
   echo "Collecting exit diagnostics ($reason)..."
@@ -190,7 +190,18 @@ finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, timeLimit, envVars } = opts;
+  const {
+    jobName,
+    model,
+    vllmVersion,
+    hfHome,
+    configFileName,
+    workDir,
+    serverPort,
+    gpuCount,
+    timeLimit,
+    envVars,
+  } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
 
   return `#!/bin/bash
@@ -253,13 +264,27 @@ ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
 function renderMultiNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit, envVars } = opts;
+  const {
+    jobName,
+    model,
+    vllmVersion,
+    hfHome,
+    configFileName,
+    workDir,
+    serverPort,
+    gpuCount,
+    nodeCount,
+    timeLimit,
+    envVars,
+  } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const rayObjectStoreMemoryGiB = 64;
-  const envPreamble = envVars.length > 0
-    ? envVars.map((e) => `export ${e.key}="${e.value}"`).join(" && ") + " && "
-    : "";
+  const envPreamble =
+    envVars.length > 0
+      ? envVars.map((e) => `export ${e.key}=\\"${e.value}\\"`).join(' && ') +
+        ' && '
+      : '';
 
   return `#!/bin/bash
 #SBATCH --job-name=${jobName}
@@ -366,5 +391,9 @@ ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
 export function renderInferenceScript(opts: InferenceScriptOptions): string {
-  return (opts.nodeCount > 1 ? renderMultiNodeScript(opts) : renderSingleNodeScript(opts)).trimStart();
+  return (
+    opts.nodeCount > 1
+      ? renderMultiNodeScript(opts)
+      : renderSingleNodeScript(opts)
+  ).trimStart();
 }

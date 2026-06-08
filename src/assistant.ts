@@ -3,8 +3,8 @@
  * Detects available assistants, generates config/env vars for each.
  */
 
-import { spawnSync } from "child_process";
-import { basename } from "path";
+import { spawnSync } from 'child_process';
+import { basename } from 'path';
 
 interface AssistantConfig {
   name: string;
@@ -28,8 +28,8 @@ export interface OpencodeConfigOptions {
   endpointHost?: string;
 }
 
-export type AssistantName = "opencode" | "claude" | "copilot" | "pi";
-export type LaunchWrapper = "none" | "scoder" | "sbx";
+export type AssistantName = 'opencode' | 'claude' | 'copilot' | 'pi';
+export type LaunchWrapper = 'none' | 'scoder' | 'sbx';
 
 interface AssistantDefinition {
   name: AssistantName;
@@ -53,28 +53,32 @@ export interface SbxSandbox {
 }
 
 const ASSISTANTS: AssistantDefinition[] = [
-  { name: "opencode", label: "OpenCode" },
-  { name: "copilot", label: "GitHub Copilot" },
-  { name: "claude", label: "Claude Code" },
-  { name: "pi", label: "Pi" },
+  { name: 'opencode', label: 'OpenCode' },
+  { name: 'copilot', label: 'GitHub Copilot' },
+  { name: 'claude', label: 'Claude Code' },
+  { name: 'pi', label: 'Pi' },
 ];
 
 /**
  * Check if a binary exists on PATH.
  */
 export function binaryExists(name: string): boolean {
-  const result = spawnSync("which", [name], {
+  const result = spawnSync('which', [name], {
     shell: true,
-    encoding: "utf-8",
+    encoding: 'utf-8',
   });
-  return result.status === 0 && result.output[1] != null && result.output[1].trim().length > 0;
+  return (
+    result.status === 0 &&
+    result.output[1] != null &&
+    result.output[1].trim().length > 0
+  );
 }
 
 /**
  * Get the list of assistant binaries available on PATH.
  */
 export function getAvailableAssistants(): string[] {
-  const candidates = ["opencode", "claude", "copilot"];
+  const candidates = ['opencode', 'claude', 'copilot'];
   return candidates.filter(binaryExists);
 }
 
@@ -82,14 +86,14 @@ export function getAvailableAssistants(): string[] {
  * Check if scoder is available on PATH.
  */
 export function getScoderAvailable(): boolean {
-  return binaryExists("scoder");
+  return binaryExists('scoder');
 }
 
 /**
  * Check if sbx is available on PATH.
  */
 export function getSbxAvailable(): boolean {
-  return binaryExists("sbx");
+  return binaryExists('sbx');
 }
 
 export function getAssistantLabel(assistant: AssistantName): string {
@@ -100,22 +104,22 @@ export function getAvailableWrappers(
   assistant: AssistantName,
   availableAssistants: string[],
   hasScoder: boolean,
-  hasSbx: boolean
+  hasSbx: boolean,
 ): LaunchWrapper[] {
   const wrappers: LaunchWrapper[] = [];
   const hasLocalAssistant = availableAssistants.includes(assistant);
 
   // For Pi, we allow wrappers even if the binary isn't installed
   // since it's primarily configuration-based
-  if (assistant === "pi" || hasLocalAssistant) {
-    wrappers.push("none");
+  if (assistant === 'pi' || hasLocalAssistant) {
+    wrappers.push('none');
     if (hasScoder) {
-      wrappers.push("scoder");
+      wrappers.push('scoder');
     }
   }
-  
+
   if (hasSbx) {
-    wrappers.push("sbx");
+    wrappers.push('sbx');
   }
 
   return wrappers;
@@ -124,27 +128,29 @@ export function getAvailableWrappers(
 /**
  * Generate OpenCode config content for ivllm launches.
  */
-export function generateOpencodeConfig(opts: OpencodeConfigOptions): Record<string, unknown> {
+export function generateOpencodeConfig(
+  opts: OpencodeConfigOptions,
+): Record<string, unknown> {
   const context = opts.maxModelLen ?? 4096;
-  const endpointHost = opts.endpointHost ?? "localhost";
+  const endpointHost = opts.endpointHost ?? 'localhost';
 
   const modelEntry: Record<string, unknown> = {
     name: `${opts.model} (Isambard)`,
     limit: { context, output: context },
   };
-  if (opts.toolCall) modelEntry["tool_call"] = true;
-  if (opts.reasoning) modelEntry["reasoning"] = true;
+  if (opts.toolCall) modelEntry['tool_call'] = true;
+  if (opts.reasoning) modelEntry['reasoning'] = true;
 
   return {
-    "$schema": "https://opencode.ai/config.json",
+    $schema: 'https://opencode.ai/config.json',
     model: `isambard-vllm/${opts.model}`,
     provider: {
-      "isambard-vllm": {
-        npm: "@ai-sdk/openai-compatible",
-        name: "Isambard vLLM Server",
+      'isambard-vllm': {
+        npm: '@ai-sdk/openai-compatible',
+        name: 'Isambard vLLM Server',
         options: {
           baseURL: `http://${endpointHost}:${opts.localPort}/v1`,
-          apiKey: "EMPTY",
+          apiKey: 'EMPTY',
         },
         models: {
           [opts.model]: modelEntry,
@@ -157,7 +163,9 @@ export function generateOpencodeConfig(opts: OpencodeConfigOptions): Record<stri
 /**
  * Generate runtime environment overrides for OpenCode.
  */
-export function generateOpencodeEnv(opts: OpencodeConfigOptions): Record<string, string> {
+export function generateOpencodeEnv(
+  opts: OpencodeConfigOptions,
+): Record<string, string> {
   return {
     OPENCODE_CONFIG_CONTENT: JSON.stringify(generateOpencodeConfig(opts)),
   };
@@ -168,13 +176,13 @@ export function generateOpencodeEnv(opts: OpencodeConfigOptions): Record<string,
  */
 export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
   const context = opts.maxModelLen ?? 4096;
-  
+
   const modelEntry: Record<string, unknown> = {
     id: opts.model,
     name: `${opts.model} (Isambard)`,
     contextWindow: context,
     maxTokens: context,
-    input: ["text"],
+    input: ['text'],
     reasoning: opts.reasoning ?? false,
     // vLLM doesn't understand the "developer" role used for reasoning-capable models
     // so we send the system prompt as a "system" message instead.
@@ -182,35 +190,38 @@ export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
       supportsDeveloperRole: false,
     },
   };
-  
+
   // Add thinking level map if reasoning is enabled
   if (opts.reasoning) {
-    modelEntry["thinkingLevelMap"] = {
-      "off": null, // Disable thinking when not needed
-      "minimal": null,
-      "low": null,
-      "medium": null,
-      "high": "high",
-      "xhigh": "max"
+    modelEntry['thinkingLevelMap'] = {
+      off: null, // Disable thinking when not needed
+      minimal: null,
+      low: null,
+      medium: null,
+      high: 'high',
+      xhigh: 'max',
     };
   }
-  
+
   return {
     providers: {
-      "isambard-vllm": {
+      'isambard-vllm': {
         baseUrl: `http://localhost:${opts.localPort}/v1`,
-        apiKey: "EMPTY",
-        api: "openai-completions",
-        models: [modelEntry]
-      }
-    }
+        apiKey: 'EMPTY',
+        api: 'openai-completions',
+        models: [modelEntry],
+      },
+    },
   };
 }
 
 /**
  * Generate environment variables for GitHub Copilot.
  */
-export function generateCopilotEnv(localPort: number, model: string): Record<string, string> {
+export function generateCopilotEnv(
+  localPort: number,
+  model: string,
+): Record<string, string> {
   return {
     COPILOT_PROVIDER_BASE_URL: `http://localhost:${localPort}/v1`,
     COPILOT_MODEL: model,
@@ -220,10 +231,13 @@ export function generateCopilotEnv(localPort: number, model: string): Record<str
 /**
  * Generate environment variables for Claude Code.
  */
-export function generateClaudeEnv(localPort: number, model: string): Record<string, string> {
+export function generateClaudeEnv(
+  localPort: number,
+  model: string,
+): Record<string, string> {
   return {
     ANTHROPIC_BASE_URL: `http://localhost:${localPort}`,
-    ANTHROPIC_API_KEY: "ollama",
+    ANTHROPIC_API_KEY: 'ollama',
     ANTHROPIC_DEFAULT_SONNET_MODEL: model,
     ANTHROPIC_DEFAULT_OPUS_MODEL: model,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
@@ -233,36 +247,45 @@ export function generateClaudeEnv(localPort: number, model: string): Record<stri
 
 export function generateAssistantEnv(
   assistant: AssistantName,
-  opts: AssistantEnvOptions
+  opts: AssistantEnvOptions,
 ): Record<string, string> {
-  const endpointHost = opts.endpointHost ?? "localhost";
+  const endpointHost = opts.endpointHost ?? 'localhost';
 
   switch (assistant) {
-    case "opencode":
+    case 'opencode':
       return generateOpencodeEnv({ ...opts, endpointHost });
-    case "copilot":
+    case 'copilot':
       return {
         ...generateCopilotEnv(opts.localPort, opts.model),
         COPILOT_PROVIDER_BASE_URL: `http://${endpointHost}:${opts.localPort}/v1`,
       };
-    case "claude":
+    case 'claude':
       return {
         ...generateClaudeEnv(opts.localPort, opts.model),
         ANTHROPIC_BASE_URL: `http://${endpointHost}:${opts.localPort}`,
       };
-    case "pi":
+    case 'pi':
       // Pi assistant works via configuration files, not environment variables
       return {};
   }
 }
 
-export function buildSandboxName(assistant: AssistantName | undefined, cwd: string): string {
-  const assistantName = assistant ?? "opencode";
-  const workspace = basename(cwd).replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `${assistantName}-${workspace || "workspace"}`;
+export function buildSandboxName(
+  assistant: AssistantName | undefined,
+  cwd: string,
+): string {
+  const assistantName = assistant ?? 'opencode';
+  const workspace = basename(cwd)
+    .replace(/[^A-Za-z0-9.+-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${assistantName}-${workspace || 'workspace'}`;
 }
 
-export function buildSandboxCreateCommand(assistant: AssistantName, cwd: string, sandboxName?: string): string {
+export function buildSandboxCreateCommand(
+  assistant: AssistantName,
+  cwd: string,
+  sandboxName?: string,
+): string {
   const name = sandboxName ?? buildSandboxName(assistant, cwd);
   return `sbx create --name ${shellQuote(name)} ${assistant} ${shellQuote(cwd)}`;
 }
@@ -274,30 +297,36 @@ function shellQuote(value: string): string {
 function formatInlineEnv(env: Record<string, string>): string {
   return Object.entries(env ?? {})
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
-    .join(" ");
+    .join(' ');
 }
 
 function getAssistantArgs(assistant: AssistantName): string[] {
-  return assistant === "copilot" ? ["--continue"] : [];
+  return assistant === 'copilot' ? ['--continue'] : [];
 }
 
 export function buildLaunchCommand(opts: LaunchCommandOptions): string {
-  const endpointHost = opts.wrapper === "sbx" ? "host.docker.internal" : "localhost";
+  const endpointHost =
+    opts.wrapper === 'sbx' ? 'host.docker.internal' : 'localhost';
   const env = generateAssistantEnv(opts.assistant, { ...opts, endpointHost });
-  const agentCommand = [opts.assistant, ...getAssistantArgs(opts.assistant)].join(" ");
+  const agentCommand = [
+    opts.assistant,
+    ...getAssistantArgs(opts.assistant),
+  ].join(' ');
 
-  if (opts.wrapper === "sbx") {
-    const sandboxName = opts.sandboxName ?? buildSandboxName(opts.assistant, opts.cwd);
+  if (opts.wrapper === 'sbx') {
+    const sandboxName =
+      opts.sandboxName ?? buildSandboxName(opts.assistant, opts.cwd);
     const envFlags = Object.entries(env)
       .map(([key, value]) => `-e ${shellQuote(`${key}=${value}`)}`)
-      .join(" ");
+      .join(' ');
     return `sbx exec -it -w ${shellQuote(opts.cwd)} ${envFlags} ${sandboxName} ${agentCommand}`.trim();
   }
 
   const envPrefix = formatInlineEnv(env);
-  const base = opts.wrapper === "scoder"
-    ? `scoder --llm-port ${opts.localPort} ${agentCommand}`
-    : agentCommand;
+  const base =
+    opts.wrapper === 'scoder'
+      ? `scoder --llm-port ${opts.localPort} ${agentCommand}`
+      : agentCommand;
   return `cd ${shellQuote(opts.cwd)} && ${envPrefix} ${base}`.trim();
 }
 
@@ -313,61 +342,97 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
 
   const rows: unknown[] = Array.isArray(parsed)
     ? parsed
-    : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>)["sandboxes"])
-      ? (parsed as Record<string, unknown>)["sandboxes"] as unknown[]
+    : typeof parsed === 'object' &&
+        parsed !== null &&
+        Array.isArray((parsed as Record<string, unknown>)['sandboxes'])
+      ? ((parsed as Record<string, unknown>)['sandboxes'] as unknown[])
       : [];
 
   return rows
     .map((row) => {
       const record = row as Record<string, unknown>;
-      const name = String(record["name"] ?? record["Name"] ?? record["sandbox"] ?? record["SANDBOX"] ?? "");
-      const agent = String(record["agent"] ?? record["Agent"] ?? record["AGENT"] ?? "");
-      const workspace = String(record["workspace"] ?? record["Workspace"] ?? record["WORKSPACE"] ?? "");
-      const status = String(record["status"] ?? record["Status"] ?? record["STATUS"] ?? "");
+      const name = String(
+        record['name'] ??
+          record['Name'] ??
+          record['sandbox'] ??
+          record['SANDBOX'] ??
+          '',
+      );
+      const agent = String(
+        record['agent'] ?? record['Agent'] ?? record['AGENT'] ?? '',
+      );
+      const workspace = String(
+        record['workspace'] ?? record['Workspace'] ?? record['WORKSPACE'] ?? '',
+      );
+      const status = String(
+        record['status'] ?? record['Status'] ?? record['STATUS'] ?? '',
+      );
 
       if (!name || !agent || !workspace) return null;
-      return { name, agent, workspace, status: status || undefined } as SbxSandbox;
+      return {
+        name,
+        agent,
+        workspace,
+        status: status || undefined,
+      } as SbxSandbox;
     })
     .filter((row): row is SbxSandbox => row !== null);
 }
 
 function listSbxSandboxes(): SbxSandbox[] {
-  const result = spawnSync("sbx", ["ls", "--json"], {
-    encoding: "utf-8",
+  const result = spawnSync('sbx', ['ls', '--json'], {
+    encoding: 'utf-8',
   });
   if (result.status !== 0) {
-    throw new Error(result.stderr?.trim() || "sbx ls --json failed");
+    throw new Error(result.stderr?.trim() || 'sbx ls --json failed');
   }
   return parseSbxSandboxes(result.stdout);
 }
 
-export function findMatchingSandbox(sandboxes: SbxSandbox[], assistant: AssistantName, cwd: string): SbxSandbox | null {
+export function findMatchingSandbox(
+  sandboxes: SbxSandbox[],
+  assistant: AssistantName,
+  cwd: string,
+): SbxSandbox | null {
   // Normalize the input cwd for comparison
   const normalizedCwd = cwd.trim();
-  
-  return sandboxes.find((sandbox) => {
-    // Normalize the sandbox fields for comparison
-    const normalizedAgent = sandbox.agent?.toLowerCase() ?? '';
-    const normalizedWorkspace = sandbox.workspace?.trim() ?? '';
-    
-    // Check for exact match first
-    if (normalizedAgent === assistant.toLowerCase() && normalizedWorkspace === normalizedCwd) {
-      return true;
-    }
-    
-    // Check if workspace matches when ignoring trailing slashes
-    const workspaceWithoutTrailingSlash = normalizedWorkspace.replace(/\/+$/, '');
-    const cwdWithoutTrailingSlash = normalizedCwd.replace(/\/+$/, '');
-    if (normalizedAgent === assistant.toLowerCase() && 
-        workspaceWithoutTrailingSlash === cwdWithoutTrailingSlash) {
-      return true;
-    }
-    
-    return false;
-  }) ?? null;
+
+  return (
+    sandboxes.find((sandbox) => {
+      // Normalize the sandbox fields for comparison
+      const normalizedAgent = sandbox.agent?.toLowerCase() ?? '';
+      const normalizedWorkspace = sandbox.workspace?.trim() ?? '';
+
+      // Check for exact match first
+      if (
+        normalizedAgent === assistant.toLowerCase() &&
+        normalizedWorkspace === normalizedCwd
+      ) {
+        return true;
+      }
+
+      // Check if workspace matches when ignoring trailing slashes
+      const workspaceWithoutTrailingSlash = normalizedWorkspace.replace(
+        /\/+$/,
+        '',
+      );
+      const cwdWithoutTrailingSlash = normalizedCwd.replace(/\/+$/, '');
+      if (
+        normalizedAgent === assistant.toLowerCase() &&
+        workspaceWithoutTrailingSlash === cwdWithoutTrailingSlash
+      ) {
+        return true;
+      }
+
+      return false;
+    }) ?? null
+  );
 }
 
-export function ensureSbxSandbox(assistant: AssistantName, cwd: string): { sandboxName: string; created: boolean } {
+export function ensureSbxSandbox(
+  assistant: AssistantName,
+  cwd: string,
+): { sandboxName: string; created: boolean } {
   const sandboxes = listSbxSandboxes();
   const existing = findMatchingSandbox(sandboxes, assistant, cwd);
   if (existing) {
@@ -375,10 +440,14 @@ export function ensureSbxSandbox(assistant: AssistantName, cwd: string): { sandb
   }
 
   const sandboxName = buildSandboxName(assistant, cwd);
-  const result = spawnSync("sbx", ["create", "--name", sandboxName, assistant, cwd], {
-    encoding: "utf-8",
-    stdio: "inherit",
-  });
+  const result = spawnSync(
+    'sbx',
+    ['create', '--name', sandboxName, assistant, cwd],
+    {
+      encoding: 'utf-8',
+      stdio: 'inherit',
+    },
+  );
   if (result.status !== 0) {
     throw new Error(`sbx create failed for ${sandboxName}`);
   }
@@ -390,7 +459,7 @@ export function ensureSbxSandbox(assistant: AssistantName, cwd: string): { sandb
  */
 export function buildAssistantMenuOptions(
   assistants: string[],
-  hasScoder: boolean
+  hasScoder: boolean,
 ): AssistantOption[] {
   const options: AssistantOption[] = [];
   let id = 1;
@@ -402,7 +471,12 @@ export function buildAssistantMenuOptions(
 
     // Scoder option (if available)
     if (hasScoder) {
-      options.push({ id, label: `scoder ${assistant}`, assistant, useScoder: true });
+      options.push({
+        id,
+        label: `scoder ${assistant}`,
+        assistant,
+        useScoder: true,
+      });
       id++;
     }
   }
@@ -415,10 +489,13 @@ export function buildAssistantMenuOptions(
  */
 export function getLaunchCommand(
   assistant: AssistantName,
-  useScoder: boolean
+  useScoder: boolean,
 ): { binary: string; args: string[] } {
   if (useScoder) {
-    return { binary: "scoder", args: [assistant, ...getAssistantArgs(assistant)] };
+    return {
+      binary: 'scoder',
+      args: [assistant, ...getAssistantArgs(assistant)],
+    };
   }
   return { binary: assistant, args: getAssistantArgs(assistant) };
 }

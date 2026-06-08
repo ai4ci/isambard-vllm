@@ -162,7 +162,7 @@ describe("renderInferenceScript", () => {
     // Env vars should appear inside at least one bash -c block
     const blocks = script.split("bash -c");
     const hasInBlock = blocks.some(
-      (b) => b.includes('export VLLM_SPECIAL="yes"'),
+      (b) => b.includes('export VLLM_SPECIAL=\\"yes\\"'),
     );
     expect(hasInBlock).toBe(true);
   });
@@ -182,7 +182,7 @@ describe("renderInferenceScript", () => {
     expect(bashIdx).toBeGreaterThan(-1);
     // Walk forwards to find the closing quote of bash -c
     const block = script.slice(bashIdx, serveIdx + 50);
-    expect(block).toContain('export VLLM_SPECIAL="yes"');
+    expect(block).toContain('export VLLM_SPECIAL=\\"yes\\"');
   });
 
   it("does not render env exports when envVars is empty (multi-node)", () => {

@@ -1,27 +1,39 @@
-import { readFileSync, existsSync } from "fs";
-import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
-import { join, basename } from "path";
-import { tmpdir } from "os";
-import { createInterface } from "readline";
-import { type ChildProcess } from "child_process";
-import { loadConfig, assertConfigured } from "../config.ts";
-import { launchAssistant } from "./agent.ts";
-import { spawnTunnel } from "../ssh.ts";
-import { runRemote } from "../ssh.ts";
-const { version: ivllmVersion } = await import("../../package.json");
+import { readFileSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdtempSync } from 'fs';
+import { join, basename } from 'path';
+import { tmpdir } from 'os';
+import { createInterface } from 'readline';
+import { type ChildProcess } from 'child_process';
+import { loadConfig, assertConfigured } from '../config.ts';
+import { launchAssistant } from './agent.ts';
+import { spawnTunnel } from '../ssh.ts';
+import { runRemote } from '../ssh.ts';
+const { version: ivllmVersion } = await import('../../package.json');
 import {
   submitJob,
   pollJobStatus,
   getSlurmQueueState,
   buildSacctDiagnosticsCommand,
   sacctDiagnosticsSettled,
-} from "../slurm.ts";
-import { renderInferenceScript } from "../templates/inference.ts";
-import { renderMockInferenceScript } from "../templates/mock-inference.ts";
-import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
-import { makeRemoteOps } from "../remote-ops.ts";
-import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig, parseEnvVars } from "../vllm-config.ts";
-import { semverGte, semverSort } from "../semver.ts";
+} from '../slurm.ts';
+import { renderInferenceScript } from '../templates/inference.ts';
+import { renderMockInferenceScript } from '../templates/mock-inference.ts';
+import {
+  parseJobDetails,
+  hfCachePath,
+  parseStartArgs,
+  type JobDetails,
+} from '../job.ts';
+import { makeRemoteOps } from '../remote-ops.ts';
+import {
+  parseVllmConfig,
+  resolveGpuCount,
+  writeStrippedConfig,
+  jobConfigPath,
+  saveJobConfig,
+  parseEnvVars,
+} from '../vllm-config.ts';
+import { semverGte, semverSort } from '../semver.ts';
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -32,8 +44,11 @@ const SLURM_POLL_INTERVAL_MS = 60_000;
  * Given a list of installed vLLM versions and a minimum required version,
  * returns the highest installed version that satisfies the minimum, or null if none do.
  */
-export function selectBestVersion(installed: string[], minVersion: string): string | null {
-  const candidates = installed.filter(v => semverGte(v, minVersion));
+export function selectBestVersion(
+  installed: string[],
+  minVersion: string,
+): string | null {
+  const candidates = installed.filter((v) => semverGte(v, minVersion));
   if (candidates.length === 0) return null;
   return semverSort(candidates)[0]!;
 }
@@ -42,17 +57,23 @@ export function selectBestVersion(installed: string[], minVersion: string): stri
  * Lists installed vLLM versions by scanning $PROJECTDIR/ivllm/ for versioned venv directories.
  * Returns versions that have a bin/ directory (i.e. are complete installs).
  */
-async function listInstalledVersions(config: import("../config.ts").Config, ops: ReturnType<typeof makeRemoteOps>): Promise<string[]> {
+async function listInstalledVersions(
+  config: import('../config.ts').Config,
+  ops: ReturnType<typeof makeRemoteOps>,
+): Promise<string[]> {
   const { stdout } = await ops.runRemote(
     `ls -d ${config.projectDir}/ivllm/*/bin 2>/dev/null | sed 's|.*/ivllm/||; s|/bin||'`,
-    { silent: true }
+    { silent: true },
   );
-  return stdout.trim().split("\n").filter(v => v && /^\d+\.\d+/.test(v));
+  return stdout
+    .trim()
+    .split('\n')
+    .filter((v) => v && /^\d+\.\d+/.test(v));
 }
 
 export async function cmdStart(args: string[]): Promise<void> {
   // Handle help flag
-  if (args.includes("--help") || args.includes("-h")) {
+  if (args.includes('--help') || args.includes('-h')) {
     console.log(`
 Usage: ivllm start <job> [options]
 
@@ -74,15 +95,24 @@ Examples:
   }
 
   const config = loadConfig();
-  try { assertConfigured(config); } catch (e) { console.error("Error:", (e as Error).message); process.exit(1); }
+  try {
+    assertConfigured(config);
+  } catch (e) {
+    console.error('Error:', (e as Error).message);
+    process.exit(1);
+  }
 
   let startArgs;
   try {
     startArgs = parseStartArgs(args);
   } catch (e) {
-    console.error("Error:", (e as Error).message);
-    console.error("Usage: ivllm start <job> [--config <file>] [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]");
-    console.error("       ivllm start <job> --mock --model <model> [--local-port <port>] [--time <hh:mm:ss>]");
+    console.error('Error:', (e as Error).message);
+    console.error(
+      'Usage: ivllm start <job> [--config <file>] [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]',
+    );
+    console.error(
+      '       ivllm start <job> --mock --model <model> [--local-port <port>] [--time <hh:mm:ss>]',
+    );
     process.exit(1);
   }
 
@@ -96,19 +126,23 @@ Examples:
   const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
 
   // Set up dry-run temp dir and RemoteOps (needed before version discovery)
-  const dryRunDir = startArgs.dryRun ? mkdtempSync(join(tmpdir(), "ivllm-dryrun-")) : undefined;
+  const dryRunDir = startArgs.dryRun
+    ? mkdtempSync(join(tmpdir(), 'ivllm-dryrun-'))
+    : undefined;
   const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
 
   // ── Pre-flight ──────────────────────────────────────────────────────────────
   // Check SSH connectivity early, before any remote operations
   if (!startArgs.dryRun) {
-    console.log("Checking SSH connectivity...");
-    const { exitCode: sshCheck } = await ops.runRemote("echo ok", { silent: true });
+    console.log('Checking SSH connectivity...');
+    const { exitCode: sshCheck } = await ops.runRemote('echo ok', {
+      silent: true,
+    });
     if (sshCheck !== 0) {
-      console.error("Error: Cannot connect to login node.");
+      console.error('Error: Cannot connect to login node.');
       process.exit(1);
     }
-    console.log("✓ SSH connectivity OK");
+    console.log('✓ SSH connectivity OK');
   }
 
   // Resolve config file: if --config provided, save to job store; if omitted, load from store.
@@ -118,12 +152,16 @@ Examples:
       try {
         saveJobConfig(jobName, configFile);
       } catch (e) {
-        console.warn(`Warning: Could not save config to job store: ${(e as Error).message}`);
+        console.warn(
+          `Warning: Could not save config to job store: ${(e as Error).message}`,
+        );
       }
     } else {
       const stored = jobConfigPath(jobName);
       if (!existsSync(stored)) {
-        console.error(`Error: No --config provided and no stored config found for '${jobName}'.`);
+        console.error(
+          `Error: No --config provided and no stored config found for '${jobName}'.`,
+        );
         console.error(`  First run: ivllm start ${jobName} --config <path>`);
         process.exit(1);
       }
@@ -146,17 +184,21 @@ Examples:
     model = startArgs.model!;
     gpuCount = startArgs.gpuCount ?? 1;
     nodeCount = 1;
-    vllmVersion = "mock";
+    vllmVersion = 'mock';
   } else {
     let yamlConfig;
     try {
       yamlConfig = parseVllmConfig(configFile!);
     } catch (e) {
-      console.error(`Error reading config file '${configFile}': ${(e as Error).message}`);
+      console.error(
+        `Error reading config file '${configFile}': ${(e as Error).message}`,
+      );
       process.exit(1);
     }
     if (!yamlConfig.model) {
-      console.error(`Error: 'model' is required in the vLLM config file '${configFile}'.`);
+      console.error(
+        `Error: 'model' is required in the vLLM config file '${configFile}'.`,
+      );
       process.exit(1);
     }
     model = yamlConfig.model;
@@ -172,16 +214,22 @@ Examples:
     const minVersion = yamlConfig.minVllmVersion;
     const installed = await listInstalledVersions(config, ops);
     if (installed.length === 0) {
-      console.error(`Error: No vLLM installation found at ${config.projectDir}/ivllm/.`);
-      console.error(minVersion
-        ? `  Run: ivllm setup ${minVersion}`
-        : `  Run: ivllm setup <version>`);
+      console.error(
+        `Error: No vLLM installation found at ${config.projectDir}/ivllm/.`,
+      );
+      console.error(
+        minVersion
+          ? `  Run: ivllm setup ${minVersion}`
+          : `  Run: ivllm setup <version>`,
+      );
       process.exit(1);
     }
     if (minVersion) {
       const best = selectBestVersion(installed, minVersion);
       if (!best) {
-        console.error(`Error: config requires vLLM >= ${minVersion} but installed versions are: ${installed.join(", ")}`);
+        console.error(
+          `Error: config requires vLLM >= ${minVersion} but installed versions are: ${installed.join(', ')}`,
+        );
         console.error(`  Run: ivllm setup ${minVersion}`);
         process.exit(1);
       }
@@ -206,22 +254,26 @@ Examples:
     if (heartbeatTimer) clearInterval(heartbeatTimer);
 
     if (slurmJobId) {
-      process.stdout.write("  Cancelling SLURM job...");
-      await ops.runRemote(`scancel ${slurmJobId}`, { silent: true }).catch(() => {});
-      console.log(" done");
+      process.stdout.write('  Cancelling SLURM job...');
+      await ops
+        .runRemote(`scancel ${slurmJobId}`, { silent: true })
+        .catch(() => {});
+      console.log(' done');
     }
 
     if (tunnel) {
-      process.stdout.write("  Closing SSH tunnel...");
+      process.stdout.write('  Closing SSH tunnel...');
       tunnel.kill();
-      console.log(" done");
+      console.log(' done');
     }
 
-    process.stdout.write("  Removing lockfile...");
-    await ops.runRemote(`rm -f ${remoteJobDetails}`, { silent: true }).catch(() => {});
-    console.log(" done");
+    process.stdout.write('  Removing lockfile...');
+    await ops
+      .runRemote(`rm -f ${remoteJobDetails}`, { silent: true })
+      .catch(() => {});
+    console.log(' done');
 
-    console.log("✓ Session ended");
+    console.log('✓ Session ended');
     process.exit(exitCode);
   }
 
@@ -229,12 +281,12 @@ Examples:
     if (crashDiagnosticsPrinted || !slurmJobId) return;
     crashDiagnosticsPrinted = true;
 
-    console.error("\n--- SLURM accounting ---");
-    let stdout = "";
+    console.error('\n--- SLURM accounting ---');
+    let stdout = '';
     for (let attempt = 0; attempt < 5; attempt++) {
       const result = await ops.runRemote(
         `${buildSacctDiagnosticsCommand(slurmJobId)} 2>/dev/null || true`,
-        { silent: true }
+        { silent: true },
       );
       stdout = result.stdout;
       if (stdout.trim() && sacctDiagnosticsSettled(stdout, slurmJobId)) break;
@@ -242,19 +294,31 @@ Examples:
     }
     if (stdout.trim()) {
       console.error(stdout);
-      const localAccountingTmp = join(tmpdir(), `ivllm-${jobName}-slurm-accounting.txt`);
-      writeFileSync(localAccountingTmp, stdout.endsWith("\n") ? stdout : `${stdout}\n`, "utf-8");
+      const localAccountingTmp = join(
+        tmpdir(),
+        `ivllm-${jobName}-slurm-accounting.txt`,
+      );
+      writeFileSync(
+        localAccountingTmp,
+        stdout.endsWith('\n') ? stdout : `${stdout}\n`,
+        'utf-8',
+      );
       try {
-        await ops.copyFile(localAccountingTmp, `${remoteWorkDirScp}/slurm-accounting.txt`);
+        await ops.copyFile(
+          localAccountingTmp,
+          `${remoteWorkDirScp}/slurm-accounting.txt`,
+        );
       } catch (error) {
-        console.error(`(failed to save SLURM accounting snapshot to ~/${jobName}/slurm-accounting.txt: ${(error as Error).message})`);
+        console.error(
+          `(failed to save SLURM accounting snapshot to ~/${jobName}/slurm-accounting.txt: ${(error as Error).message})`,
+        );
       } finally {
         if (existsSync(localAccountingTmp)) unlinkSync(localAccountingTmp);
       }
     } else {
-      console.error("(no sacct output available)");
+      console.error('(no sacct output available)');
     }
-    console.error("--- end accounting ---");
+    console.error('--- end accounting ---');
     console.error(`Remote work dir : ~/${jobName}`);
     console.error(`Remote script   : ~/${jobName}/${jobName}.slurm.sh`);
     console.error(`Remote log      : ~/${jobName}/${jobName}.slurm.log`);
@@ -264,32 +328,39 @@ Examples:
   }
 
   // Register signal handlers immediately
-  process.on("SIGINT", () => shutdown("interrupted (Ctrl+C)"));
-  process.on("SIGTERM", () => shutdown("terminated"));
+  process.on('SIGINT', () => shutdown('interrupted (Ctrl+C)'));
+  process.on('SIGTERM', () => shutdown('terminated'));
 
   console.log(`=== ivllm start (v${ivllmVersion}) ===`);
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
-  console.log(`Config     : ${configFile ? `${configFile}${usingStoredConfig ? " (stored)" : ""}` : "(N/A — mock mode)"}`);
-  console.log(`GPUs       : ${gpuCount}${nodeCount > 1 ? ` (${nodeCount} nodes × ${gpuCount / nodeCount} GPUs each)` : ""}`);
+  console.log(
+    `Config     : ${configFile ? `${configFile}${usingStoredConfig ? ' (stored)' : ''}` : '(N/A — mock mode)'}`,
+  );
+  console.log(
+    `GPUs       : ${gpuCount}${nodeCount > 1 ? ` (${nodeCount} nodes × ${gpuCount / nodeCount} GPUs each)` : ''}`,
+  );
   if (nodeCount > 1) {
     console.log(`⚠ Multi-node job: ${nodeCount} nodes requested`);
   }
   console.log(`Local port : ${localPort}  |  Server port: ${serverPort}`);
-  console.log("");
+  console.log('');
 
   // ── Venv check (after SSH is confirmed working) ─────────────────────────────
   if (!startArgs.dryRun) {
-    console.log("Checking venv...");
+    console.log('Checking venv...');
     const venvDir = `${config.projectDir}/ivllm/${vllmVersion}`;
     const { exitCode: venvCheck } = await ops.runRemote(
-      `test -f ${venvDir}/bin/activate`, { silent: true }
+      `test -f ${venvDir}/bin/activate`,
+      { silent: true },
     );
     if (venvCheck !== 0) {
-      console.error(`Error: vLLM venv not found at ${venvDir}. Run 'ivllm setup' first.`);
+      console.error(
+        `Error: vLLM venv not found at ${venvDir}. Run 'ivllm setup' first.`,
+      );
       process.exit(1);
     }
-    console.log("✓ Venv check passed");
+    console.log('✓ Venv check passed');
   }
 
   // ── Model download ───────────────────────────────────────────────────────────
@@ -300,66 +371,93 @@ Examples:
     console.log(`[mock] Model download skipped`);
   } else {
     const { exitCode: cacheCheck } = await ops.runRemote(
-      `test -d ${cachePath}`, { silent: true }
+      `test -d ${cachePath}`,
+      { silent: true },
     );
     if (cacheCheck === 0) {
       console.log(`✓ Model cached at ${cachePath}`);
     } else {
       console.log(`Downloading model ${model} to ${hfHome} on login node...`);
       // Ensure shared cache directory exists and is group-writable before downloading
-      await ops.runRemote(`mkdir -p ${hfHome} && chmod g+w ${hfHome} 2>/dev/null || true`, { silent: true });
-      const hfToken = config.hfToken ?? process.env["HF_TOKEN"] ?? "";
-      const downloadCmd = `umask 0002 && source ${config.projectDir}/ivllm/${vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ""} hf download ${model}`;
+      await ops.runRemote(
+        `mkdir -p ${hfHome} && chmod g+w ${hfHome} 2>/dev/null || true`,
+        { silent: true },
+      );
+      const hfToken = config.hfToken ?? process.env['HF_TOKEN'] ?? '';
+      const downloadCmd = `umask 0002 && source ${config.projectDir}/ivllm/${vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ''} hf download ${model}`;
       const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
       if (dlCode !== 0) {
-        console.error("Error: Model download failed.");
+        console.error('Error: Model download failed.');
         process.exit(1);
       }
-      console.log("✓ Model downloaded");
+      console.log('✓ Model downloaded');
     }
   }
 
   // ── Create lockfile ──────────────────────────────────────────────────────────
   if (startArgs.dryRun) {
-    console.log(`[dry-run] Lockfile creation skipped (would create: ${remoteJobDetails})`);
+    console.log(
+      `[dry-run] Lockfile creation skipped (would create: ${remoteJobDetails})`,
+    );
   } else {
-    console.log("Creating job working directory and lockfile...");
+    console.log('Creating job working directory and lockfile...');
     await ops.runRemote(`mkdir -p ${remoteWorkDir}`, { silent: true });
-    const pendingJson = JSON.stringify({ status: "pending", job_name: jobName });
+    const pendingJson = JSON.stringify({
+      status: 'pending',
+      job_name: jobName,
+    });
     const { exitCode: lockCode } = await ops.runRemote(
       `set -C; echo '${pendingJson}' > ${remoteJobDetails}`,
-      { silent: true }
+      { silent: true },
     );
     if (lockCode !== 0) {
-      console.error(`Error: Job '${jobName}' already exists (lockfile present). Use 'ivllm stop ${jobName}' to clean up.`);
+      console.error(
+        `Error: Job '${jobName}' already exists (lockfile present). Use 'ivllm stop ${jobName}' to clean up.`,
+      );
       process.exit(1);
     }
-    console.log("✓ Lockfile created");
+    console.log('✓ Lockfile created');
   }
 
   // ── Copy files and submit SLURM job ─────────────────────────────────────────
-  const remoteConfigFile = configFile ? `${remoteWorkDir}/${basename(configFile)}` : undefined;
+  const remoteConfigFile = configFile
+    ? `${remoteWorkDir}/${basename(configFile)}`
+    : undefined;
   const remoteScriptPath = `${remoteWorkDir}/${jobName}.slurm.sh`;
   // Scp destinations use ~ (reliably expanded by scp/sftp; $HOME is not expanded without a shell)
-  const remoteConfigFileScp = configFile ? `${remoteWorkDirScp}/${basename(configFile)}` : undefined;
+  const remoteConfigFileScp = configFile
+    ? `${remoteWorkDirScp}/${basename(configFile)}`
+    : undefined;
   const remoteScriptPathScp = `${remoteWorkDirScp}/${jobName}.slurm.sh`;
 
   const envVars = configFile ? parseEnvVars(configFile) : [];
   const script = startArgs.mock
-    ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
-    : renderInferenceScript({
-        jobName, model, vllmVersion, hfHome,
-        configFileName: configFile ? basename(configFile) : "",
+    ? renderMockInferenceScript({
+        jobName,
+        model,
         workDir: remoteWorkDir,
-        serverPort, gpuCount, nodeCount, timeLimit,
+        serverPort,
+        timeLimit,
+      })
+    : renderInferenceScript({
+        jobName,
+        model,
+        vllmVersion,
+        hfHome,
+        configFileName: configFile ? basename(configFile) : '',
+        workDir: remoteWorkDir,
+        serverPort,
+        gpuCount,
+        nodeCount,
+        timeLimit,
         envVars,
       });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);
-  writeFileSync(localScriptTmp, script, "utf-8");
+  writeFileSync(localScriptTmp, script, 'utf-8');
 
   try {
-    console.log("Copying files to login node...");
+    console.log('Copying files to login node...');
     if (remoteConfigFileScp && configFile) {
       // Strip ivllm-only keys (e.g. min-vllm-version) — vLLM errors on unknown keys
       const strippedConfigTmp = writeStrippedConfig(configFile);
@@ -370,7 +468,7 @@ Examples:
       }
     }
     await ops.copyFile(localScriptTmp, remoteScriptPathScp);
-    console.log("✓ Files copied");
+    console.log('✓ Files copied');
 
     // ── Dry-run: show summary and exit ────────────────────────────────────────
     if (startArgs.dryRun) {
@@ -384,7 +482,7 @@ Examples:
       return;
     }
 
-    console.log("Submitting SLURM job...");
+    console.log('Submitting SLURM job...');
     slurmJobId = await submitJob(config, remoteScriptPath);
     console.log(`✓ SLURM job submitted: ${slurmJobId}`);
   } finally {
@@ -396,21 +494,24 @@ Examples:
 
   // Issue #1: accept "exit" from stdin immediately (before job is even running)
   const rl = createInterface({ input: process.stdin, terminal: false });
-  rl.on("line", (line) => {
-    if (line.trim().toLowerCase() === "exit") {
+  rl.on('line', (line) => {
+    if (line.trim().toLowerCase() === 'exit') {
       rl.close();
-      shutdown("user requested exit");
+      shutdown('user requested exit');
     }
   });
 
-  let lastStatus = "pending";
-  let lastSlurmQueueState = "";
+  let lastStatus = 'pending';
+  let lastSlurmQueueState = '';
   let logLineOffset = 0;
   let lastSlurmPollTime = 0; // timestamp of last squeue/sacct call
 
   while (!shuttingDown) {
     await sleep(POLL_INTERVAL_MS);
-    const { stdout } = await ops.runRemote(`cat ${remoteJobDetails} 2>/dev/null`, { silent: true });
+    const { stdout } = await ops.runRemote(
+      `cat ${remoteJobDetails} 2>/dev/null`,
+      { silent: true },
+    );
     const details = parseJobDetails(stdout);
 
     if (!details) {
@@ -419,10 +520,10 @@ Examples:
       if (Date.now() - lastSlurmPollTime >= SLURM_POLL_INTERVAL_MS) {
         lastSlurmPollTime = Date.now();
         const slurmState = await pollJobStatus(config, slurmJobId!);
-        if (slurmState === "failed") {
+        if (slurmState === 'failed') {
           await printSlurmLog(config, remoteWorkDir, jobName);
           await printCrashDiagnostics();
-          await shutdown("SLURM job failed unexpectedly", 1);
+          await shutdown('SLURM job failed unexpectedly', 1);
           return;
         }
       }
@@ -431,14 +532,15 @@ Examples:
 
     // Issue #2a: while our lockfile shows "pending", report actual SLURM queue state
     // Gate squeue calls to at most once per SLURM_POLL_INTERVAL_MS (Isambard policy)
-    if (details.status === "pending") {
+    if (details.status === 'pending') {
       if (Date.now() - lastSlurmPollTime >= SLURM_POLL_INTERVAL_MS) {
         lastSlurmPollTime = Date.now();
         const queueState = await getSlurmQueueState(config, slurmJobId!);
         if (queueState) {
-          const msg = queueState.state === "PENDING"
-            ? `  [${timestamp()}] Waiting in SLURM queue (${queueState.reason})`
-            : `  [${timestamp()}] SLURM state: ${queueState.state}`;
+          const msg =
+            queueState.state === 'PENDING'
+              ? `  [${timestamp()}] Waiting in SLURM queue (${queueState.reason})`
+              : `  [${timestamp()}] SLURM state: ${queueState.state}`;
           if (msg !== lastSlurmQueueState) {
             console.log(msg);
             lastSlurmQueueState = msg;
@@ -448,23 +550,25 @@ Examples:
     }
 
     if (details.status !== lastStatus) {
-      if (details.status === "initialising") {
-        console.log(`  [${timestamp()}] Job allocated — vLLM is starting up...`);
-      } else if (details.status !== "pending") {
+      if (details.status === 'initialising') {
+        console.log(
+          `  [${timestamp()}] Job allocated — vLLM is starting up...`,
+        );
+      } else if (details.status !== 'pending') {
         console.log(`  [${timestamp()}] Status: ${details.status}`);
       }
       lastStatus = details.status;
     }
 
     // Issue #2b: stream SLURM log incrementally during startup
-    if (details.status === "initialising") {
+    if (details.status === 'initialising') {
       const slurmLogPath = `${remoteWorkDir}/${jobName}.slurm.log`;
       const { stdout: newLines } = await ops.runRemote(
         `tail -n +${logLineOffset + 1} ${slurmLogPath} 2>/dev/null`,
-        { silent: true }
+        { silent: true },
       );
       if (newLines.trim()) {
-        const lines = newLines.split("\n").filter(l => l.trim());
+        const lines = newLines.split('\n').filter((l) => l.trim());
         for (const line of lines) {
           console.log(`  | ${line}`);
         }
@@ -472,7 +576,7 @@ Examples:
       }
     }
 
-    if (details.status === "failed" || details.status === "timeout") {
+    if (details.status === 'failed' || details.status === 'timeout') {
       if (details.error) console.error(`  Error: ${details.error}`);
       await printSlurmLog(config, remoteWorkDir, jobName);
       await printCrashDiagnostics();
@@ -480,7 +584,7 @@ Examples:
       return;
     }
 
-    if (details.status === "running") {
+    if (details.status === 'running') {
       rl.close();
       await onRunning(details);
       return;
@@ -494,8 +598,9 @@ Examples:
 
     // Spawn forward SSH tunnel: LOCAL:localPort -> computeHost:serverPort via LOGIN
     tunnel = spawnTunnel(config, localPort, computeHost, serverPort);
-    tunnel.on("exit", (code) => {
-      if (!shuttingDown) shutdown(`SSH tunnel exited unexpectedly (code ${code})`, 1);
+    tunnel.on('exit', (code) => {
+      if (!shuttingDown)
+        shutdown(`SSH tunnel exited unexpectedly (code ${code})`, 1);
     });
 
     // Brief wait for tunnel to establish
@@ -518,23 +623,31 @@ Examples:
       try {
         const res = await fetch(`http://localhost:${localPort}/health`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        } catch (e) {
-          if (!shuttingDown) {
-            console.error(`\nHeartbeat failed: ${(e as Error).message}`);
-            await printSlurmLog(config, remoteWorkDir, jobName);
-            await printCrashDiagnostics();
-            shutdown("vLLM heartbeat failed", 1);
-          }
+      } catch (e) {
+        if (!shuttingDown) {
+          console.error(`\nHeartbeat failed: ${(e as Error).message}`);
+          await printSlurmLog(config, remoteWorkDir, jobName);
+          await printCrashDiagnostics();
+          shutdown('vLLM heartbeat failed', 1);
         }
-      }, HEARTBEAT_INTERVAL_MS);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
   }
 }
 
-async function printSlurmLog(config: Parameters<typeof runRemote>[0], workDir: string, jobName: string): Promise<void> {
-  console.error("\n--- SLURM log ---");
-  const { stdout } = await runRemote(config, `tail -50 ${workDir}/${jobName}.slurm.log 2>/dev/null`, { silent: true });
+async function printSlurmLog(
+  config: Parameters<typeof runRemote>[0],
+  workDir: string,
+  jobName: string,
+): Promise<void> {
+  console.error('\n--- SLURM log ---');
+  const { stdout } = await runRemote(
+    config,
+    `tail -50 ${workDir}/${jobName}.slurm.log 2>/dev/null`,
+    { silent: true },
+  );
   if (stdout) console.error(stdout);
-  console.error("--- end log ---\n");
+  console.error('--- end log ---\n');
 }
 
 function timestamp(): string {
@@ -542,5 +655,5 @@ function timestamp(): string {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
