@@ -1,4 +1,5 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from "../slurm.ts";
+import { EnvVarEntry } from "../vllm-config.ts";
 
 export interface InferenceScriptOptions {
   jobName: string;
@@ -11,6 +12,7 @@ export interface InferenceScriptOptions {
   gpuCount: number;
   nodeCount: number;
   timeLimit: string;
+  envVars: EnvVarEntry[];
 }
 
 const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
@@ -24,6 +26,13 @@ export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:
 export CC=gcc
 export CXX=g++`;
 
+/** Renders user-supplied env vars as `export KEY="VALUE"` lines. */
+function renderEnvVars(envVars: EnvVarEntry[]): string {
+  if (envVars.length === 0) return "";
+  const lines = envVars.map((e) => `export ${e.key}="${e.value}"`);
+  return `# User-supplied environment variables\n${lines.join("\n")}\n`;
+}
+
 function renderExitDiagnostics(_workDir: string): string {
   return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
 
@@ -34,28 +43,31 @@ persist_slurm_accounting() {
 }`;
 }
 
-function renderWorkDirSetup(workDir: string): string {
+function renderWorkDirSetup(workDir: string, model: string): string {
   return `WORK_DIR="${workDir}"
 mkdir -p "$WORK_DIR/ivllm"
 # Look for and link the plugins directory
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
   ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
 fi
-# Set flash infer cache to SCRATCHDIR (Lustre) if available, falling back to work dir
-export FLASHINFER_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/flashinfer_cache
+# Model-scoped JIT cache directories under $SCRATCHDIR (Lustre).
+# Each model gets its own persistent cache to avoid kernel conflicts
+# between different models (different attention heads, MoE configs, etc.).
+# $SCRATCHDIR is always defined on Isambard AI and persists ~60 days.
+MODEL_SLUG=$(echo "${model}" | tr '/' '_' | tr '.' '_')
+
+export FLASHINFER_JIT_CACHE_DIR=$SCRATCHDIR/flashinfer_cache_\${MODEL_SLUG}
 # Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
-# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use it.
 mkdir -p "$FLASHINFER_JIT_CACHE_DIR" ~/.cache
 if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
   cp -r ~/.cache/flashinfer/. "$FLASHINFER_JIT_CACHE_DIR/" 2>/dev/null || true
   rm -rf ~/.cache/flashinfer
-  fi
-  ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer
+fi
+ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer
 
-# Set DeepGEMM JIT cache to SCRATCHDIR (Lustre) if available, falling back to work dir
-export DG_JIT_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/deep_gemm_cache
-# Symlink ~/.deep_gemm -> Lustre so that Ray actors (which don't inherit
-# DG_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+export DG_JIT_CACHE_DIR=$SCRATCHDIR/deep_gemm_cache_\${MODEL_SLUG}
+# Symlink ~/.deep_gemm -> Lustre for DeepGEMM JIT kernel cache.
 mkdir -p "$DG_JIT_CACHE_DIR"
 if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
   cp -r ~/.deep_gemm/. "$DG_JIT_CACHE_DIR/" 2>/dev/null || true
@@ -63,10 +75,8 @@ if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
 fi
 ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
 
-# Set Triton JIT cache to SCRATCHDIR (Lustre) if available, falling back to work dir
-export TRITON_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/triton_cache
-# Symlink ~/.triton -> Lustre so that Ray actors (which don't inherit
-# TRITON_CACHE_DIR from vLLM's ray_env.py propagation list) also use Lustre.
+export TRITON_CACHE_DIR=$SCRATCHDIR/triton_cache_\${MODEL_SLUG}
+# Symlink ~/.triton -> Lustre for OpenAI Triton JIT kernel cache.
 mkdir -p "$TRITON_CACHE_DIR"
 if [ -d ~/.triton ] && [ ! -L ~/.triton ]; then
   cp -r ~/.triton/. "$TRITON_CACHE_DIR/" 2>/dev/null || true
@@ -74,9 +84,8 @@ if [ -d ~/.triton ] && [ ! -L ~/.triton ]; then
 fi
 ln -sfn "$TRITON_CACHE_DIR" ~/.triton
 
-# Set TorchInductor cache to SCRATCHDIR (Lustre) if available, falling back to work dir
-export TORCHINDUCTOR_CACHE_DIR=\${SCRATCHDIR:-\$WORK_DIR/ivllm}/torchinductor_cache
-# Symlink ~/.cache/torchinductor -> Lustre so that Ray actors also use Lustre.
+export TORCHINDUCTOR_CACHE_DIR=$SCRATCHDIR/torchinductor_cache_\${MODEL_SLUG}
+# Symlink ~/.cache/torchinductor -> Lustre for PyTorch TorchInductor cache.
 mkdir -p "$TORCHINDUCTOR_CACHE_DIR" ~/.cache
 if [ -d ~/.cache/torchinductor ] && [ ! -L ~/.cache/torchinductor ]; then
   cp -r ~/.cache/torchinductor/. "$TORCHINDUCTOR_CACHE_DIR/" 2>/dev/null || true
@@ -181,7 +190,7 @@ finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, timeLimit } = opts;
+  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, timeLimit, envVars } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
 
   return `#!/bin/bash
@@ -216,12 +225,12 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir)}
+${renderWorkDirSetup(workDir, model)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderExitDiagnostics(workDir)}
+${renderEnvVars(envVars)}${renderExitDiagnostics(workDir)}
 ${renderExitTrap(false)}
 cd "$WORK_DIR"
 
@@ -244,10 +253,13 @@ ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
 function renderMultiNodeScript(opts: InferenceScriptOptions): string {
-  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit } = opts;
+  const { jobName, model, vllmVersion, hfHome, configFileName, workDir, serverPort, gpuCount, nodeCount, timeLimit, envVars } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const rayObjectStoreMemoryGiB = 64;
+  const envPreamble = envVars.length > 0
+    ? envVars.map((e) => `export ${e.key}="${e.value}"`).join(" && ") + " && "
+    : "";
 
   return `#!/bin/bash
 #SBATCH --job-name=${jobName}
@@ -285,12 +297,12 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir)}
+${renderWorkDirSetup(workDir, model)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderMultiNodeExitDiagnostics(workDir)}
+${renderEnvVars(envVars)}${renderMultiNodeExitDiagnostics(workDir)}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
 
@@ -311,7 +323,7 @@ srun \\
   --mem=0 \\
   --cpus-per-task 72 \\
   --ntasks-per-node 1 \\
-  bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
+  bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 sleep 20
 
 # Start Ray worker nodes
@@ -326,7 +338,7 @@ for WORKER in $WORKER_NODES; do
     --mem=0 \\
     --cpus-per-task 72 \\
     --ntasks-per-node 1 \\
-    bash -c "source ${venvPath}/bin/activate && VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
+    bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 done
 sleep 20
 
@@ -346,7 +358,7 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node 1 \\
-  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
+  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
   &
 VLLM_PID=$!
 

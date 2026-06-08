@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, unlinkSync, readFileSync, existsSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir, homedir } from "os";
-import { parseVllmConfig, resolveGpuCount, stripIvllmKeys, IVLLM_ONLY_KEYS, jobConfigPath, saveJobConfig } from "../src/vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount, stripIvllmKeys, IVLLM_ONLY_KEYS, jobConfigPath, saveJobConfig, parseEnvVars } from "../src/vllm-config.ts";
 
 function writeTmp(content: string): string {
   const path = join(tmpdir(), `ivllm-test-${Date.now()}.yaml`);
@@ -245,6 +245,89 @@ describe("stripIvllmKeys", () => {
 
   it("IVLLM_ONLY_KEYS contains min-vllm-version", () => {
     expect(IVLLM_ONLY_KEYS.has("min-vllm-version")).toBe(true);
+  });
+
+  it("IVLLM_ONLY_KEYS contains env", () => {
+    expect(IVLLM_ONLY_KEYS.has("env")).toBe(true);
+  });
+
+  it("removes env from the output YAML", () => {
+    const path = writeTmp(
+      "model: some/model\n" +
+      "env:\n" +
+      "  FOO: bar\n" +
+      "tensor-parallel-size: 4\n"
+    );
+    try {
+      const result = stripIvllmKeys(path);
+      expect(result).not.toContain("env:");
+      expect(result).not.toContain("FOO");
+      expect(result).toContain("some/model");
+      expect(result).toContain("tensor-parallel-size");
+    } finally { unlinkSync(path); }
+  });
+});
+
+describe("env field in VllmConfig", () => {
+  it("parses env block from YAML into VllmConfig.env", () => {
+    const path = writeTmp(
+      "model: some/model\n" +
+      "env:\n" +
+      "  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: '1'\n" +
+      "  VLLM_USE_DEEP_GEMM_FP8: '1'\n"
+    );
+    try {
+      const cfg = parseVllmConfig(path);
+      expect(cfg.env).toBeDefined();
+      expect(cfg.env!["VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS"]).toBe("1");
+      expect(cfg.env!["VLLM_USE_DEEP_GEMM_FP8"]).toBe("1");
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns empty env object when env block is absent", () => {
+    const path = writeTmp("model: some/model\ntensor-parallel-size: 4\n");
+    try {
+      expect(parseVllmConfig(path).env).toEqual({});
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns empty env object when env block is empty", () => {
+    const path = writeTmp("model: some/model\nenv: {}\n");
+    try {
+      const cfg = parseVllmConfig(path);
+      expect(cfg.env).toEqual({});
+    } finally { unlinkSync(path); }
+  });
+});
+
+describe("parseEnvVars", () => {
+  it("returns array of {key, value} from env block", () => {
+    const path = writeTmp(
+      "model: some/model\n" +
+      "env:\n" +
+      "  FOO: bar\n" +
+      "  BAZ: '123'\n"
+    );
+    try {
+      const vars = parseEnvVars(path);
+      expect(vars).toHaveLength(2);
+      expect(vars).toContainEqual({ key: "FOO", value: "bar" });
+      expect(vars).toContainEqual({ key: "BAZ", value: "123" });
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns empty array when no env block", () => {
+    const path = writeTmp("model: some/model\n");
+    try {
+      expect(parseEnvVars(path)).toEqual([]);
+    } finally { unlinkSync(path); }
+  });
+
+  it("returns empty array when env block is empty", () => {
+    const path = writeTmp("model: some/model\nenv: {}\n");
+    try {
+      expect(parseEnvVars(path)).toEqual([]);
+    } finally { unlinkSync(path); }
   });
 });
 

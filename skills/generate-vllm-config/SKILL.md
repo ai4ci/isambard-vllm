@@ -52,32 +52,82 @@ If the model card is not accessible or the parameter count cannot be determined,
 
 ### 3. Look up the official vLLM recipe (if available)
 
-vLLM recipes can be queried using the huggingface model-id and hardware.
+Go to [recipes.vllm.ai](https://recipes.vllm.ai) — this is the authoritative source for vLLM deployment recipes. It supersedes checking HuggingFace model cards for configuration advice.
 
-The json api is probably the easiest to read:
+The site has a four-level structure:
 
-`https://recipes.vllm.ai/models.json` (index)
+1. **Index** — `https://recipes.vllm.ai/models.json` lists every model with a recipe. Use this to check whether a recipe exists for your model. Look up the model's `"json"` path (e.g. `"/Qwen/Qwen3.5-397B-A17B.json"`) — this is the URL path segment to append to `https://recipes.vllm.ai`.
+2. **Top-level recipe** — `https://recipes.vllm.ai/<path>.json` contains the full recipe with model metadata, features, hardware overrides, and variants.
+3. **Hardware-specific overrides** — `https://recipes.vllm.ai/<path>/hw/h200.json` provides a flat, fully resolved deployment snapshot with all overrides already applied.
+4. **Strategy-specific** — `https://recipes.vllm.ai/<path>/strategies/<strategy>.json` provides alternative deployment strategies (e.g. multi-node, different parallelism approaches).
 
-`https://recipes.vllm.ai/<model-id>.json`
+#### Three JSON types and jq paths
 
-The standard model page sometimes has `hardware_overrides.hopper` section.
+The top-level recipe and the hardware/strategy-specific files have **completely different structures**. The top-level recipe is nested and contains raw, un-resolved data; the hardware/strategy files are flat snapshots with overrides already baked in.
 
-`https://recipes.vllm.ai/<model-id>/hw/h100.json` (for h100)
+**Top-level recipe JSON** (`/<org>/<model>.json`):
 
-`https://recipes.vllm.ai/<model-id>/hw/h200.json` (for h200)
+```json
+.model.model_id                      # HuggingFace model ID
+.model.min_vllm_version              # Minimum vLLM version required
+.model.architecture                  # "moe" or "dense"
+.model.parameter_count               # e.g. "1600B"
+.model.active_parameters             # e.g. "49B" (MoE only)
+.model.context_length                # Native context length (integer)
+.model.base_args[]                   # Always-applied CLI args
+.recommended_command.env             # Top-level env vars
+.recommended_command.argv[]          # CLI args (default strategy)
+.recommended_command.hardware_profile.gpu_count   # GPUs per node
+.hardware_overrides.hopper.extra_args[]           # Extra CLI args for Hopper
+.hardware_overrides.hopper.extra_env              # Extra env vars for Hopper
+.features.tool_calling.args[]        # Tool-calling CLI args
+.features.reasoning.args[]           # Reasoning CLI args
+.variants.default.precision          # "fp8", "bf16", etc.
+.variants.default.vram_minimum_gb    # Min VRAM for this variant
+```
 
+**Hardware-specific JSON** (`/<org>/<model>/hw/h200.json`):
 
-Isambard AIs GH200 is a Grace CPU + H100 GPU and falls between H100 and H200 in terms of specifications (closer to H100), and there is usually no exact recipe for it.
+This is a **resolved snapshot** — all hardware overrides are already applied. No `model`, `features`, or `hardware_overrides` keys exist here.
 
-Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVIDIA NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB is usable for each CPU), and 384 GB of GPU memory. In total, there is 844 GB of CPU + GPU memory per node.
+```json
+.env                                 # Env vars (overrides already included)
+.argv[]                              # Resolved CLI args (all overrides baked in)
+.node_count                          # Nodes required
+.strategy                            # Strategy name
+.strategy_spec.name                  # Strategy display name
+.strategy_spec.description           # What the strategy does
+.strategy_spec.vllm_args[]           # vLLM-specific flags only (e.g. --enable-expert-parallel)
+.hardware_profile.gpu_count          # GPUs per node
+.hardware_profile.vram_gb            # Total VRAM across all GPUs
+.hardware_profile.multi_node         # true/false
+.alternatives                        # Links to other strategy JSON files
+```
 
-If a recipe exists:
-- Note the minimum vLLM version that supports the model
-- Note the recommended `tensor-parallel-size`, quantization, and any special flags
-- Note whether `--enable-expert-parallel` is recommended (always the case for large MoE models)
-- Note the `reasoning-parser` name if applicable
-- Find out what specific options are recommended and why.
-- Adapt the recipe's recommendations to Isambard AI's 4 × GH200 120GB topology (~96 GiB usable per GPU)
+**Strategy-specific JSON** (`/<org>/<model>/strategies/<strategy>.json`):
+
+Same base as hardware-specific, with **head/worker split for multi-node**:
+
+```json
+.env                                 # Env vars (includes GLOO/NCCL_SOCKET_IFNAME for multi-node)
+.head_argv[]                         # CLI args for head node
+.worker_argv[]                       # CLI args for worker node(s)
+.node_count                          # Total nodes
+.strategy_spec.name                  # Strategy name
+.strategy_spec.vllm_args[]           # vLLM-specific flags
+.hardware_profile.gpu_count          # GPUs per node
+.hardware_profile.multi_node         # true/false
+```
+
+#### Which JSON to use
+
+- **Model metadata** (parameter count, architecture, context length): **top-level recipe** — the hardware-specific file doesn't include these.
+- **Env vars and CLI args for your config**: **hardware-specific** (`/hw/h100.json` or `/hw/h200.json`) — overrides are already resolved, so you don't need to manually merge `hardware_overrides.hopper.extra_env` with the base `env`.
+- **Multi-node strategies**: **strategy-specific** files — they include `head_argv`/`worker_argv` and multi-node env vars.
+
+**Adapting to Isambard AI:** Isambard AI's GH200 (Grace CPU + H100 GPU) is not listed as a separate hardware target. It falls between H100 and H200 in specs (closer to H100), so use the H100 recipe as a starting point and adapt.
+
+Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB per CPU) and 384 GB of GPU memory (96 GiB usable per GPU). In total, there is 844 GB of CPU + GPU memory per node.
 
 The recipes are written for various hardware; translate GPU counts to Isambard AI node counts using: `nodes = ceil(recipe_gpus / 4)`.
 
@@ -127,10 +177,11 @@ When reporting to the user, include:
 - "Minimum vLLM version: 0.6.0+"
 
 **Single node** (needed_gpus ≤ 4):
-- **Default to `tensor-parallel-size: 4` (full node) for any non-trivial model.**
-  There is no penalty to using all 4 GPUs on a single node — it gives 4× more KV cache space (directly enabling longer contexts and higher batch throughput), leverages NVLink-C2C for near-linear TP scaling, and keeps the job within a single node (simpler, lower latency). Only drop below tp=4 if:
-  - The model is very small (< ~7B) and the user explicitly asks for a minimal footprint, **or**
-  - The model's number of attention heads is not divisible by 4 (rare; check the model card)
+- **Default to `tensor-parallel-size: 2`** for models needing 1–2 GPUs. Two GPUs are always available in the queue (users who grab part of a node typically use only 1), so tp=2 gives a good balance of capacity and fast queue times.
+- Use `tensor-parallel-size: 4` (full node) if:
+  - The model needs 3–4 GPUs to fit, **or**
+  - The model needs 1–2 GPUs but the user explicitly wants maximum throughput or longest possible context, **or**
+  - The model's number of attention heads is not divisible by 2 but is divisible by 4 (rare; check the model card)
 - `pipeline-parallel-size` = 1 (omit from config)
 
 **Multi-node** (needed_gpus > 4):
@@ -140,12 +191,12 @@ When reporting to the user, include:
 
 ### 6. Choose max-model-len
 
-- **Default to the model's full native context length.** With tp=4 on 4 × GH200 120GB (~345 GB usable VRAM combined), KV cache headroom is large even for very long contexts — do not reduce the context pre-emptively.
+- **Default to the model's full native context length.** KV cache headroom depends on `tensor-parallel-size` and whether weights fit with room to spare. Do not reduce the context pre-emptively.
 - Only reduce `max-model-len` if an explicit OOM analysis shows the KV cache at native context would exhaust available memory after weights are loaded. Calculate:
   ```
   kv_per_token ≈ num_kv_heads × head_dim × 2 bytes × num_layers  (standard dense attention)
   total_kv_GB  = kv_per_token × max_tokens / 1e9
-  available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB
+  available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB  # scales with tp  # scales with tp
   ```
 - If the native context does exceed available KV budget, reduce to the largest power-of-two that fits, and note the native context in a YAML comment.
 - Exception: hybrid architectures (e.g. Qwen3.5-35B-A3B with Gated DeltaNet layers) have a tiny KV footprint — keep the full context.
@@ -157,8 +208,42 @@ When reporting to the user, include:
 - **FP8 quantization**: GH200/H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
 - **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
+- **Environment variables (`env:`)**: Some models require environment variables to be set before `vllm serve` starts. These are specified in the `env:` block of the config. The `env:` key is **ivllm-specific** — it is stripped from the YAML before passing to `vllm serve` (vLLM errors on unknown keys) and rendered as `export` lines in the SLURM script. For multi-node jobs, env vars are automatically propagated into every Ray worker `bash -c` invocation.
 
-### 7. Write the YAML file
+  Check the vLLM recipe for recommended env vars. Common examples:
+  ```yaml
+  env:
+    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+    VLLM_USE_DEEP_GEMM_FP8: "1"
+  ```
+
+  Always check the model's vLLM recipe page for any `extra_env` recommendations. Values should be quoted strings. Only include env vars that are explicitly recommended by the recipe or required for the model to run correctly.
+
+### 8. Convert dotted shorthand options to YAML
+
+**CRITICAL**: vLLM recipes sometimes use dotted shorthand notation for nested config values. THESE WILL NOT WORK IN THE ivllm YAML config. The recipe might show:
+
+`-cc.pass_config.fuse_allreduce_rms=False`
+
+Where `-cc` is shorthand for `--compilation-config` and the dotted suffix sets nested keys. Convert via the verbose long form:
+
+`--compilation-config '{"pass_config": {"fuse_allreduce_rms": false}}'`
+
+Then use as a YAML key:
+
+`compilation-config: '{"pass_config": {"fuse_allreduce_rms": false}}'`
+
+**GOTCHA — merging with existing compilation-config**: The recipe may already have a `--compilation-config` value that must be merged, not replaced. For example, the DeepSeek-V4-Pro recipe has:
+
+`--compilation-config '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY"}'`
+
+When adding the pass config option above, merge the keys into a single JSON object:
+
+`compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY", "pass_config": {"fuse_allreduce_rms": false}}'`
+
+**General rule**: Any dotted shorthand (`-X.key=value`) must be expanded to its long-form flag (`--X '{"key": "value"}'`), then converted to a YAML key (`X: '...'`). So far we have only encountered this with `-cc`/`--compilation-config`, but the same pattern likely applies to any similar dotted shorthand.
+
+### 9. Write the YAML file
 
 Write the config to the requested filename. Include comments to explain the key choices:
 
@@ -180,13 +265,15 @@ enable-auto-tool-choice: true
 tool-call-parser: <parser>      # see vllm-config-guide.md for parser names
 enable-prefix-caching: true
 min-vllm-version: "<version>"
+# env:                              # uncomment if the vLLM recipe recommends env vars
+#   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
 # min-vllm-version: minimum vLLM version to run this model; ivllm checks before
 # submitting. Stripped before passing to vllm serve (vLLM errors on unknown keys).
 ```
 
 Only include keys that are non-default or important — keep the config minimal and readable.
 
-### 8. Report to the user
+### 10. Report to the user
 
 After writing the file, tell the user:
 - The filename written
@@ -234,14 +321,17 @@ For MoE models, all expert weights must reside in GPU memory simultaneously even
 
 ### Parallelism choices
 
-**The default is tp=4 (full node).** On Isambard AI there is no queuing penalty for using all 4 GH200s on a single node — the purpose of the system is large-scale inference. Using the full node gives:
+**The default is tp=4.** The allocation on isambard is for a 4 GPU node. Smaller requests are only worth it if you can run mulitple models on a single node (not yet supported):
+
+4 nodes gives us
 - 4× more aggregate KV cache memory, enabling longer contexts and larger batches
 - Higher throughput via NVLink-C2C-connected tensor parallelism (near-linear scaling)
 - Full use of the allocated node allocation
 
-Reduce below tp=4 only when:
-- **tp=1**: model is very small (< ~7B) and the user explicitly wants a minimal single-GPU footprint
-- **tp=2**: attention head count is not divisible by 4 but is divisible by 2 (rare with modern models)
+Common choices:
+- **tp=1**: model fits on a single GPU (e.g., < ~40B at bf16, < ~80B at fp8) and the user explicitly wants minimal resource usage.
+- **tp=2**: default for models needing 1–2 GPUs (e.g., 72B at bf16). Good balance of queue time and capacity.
+- **tp=4**: full node. For models needing 3–4 GPUs, or when the user explicitly wants maximum throughput or very long contexts.
 
 Multi-node (pp>1) adds inter-node communication latency and complexity — only use it when the model's weights genuinely won't fit on a single 4-GPU node.
 
@@ -268,6 +358,9 @@ Before writing the file, verify:
 - [ ] `model` field exactly matches the HuggingFace model ID (case-sensitive)
 - [ ] If multi-node: user has been warned about resource requirements (multi-node is supported by `ivllm`)
 - [ ] `min-vllm-version` is set to the earliest vLLM version that supports this model
+- [ ] `env:` only contains variables explicitly recommended by the vLLM recipe or required for the model
+- [ ] All parameter options use the long name (two hyphens).
+- [ ] `-cc`/`--compilation-config` options are merged appropriately
 
 ## Troubleshooting
 

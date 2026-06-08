@@ -12,6 +12,7 @@ const base = {
   gpuCount: 4,
   nodeCount: 1,
   timeLimit: "4:00:00",
+  envVars: [] as Array<{ key: string; value: string }>,
 };
 
 describe("renderInferenceScript", () => {
@@ -60,24 +61,37 @@ describe("renderInferenceScript", () => {
     expect(script).toContain("CPATH=$NVHPC_ROOT/math_libs/12.9/include:");
   });
 
-  it("redirects FLASHINFER_JIT_CACHE_DIR to SCRATCHDIR/Lustre for reliable flock and persistent cache", () => {
+  it("computes a model-scoped MODEL_SLUG from the model name", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/flashinfer_cache");
+    expect(script).toContain("MODEL_SLUG=$(echo \"Qwen/Qwen2.5-0.5B-Instruct\" | tr '/' '_' | tr '.' '_')");
   });
 
-  it("redirects DG_JIT_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+  it("redirects FLASHINFER_JIT_CACHE_DIR to model-scoped SCRATCHDIR/Lustre", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("DG_JIT_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/deep_gemm_cache");
+    expect(script).toContain("FLASHINFER_JIT_CACHE_DIR=$SCRATCHDIR/flashinfer_cache_${MODEL_SLUG}");
   });
 
-  it("redirects TRITON_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+  it("redirects DG_JIT_CACHE_DIR to model-scoped SCRATCHDIR/Lustre", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("TRITON_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/triton_cache");
+    expect(script).toContain("DG_JIT_CACHE_DIR=$SCRATCHDIR/deep_gemm_cache_${MODEL_SLUG}");
   });
 
-  it("redirects TORCHINDUCTOR_CACHE_DIR to SCRATCHDIR/Lustre for reliable JIT compiler cache", () => {
+  it("redirects TRITON_CACHE_DIR to model-scoped SCRATCHDIR/Lustre", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("TORCHINDUCTOR_CACHE_DIR=${SCRATCHDIR:-$WORK_DIR/ivllm}/torchinductor_cache");
+    expect(script).toContain("TRITON_CACHE_DIR=$SCRATCHDIR/triton_cache_${MODEL_SLUG}");
+  });
+
+  it("redirects TORCHINDUCTOR_CACHE_DIR to model-scoped SCRATCHDIR/Lustre", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain("TORCHINDUCTOR_CACHE_DIR=$SCRATCHDIR/torchinductor_cache_${MODEL_SLUG}");
+  });
+
+  it("does not use the old $WORK_DIR fallback for JIT caches", () => {
+    const script = renderInferenceScript(base);
+    expect(script).not.toContain("$WORK_DIR/ivllm}/flashinfer_cache");
+    expect(script).not.toContain("$WORK_DIR/ivllm}/deep_gemm_cache");
+    expect(script).not.toContain("$WORK_DIR/ivllm}/triton_cache");
+    expect(script).not.toContain("$WORK_DIR/ivllm}/torchinductor_cache");
   });
 
   it("symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var", () => {
@@ -98,6 +112,86 @@ describe("renderInferenceScript", () => {
   it("symlinks ~/.cache/torchinductor to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
     expect(script).toContain("ln -sfn \"$TORCHINDUCTOR_CACHE_DIR\" ~/.cache/torchinductor");
+  });
+
+  it("renders user env vars as export lines in single-node script", () => {
+    const script = renderInferenceScript({
+      ...base,
+      envVars: [
+        { key: "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS", value: "1" },
+        { key: "VLLM_USE_DEEP_GEMM_FP8", value: "1" },
+      ],
+    });
+    expect(script).toContain('export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="1"');
+    expect(script).toContain('export VLLM_USE_DEEP_GEMM_FP8="1"');
+  });
+
+  it("renders env vars before vllm serve in single-node script", () => {
+    const script = renderInferenceScript({
+      ...base,
+      envVars: [{ key: "FOO", value: "bar" }],
+    });
+    const exportIdx = script.indexOf('export FOO="bar"');
+    const vllmIdx = script.indexOf("vllm serve");
+    expect(exportIdx).toBeGreaterThan(-1);
+    expect(vllmIdx).toBeGreaterThan(-1);
+    expect(exportIdx).toBeLessThan(vllmIdx);
+  });
+
+  it("does not render env exports when envVars is empty (single-node)", () => {
+    const script = renderInferenceScript({ ...base, envVars: [] });
+    // Should not have a "User-supplied environment variables" comment or bare exports
+    expect(script).not.toContain("# User-supplied environment variables");
+  });
+
+  it("renders env vars in multi-node preamble", () => {
+    const script = renderInferenceScript({
+      ...base,
+      nodeCount: 2,
+      envVars: [{ key: "FOO", value: "bar" }],
+    });
+    expect(script).toContain('export FOO="bar"');
+  });
+
+  it("renders env vars inside bash -c for ray start in multi-node", () => {
+    const script = renderInferenceScript({
+      ...base,
+      nodeCount: 2,
+      envVars: [{ key: "VLLM_SPECIAL", value: "yes" }],
+    });
+    // Env vars should appear inside at least one bash -c block
+    const blocks = script.split("bash -c");
+    const hasInBlock = blocks.some(
+      (b) => b.includes('export VLLM_SPECIAL="yes"'),
+    );
+    expect(hasInBlock).toBe(true);
+  });
+
+  it("renders env vars inside bash -c for multi-node vllm serve", () => {
+    const script = renderInferenceScript({
+      ...base,
+      nodeCount: 2,
+      envVars: [{ key: "VLLM_SPECIAL", value: "yes" }],
+    });
+    // Find the vllm serve bash -c block — use a flexible pattern since
+    // env var values may contain quotes that break [^"] matching.
+    const serveIdx = script.indexOf("vllm serve --config");
+    expect(serveIdx).toBeGreaterThan(-1);
+    // Walk backwards from vllm serve to find the bash -c start
+    const bashIdx = script.lastIndexOf('bash -c "cd', serveIdx);
+    expect(bashIdx).toBeGreaterThan(-1);
+    // Walk forwards to find the closing quote of bash -c
+    const block = script.slice(bashIdx, serveIdx + 50);
+    expect(block).toContain('export VLLM_SPECIAL="yes"');
+  });
+
+  it("does not render env exports when envVars is empty (multi-node)", () => {
+    const script = renderInferenceScript({
+      ...base,
+      nodeCount: 2,
+      envVars: [],
+    });
+    expect(script).not.toContain("# User-supplied environment variables");
   });
 
   it("sets CC=gcc and CXX=g++ for JIT compilation with gcc-native module", () => {

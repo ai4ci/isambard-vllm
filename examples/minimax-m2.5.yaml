@@ -48,3 +48,11 @@ min-vllm-version: "0.15.1"
 # min-vllm-version: MiniMax-M2.5 support requires vLLM >= 0.15.1; a nightly build
 # at a specific commit may be needed for full accuracy (see header comment above).
 # ivllm checks this before submitting; stripped before passing to vLLM.
+
+# Environment variables per vLLM recipe (Hopper GPU overrides).
+# Stripped before passing to vLLM serve; rendered as export lines in SLURM.
+env:
+  PYTHONNOUSERSITE: "1"
+  VLLM_USE_DEEP_GEMM: "0"
+  VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER: "0"
+  VLLM_FLOAT32_MATMUL_PRECISION: high

@@ -1,12 +1,48 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir, homedir } from "os";
 import yaml from "js-yaml";
 
 /** Keys that are ivllm-specific and must be stripped before passing the config to `vllm serve`. */
-export const IVLLM_ONLY_KEYS = new Set(["min-vllm-version"]);
+export const IVLLM_ONLY_KEYS = new Set(["min-vllm-version", "env"]);
 
-const JOB_CONFIG_DIR = join(homedir(), ".config", "ivllm");
+export const JOB_CONFIG_DIR = join(homedir(), ".config", "ivllm");
+
+/** Metadata for a stored job config. */
+export interface JobConfigEntry {
+  jobName: string;
+  filePath: string;
+  model?: string;
+  tensorParallelSize?: number;
+  pipelineParallelSize?: number;
+}
+
+/** Lists all stored job configs in the job config directory. */
+export function listJobConfigs(): JobConfigEntry[] {
+  if (!existsSync(JOB_CONFIG_DIR)) return [];
+  const files = readdirSync(JOB_CONFIG_DIR)
+    .filter((f) => f.endsWith(".yaml"))
+    .sort();
+  const entries: JobConfigEntry[] = [];
+  for (const file of files) {
+    const filePath = join(JOB_CONFIG_DIR, file);
+    const jobName = file.replace(/\.yaml$/, "");
+    try {
+      const parsed = parseVllmConfig(filePath);
+      entries.push({
+        jobName,
+        filePath,
+        model: parsed.model,
+        tensorParallelSize: parsed.tensorParallelSize,
+        pipelineParallelSize: parsed.pipelineParallelSize,
+      });
+    } catch {
+      // If a config file is malformed, still list it but without parsed fields
+      entries.push({ jobName, filePath });
+    }
+  }
+  return entries;
+}
 
 /** Returns the path where a named job's vLLM config is stored locally. */
 export function jobConfigPath(jobName: string): string {
@@ -29,6 +65,8 @@ export interface VllmConfig {
   enableAutoToolChoice?: boolean;
   enableReasoning?: boolean;
   minVllmVersion?: string;
+  /** Environment variables to set before launching vLLM. Always present (may be empty). */
+  env: Record<string, string>;
 }
 
 /**
@@ -86,7 +124,17 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const reasoningParser = doc["reasoning-parser"] ?? doc["reasoning_parser"];
   const enableReasoning = typeof reasoningParser === "string" && reasoningParser.length > 0 ? true : undefined;
 
-  return { model, tensorParallelSize, pipelineParallelSize, maxModelLen, enableAutoToolChoice, enableReasoning, minVllmVersion };
+  const envBlock = doc["env"];
+  const env: Record<string, string> = {};
+  if (envBlock && typeof envBlock === "object" && !Array.isArray(envBlock)) {
+    for (const [k, v] of Object.entries(envBlock)) {
+      if (typeof v === "string" || typeof v === "number") {
+        env[k] = String(v);
+      }
+    }
+  }
+
+  return { model, tensorParallelSize, pipelineParallelSize, maxModelLen, enableAutoToolChoice, enableReasoning, minVllmVersion, env };
 }
 
 /**
@@ -111,4 +159,25 @@ export function writeStrippedConfig(filePath: string): string {
   const tmpPath = join(tmpdir(), `ivllm-stripped-${Date.now()}.yaml`);
   writeFileSync(tmpPath, stripped, "utf-8");
   return tmpPath;
+}
+
+/** Parsed environment variable entry. */
+export interface EnvVarEntry { key: string; value: string }
+
+/**
+ * Reads env vars from a vLLM config file and returns them as an array
+ * of { key, value } entries suitable for rendering into SLURM scripts.
+ */
+export function parseEnvVars(filePath: string): EnvVarEntry[] {
+  const raw = readFileSync(filePath, "utf-8");
+  const doc = yaml.load(raw) as Record<string, unknown>;
+  const envBlock = doc["env"];
+  if (!envBlock || typeof envBlock !== "object" || Array.isArray(envBlock)) return [];
+  const entries: EnvVarEntry[] = [];
+  for (const [k, v] of Object.entries(envBlock)) {
+    if (typeof v === "string" || typeof v === "number") {
+      entries.push({ key: k, value: String(v) });
+    }
+  }
+  return entries;
 }

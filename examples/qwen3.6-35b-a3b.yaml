@@ -6,11 +6,9 @@
 # Architecture: MoE + Gated DeltaNet + Vision Encoder (multimodal)
 #   Only 10 of 40 layers use standard attention (2 KV heads, head_dim=256);
 #   the remaining 30 use Gated DeltaNet (linear attention, fixed state — no per-token KV).
-#   KV cache at 262K context ≈ 2.7 GB total — tp=4 single-node is fine.
-#   The official vLLM recipe recommends tp=8 for maximum throughput; tp=4 is correct
-#   for single-node Isambard AI use.
+#   KV cache at 262K context ≈ 2.7 GB total — very small footprint.
 #
-# Parallelism: tp=4 (70 GB weights, ~276 GB remaining for KV cache across 4 GPUs)
+# Parallelism: tp=2 (70 GB weights, ~102 GB remaining for KV cache across 2 GPUs)
 # Context: 262,144 tokens (full native context)
 
 model: Qwen/Qwen3.6-35B-A3B
@@ -36,4 +34,4 @@ enable-prefix-caching: true
 # To run text-only (frees ~a few GB of memory for extra KV cache), add:
 #   language-model-only: true
 # An FP8 variant exists (Qwen/Qwen3.6-35B-A3B-FP8) — halves weight memory to ~35 GB.
-min-vllm-version: "0.19.0"
+min-vllm-version: "0.17.0"

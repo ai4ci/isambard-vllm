@@ -33,9 +33,8 @@ max-model-len: 800000
 gpu-memory-utilization: 0.95
 
 # Compilation and decoding optimizations
-compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY"}'
+compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY", "pass_config": {"fuse_allreduce_rms": false}}'
 no-enable-flashinfer-autotune: true
-cc.pass_config.fuse_allreduce_rms: "False"
 
 # Max batch parameters to protect host/GPU RAM
 max-num-seqs: 512
@@ -55,6 +54,11 @@ tokenizer-mode: deepseek_v4
 # Prefix caching — valuable for repeated system prompts and CoT contexts.
 enable-prefix-caching: true
 
-min-vllm-version: "0.22.0"
-# min-vllm-version: DeepSeek-V4-Pro support is present in vLLM 0.22.0+.
+min-vllm-version: "0.20.0"
+# min-vllm-version: DeepSeek-V4-Pro requires vLLM 0.20.0+ (per vLLM recipes).
 # ivllm checks this before submitting; stripped before passing to vLLM.
+
+# Environment variables required for Hopper GPUs (per vLLM recipe).
+# Stripped before passing to vLLM serve; rendered as export lines in the SLURM script.
+env:
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"

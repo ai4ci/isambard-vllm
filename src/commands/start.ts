@@ -20,7 +20,7 @@ import { renderInferenceScript } from "../templates/inference.ts";
 import { renderMockInferenceScript } from "../templates/mock-inference.ts";
 import { parseJobDetails, hfCachePath, parseStartArgs, type JobDetails } from "../job.ts";
 import { makeRemoteOps } from "../remote-ops.ts";
-import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig } from "../vllm-config.ts";
+import { parseVllmConfig, resolveGpuCount, writeStrippedConfig, jobConfigPath, saveJobConfig, parseEnvVars } from "../vllm-config.ts";
 import { semverGte, semverSort } from "../semver.ts";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -344,6 +344,7 @@ Examples:
   const remoteConfigFileScp = configFile ? `${remoteWorkDirScp}/${basename(configFile)}` : undefined;
   const remoteScriptPathScp = `${remoteWorkDirScp}/${jobName}.slurm.sh`;
 
+  const envVars = configFile ? parseEnvVars(configFile) : [];
   const script = startArgs.mock
     ? renderMockInferenceScript({ jobName, model, workDir: remoteWorkDir, serverPort, timeLimit })
     : renderInferenceScript({
@@ -351,6 +352,7 @@ Examples:
         configFileName: configFile ? basename(configFile) : "",
         workDir: remoteWorkDir,
         serverPort, gpuCount, nodeCount, timeLimit,
+        envVars,
       });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);

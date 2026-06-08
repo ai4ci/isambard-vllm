@@ -97,6 +97,8 @@ if needed_gpus <= 4:
     tensor-parallel-size = needed_gpus  (round up to 1, 2, or 4)
     pipeline-parallel-size = 1
     → single node job
+    → Use minimum GPUs to reduce queue wait times
+    → Upgrade to tp=4 only if user wants max throughput/longest context
 else:
     tensor-parallel-size = 4
     pipeline-parallel-size = ceil(needed_gpus / 4)
@@ -204,8 +206,8 @@ This is recommended in the official vLLM recipes for throughput-focused serving.
 
 - Start with the model's native context length from the model card
 - Reduce if you get OOM errors — halving context roughly halves KV cache memory
-- For most use cases 32768 (32K) is a good starting point even if the model supports 128K+
-- Very long contexts (>64K) are memory intensive; only use if needed
+- KV cache headroom scales with `tensor-parallel-size`: more GPUs = more aggregate memory = more room for KV cache
+- Very long contexts (>64K) are memory intensive; only use if needed and if you have enough GPUs
 
 ## Common complete configs
 

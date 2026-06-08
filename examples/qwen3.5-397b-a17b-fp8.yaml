@@ -39,6 +39,13 @@ enable-expert-parallel: true
 # Caching
 enable-prefix-caching: true
 
+# Environment variables per vLLM recipe (Hopper GPU overrides).
+# Stripped before passing to vLLM serve; rendered as export lines in SLURM.
+env:
+  VLLM_DEEP_GEMM_WARMUP: skip
+  VLLM_USE_DEEP_GEMM: "0"
+  VLLM_FLASHINFER_MOE_BACKEND: latency
+
 # Note: text-only mode - skips the vision encoder to free memory for extra KV cache.
 # Remove this line to enable image/video input.
 language-model-only: true

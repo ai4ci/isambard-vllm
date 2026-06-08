@@ -176,8 +176,11 @@ export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
     maxTokens: context,
     input: ["text"],
     reasoning: opts.reasoning ?? false,
-    // For OpenAI-compatible APIs like vLLM
-    api: "openai-completions"
+    // vLLM doesn't understand the "developer" role used for reasoning-capable models
+    // so we send the system prompt as a "system" message instead.
+    compat: {
+      supportsDeveloperRole: false,
+    },
   };
   
   // Add thinking level map if reasoning is enabled
