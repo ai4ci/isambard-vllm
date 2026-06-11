@@ -2,10 +2,19 @@
 #
 # Hardware: 4 × GH200 120GB per node (Isambard AI Phase 1/2) — ~96 GiB usable HBM3e per GPU
 # Model: 1.6T total parameters, 49B active parameters (MoE)
-# Parallelism: tp=16 (4 nodes of 4 GPUs) or tp=8 (2 nodes of 4 GPUs)
-#   - 16 GPUs (4 nodes): Recommended for comfortable KV cache headroom and longer context.
-#   - 8 GPUs (2 nodes): Tight fit but works for standard contexts.
+# Parallelism options:
+#   - TP=16 (4 nodes): Recommended for comfortable KV cache headroom and longer context.
+#     Requires vLLM fix for FP8 block alignment (moe_intermediate_size=3072 / 16 = 192,
+#     not divisible by block_k=128). May fail with current vLLM versions.
+#   - TP=8 + PP=2 (4 nodes): Same 16-GPU memory profile as TP=16 (~50 GB weights/GPU).
+#     TP=8 satisfies all divisibility constraints: 7168/8=896, 3072/8=384, 384/128=3.
+#     Use this if TP=16 fails with "not divisible by weight quantization block_k=128".
+#   - TP=8 alone (2 nodes): Tight fit (~100 GB weights/GPU), limited KV cache headroom.
+#     Suitable for shorter contexts only.
+#
 #   Uses Tensor + Expert Parallel (TEP) with expert layers split via EP.
+#   Pipeline Parallel (PP) can replace TP to maintain the same GPU count with
+#   correct weight partitioning when TP alone hits FP8 block alignment issues.
 #
 # Quantization: Native FP4+FP8 mixed checkpoint (experts are in FP4, dense layers in FP8)
 #   which reduces model weights footprint to ~800 GB.
@@ -16,24 +25,36 @@
 #   Three-tier reasoning effort: Non-think, Think High, and Think Max.
 #   Function calling: native deepseek_v4 tool-use protocol.
 #
-# Usage (16-GPU): ivllm start <job-name> --config examples/deepseek-v4-pro.yaml
-# Usage (8-GPU):  ivllm start <job-name> --config examples/deepseek-v4-pro.yaml --gpus 8
+# Usage (16-GPU default): ivllm start <job-name> --config examples/deepseek-v4-pro.yaml
+# Usage (8-GPU, tight):  ivllm start <job-name> --config examples/deepseek-v4-pro.yaml --gpus 8
 
 model: deepseek-ai/DeepSeek-V4-Pro
-tensor-parallel-size: 16
+# Default: TP=8 + PP=2 (16 GPUs, 4 nodes) — satisfies FP8 block alignment.
+# To use TP=16 instead, comment out the two lines below and uncomment the TP=16 block.
+tensor-parallel-size: 8
+pipeline-parallel-size: 2
+
+# Alternative: TP=16 (4 nodes, pure tensor parallel)
+# May fail with "not divisible by weight quantization block_k=128" in vLLM < 0.23.
+# tensor-parallel-size: 16
+# pipeline-parallel-size: 1
 enable-expert-parallel: true
 
-# Weights occupy ~800 GB. 8 GPUs offer 960 GB VRAM, 16 GPUs offer 1920 GB VRAM.
+# Weights occupy ~800 GB. 16 GPUs offer 1920 GB VRAM (50 GB weights/GPU with TP=16 or TP=8+PP=2).
+# 8 GPUs offer 960 GB VRAM (100 GB weights/GPU with TP=8 alone — tight for KV cache).
 # Using FP8 KV cache is required to stay within memory limits.
 kv-cache-dtype: fp8
 block-size: 256
 
 # High context capability up to 1,000,000 tokens (recipe recommends 800K max-model-len)
-max-model-len: 800000
-gpu-memory-utilization: 0.95
+# Reduced to 512K to reduce scheduler edge-case triggers for upstream bug #41530
+max-model-len: 512000
+gpu-memory-utilization: 0.88
 
 # Compilation and decoding optimizations
+# enforce-eager: disables CUDA graphs to avoid replay hangs (upstream bug #41530)
 compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY", "pass_config": {"fuse_allreduce_rms": false}}'
+enforce-eager: true
 no-enable-flashinfer-autotune: true
 
 # Max batch parameters to protect host/GPU RAM
@@ -51,10 +72,10 @@ enable-auto-tool-choice: true
 tool-call-parser: deepseek_v4
 tokenizer-mode: deepseek_v4
 
-# Prefix caching — valuable for repeated system prompts and CoT contexts.
-enable-prefix-caching: true
+# Prefix caching — disabled to avoid scheduler deadlock (upstream vLLM #41530)
+# enable-prefix-caching: true
 
-min-vllm-version: "0.20.0"
+min-vllm-version: "0.22.1"
 # min-vllm-version: DeepSeek-V4-Pro requires vLLM 0.20.0+ (per vLLM recipes).
 # ivllm checks this before submitting; stripped before passing to vLLM.
 
@@ -62,3 +83,4 @@ min-vllm-version: "0.20.0"
 # Stripped before passing to vLLM serve; rendered as export lines in the SLURM script.
 env:
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"

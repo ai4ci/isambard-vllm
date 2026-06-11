@@ -143,6 +143,26 @@ Examples:
       process.exit(1);
     }
     console.log('✓ SSH connectivity OK');
+
+    // Check local port availability — if the port is already in use (e.g. from
+    // a stale tunnel), spawnTunnel will fail with ExitOnForwardFailure=yes,
+    // which triggers shutdown() → scancel → kills the remote job.
+    // Detect this upfront and fail before submitting the SLURM job.
+    console.log(`Checking local port ${localPort}...`);
+    const portInUse = await isLocalPortInUse(localPort);
+    if (portInUse) {
+      console.error(
+        `Error: Local port ${localPort} is already in use by ${portInUse.process} (pid ${portInUse.pid}).`,
+      );
+      console.error(
+        `  This is likely a stale SSH tunnel from a previous session.`,
+      );
+      console.error(
+        `  Kill it with: kill ${portInUse.pid}  (or: lsof -ti :${localPort} | xargs kill)`,
+      );
+      process.exit(1);
+    }
+    console.log(`✓ Port ${localPort} is free`);
   }
 
   // Resolve config file: if --config provided, save to job store; if omitted, load from store.
@@ -656,4 +676,29 @@ function timestamp(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if a local TCP port is already in use.
+ * Returns `{ pid, process }` if occupied, or `null` if free.
+ * Uses `lsof` (macOS/Linux) with fallback to `/proc/net/tcp`.
+ */
+async function isLocalPortInUse(
+  port: number,
+): Promise<{ pid: string; process: string } | null> {
+  const { execFile } = await import('child_process');
+  return new Promise((resolve) => {
+    execFile('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], (err, stdout) => {
+      if (err || !stdout.trim()) {
+        resolve(null);
+        return;
+      }
+      const pid = stdout.trim().split('\n')[0];
+      // Try to get the process name for a nicer error message
+      execFile('ps', ['-p', pid, '-o', 'comm='], (_err2, psOut) => {
+        const process = psOut?.trim() || 'unknown';
+        resolve({ pid, process });
+      });
+    });
+  });
 }

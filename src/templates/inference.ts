@@ -210,7 +210,6 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 #SBATCH --gpus=${gpuCount}
 #SBATCH --mem=0
 #SBATCH --time=${timeLimit}
-#SBATCH --exclusive
 
 exec > "${workDir}/${jobName}.slurm.log" 2>&1
 umask 0002
