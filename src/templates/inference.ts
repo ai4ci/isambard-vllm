@@ -256,6 +256,10 @@ srun \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${serverPort} \\
+  --served-model-name "${model}" \\
+  --served-model-name "${model.split('/').pop()!.toLowerCase()}" \\
+  --served-model-name "default" \\
+  --served-model-name "${jobName}" \\
   &
 VLLM_PID=$!
 
@@ -382,7 +386,7 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node 1 \\
-  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort}" \\
+  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model}\" --served-model-name \"${model.split('/').pop()!.toLowerCase()}\" --served-model-name \"default\" --served-model-name \"${jobName}\"" \\
   &
 VLLM_PID=$!
 

@@ -278,8 +278,12 @@ describe("renderInferenceScript", () => {
     expect(renderInferenceScript(base)).not.toContain("--tensor-parallel-size");
   });
 
-  it("does not pass --served-model-name on command line", () => {
-    expect(renderInferenceScript(base)).not.toContain("--served-model-name");
+  it("includes served-model-name flags for the model and job name", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('--served-model-name "Qwen/Qwen2.5-0.5B-Instruct"');
+    expect(script).toContain('--served-model-name "qwen2.5-0.5b-instruct"');
+    expect(script).toContain('--served-model-name "default"');
+    expect(script).toContain('--served-model-name "my-job"');
   });
 
   it("references the vllm config file from workDir", () => {
