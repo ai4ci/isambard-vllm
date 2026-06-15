@@ -137,21 +137,26 @@ export async function runInteractive(
 
   console.log(`Executing: ${cmd}`);
 
-  const { exitCode } = await streamSrun(config, cmd, {
-    silent: false,
-    onIdReceived: (jobId) => {
-      console.log(`\n🚀 Captured Slurm/Srun Identifier: ${jobId}`);
-      sessionState.slurmJobId = jobId;
+  try {
+    const { exitCode } = await streamSrun(config, cmd, {
+      silent: false,
+      onIdReceived: (jobId) => {
+        console.log(`\n🚀 Captured Slurm/Srun Identifier: ${jobId}`);
+        sessionState.slurmJobId = jobId;
 
-      // Start monitoring asynchronously in the background as srun logs stream
-      monitor(sessionState, startArgs, opts).catch((err) => {
-        console.error('Error in monitor session:', err);
-      });
-    },
-  });
-
-  if (exitCode !== 0) {
-    throw new Error(`srun failed (exit ${exitCode})`);
+        // Start monitoring asynchronously in the background as srun logs stream
+        void monitor(sessionState, startArgs, opts);
+      },
+    });
+  } catch (err) {
+    // srun returns exit code 255 when cancelled via SIGINT (user Ctrl+C).
+    // In this case the shutdown handler already called scancel. Treat as
+    // graceful cancellation rather than bubbling an unhandled error.
+    const msg = (err as Error).message ?? '';
+    if (msg.includes('exit 255')) {
+      process.exit(0);
+    }
+    throw err;
   }
 }
 
