@@ -492,7 +492,7 @@ export async function runInferenceSession(
   isInteractive: boolean,
   ops: RemoteOps,
 ): Promise<void> {
-  const { version: ivllmVersion } = await import('../../package.json');
+  const { version: ivllmVersion } = await import('../package.json');
   const { jobName, timeLimit, serverPort } = startArgs;
   const localPort = startArgs.localPort ?? config.defaultLocalPort;
   const hfHome = `${config.projectDir}/hf`;
