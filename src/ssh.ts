@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+
+import readline from 'readline';
 import type { Config } from './config.ts';
 
 /**
@@ -41,6 +43,87 @@ export function runRemote(
     proc.on('close', (code) =>
       resolve({ exitCode: code ?? 1, stdout: stdout.trim() }),
     );
+  });
+}
+
+export function streamSrun(
+  config: Config,
+  command: string,
+  options: {
+    env?: Record<string, string>;
+    silent?: boolean;
+    onIdReceived?: (id: string) => void; // Dispatched instantly when found
+  } = {},
+): Promise<{ exitCode: number }> {
+  const cmd = `${command} & echo "SLURM_JOB_ID_MATCH:$!"`;
+  return new Promise((resolve, reject) => {
+    const target = `${config.username}@${config.loginHost}`;
+    const envPrefix = options.env
+      ? Object.entries(options.env)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' ') + ' '
+      : '';
+    const fullCommand = envPrefix + cmd;
+
+    // Use -t for pseudo-tty streaming to bypass log buffering
+    const proc = spawn(
+      'ssh',
+      ['-t', '-o', 'BatchMode=yes', target, fullCommand],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    // Use readline interface to parse logs cleanly line by line
+    const rl = readline.createInterface({
+      input: proc.stdout!,
+      terminal: false,
+    });
+
+    let idReceived = false;
+    rl.on('line', (line) => {
+      // Print to local console unless silent
+      if (!options.silent) {
+        console.log(line);
+      }
+
+      // Extremely robust matching of SLURM identifier formats
+      if (options.onIdReceived && !idReceived) {
+        let foundId: string | null = null;
+        const match = line.match(/Submitted (batch|interactive) job (\d+)/);
+        if (match) {
+          foundId = match[2];
+        } else {
+          const srunMatch = line.match(/srun: (?:job|Job) (\d+)/i);
+          if (srunMatch) {
+            foundId = srunMatch[1];
+          } else if (line.includes('SLURM_JOB_ID_MATCH:')) {
+            const pidMatch = line.match(/SLURM_JOB_ID_MATCH:(\d+)/);
+            if (pidMatch) {
+              foundId = pidMatch[1];
+            }
+          } else if (line.trim().match(/^\d+$/)) {
+            foundId = line.trim();
+          }
+        }
+
+        if (foundId) {
+          idReceived = true;
+          options.onIdReceived(foundId);
+        }
+      }
+    });
+
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      if (!options.silent) {
+        process.stderr.write(chunk.toString());
+      }
+    });
+
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      resolve({ exitCode: code ?? 1 });
+    });
   });
 }
 

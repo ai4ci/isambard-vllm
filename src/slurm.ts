@@ -1,7 +1,8 @@
 import type { Config } from './config.ts';
-import { runRemote } from './ssh.ts';
+import { runRemote, streamSrun } from './ssh.ts';
 import type { InferenceScriptOptions } from './templates/inference.ts';
-// import type { EnvVarEntry } from './vllm-config.ts';
+import type { SessionState, MonitorRuntimeOpts } from './session-helper.ts';
+import type { StartArgs } from './job.ts';
 
 export type JobState = 'running' | 'completed' | 'failed';
 export type SlurmQueueState = { state: string; reason: string };
@@ -64,7 +65,15 @@ export function parseJobState(sacctOutput: string): JobState | null {
 export async function submitJob(
   config: Config,
   remoteScriptPath: string,
-): Promise<string> {
+  sessionState: SessionState,
+  startArgs: StartArgs,
+  opts: MonitorRuntimeOpts,
+  monitor: (
+    state: SessionState,
+    args: StartArgs,
+    runtimeOpts: MonitorRuntimeOpts,
+  ) => Promise<void>,
+): Promise<void> {
   const { stdout, exitCode } = await runRemote(
     config,
     `sbatch ${remoteScriptPath}`,
@@ -72,10 +81,16 @@ export async function submitJob(
   );
   if (exitCode !== 0)
     throw new Error(`sbatch failed (exit ${exitCode}): ${stdout}`);
+
   const jobId = parseJobId(stdout);
   if (!jobId)
     throw new Error(`Could not parse job ID from sbatch output: ${stdout}`);
-  return jobId;
+
+  console.log(`✓ SLURM job submitted: ${jobId}`);
+  sessionState.slurmJobId = jobId;
+
+  // Sbatch returns immediately, so block/await monitorSession here
+  await monitor(sessionState, startArgs, opts);
 }
 
 /**
@@ -90,7 +105,15 @@ export async function runInteractive(
   config: Config,
   options: InferenceScriptOptions,
   remoteScriptPath: string,
-): Promise<string> {
+  sessionState: SessionState,
+  startArgs: StartArgs,
+  opts: MonitorRuntimeOpts,
+  monitor: (
+    state: SessionState,
+    args: StartArgs,
+    runtimeOpts: MonitorRuntimeOpts,
+  ) => Promise<void>,
+): Promise<void> {
   // Calculate basic metrics
   const gpusPerNode = Math.floor(options.gpuCount / options.nodeCount);
   const isFullOrMultiNode = options.nodeCount > 1 || options.gpuCount === 4;
@@ -98,7 +121,7 @@ export async function runInteractive(
   // 1. Calculate --mem
   // Use '0' for full/multi node, otherwise scale linearly (120GB per GPU, one
   // Grace Hopper superchip per GPU).
-  const mem = isFullOrMultiNode ? '0' : `${options.gpuCount * 120}G`;
+  const mem = '0'; // isFullOrMultiNode ? '0' : `${options.gpuCount * 120}G`;
 
   // 2. Calculate --cpus-per-task
   // Each Grace Hopper superchip has 72 physical cores + 1 H100 GPU. We use 64
@@ -110,16 +133,26 @@ export async function runInteractive(
   const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
 
   // Assemble the final command
-  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+  const cmd = `srun --parsable --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
 
-  const { stdout, exitCode } = await runRemote(config, cmd, { silent: false });
+  console.log(`Executing: ${cmd}`);
 
-  if (exitCode !== 0)
-    throw new Error(`srun failed (exit ${exitCode}): ${stdout}`);
-  const jobId = parseJobId(stdout);
-  if (!jobId)
-    throw new Error(`Could not parse job ID from srun output: ${stdout}`);
-  return jobId;
+  const { exitCode } = await streamSrun(config, cmd, {
+    silent: false,
+    onIdReceived: (jobId) => {
+      console.log(`\n🚀 Captured Slurm/Srun Identifier: ${jobId}`);
+      sessionState.slurmJobId = jobId;
+
+      // Start monitoring asynchronously in the background as srun logs stream
+      monitor(sessionState, startArgs, opts).catch((err) => {
+        console.error('Error in monitor session:', err);
+      });
+    },
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(`srun failed (exit ${exitCode})`);
+  }
 }
 
 /**

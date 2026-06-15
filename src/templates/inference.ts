@@ -236,7 +236,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 
   // Calculate resources using our fractional node logic
   const isFullNode = opts.gpuCount === 4;
-  const memValue = isFullNode ? '0' : `${opts.gpuCount * 120}G`;
+  const memValue = '0'; //isFullNode ? '0' : `${opts.gpuCount * 120}G`;
   const cpusPerTask = isFullNode ? '256' : `${opts.gpuCount * 64}`;
   const exclusiveFlag = isFullNode ? '#SBATCH --exclusive\n' : '';
 
@@ -245,7 +245,9 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     // The script payload itself runs raw because your local orchestrator
     // will invoke this string via an active 'srun' command over SSH.
     return `#!/bin/bash
-    ${runtimePayload}`;
+    ${runtimePayload}
+    echo "Submitted interactive job $VLLM_PID"
+    `;
   } else {
     // BATCH PROCESSING ACCESS (Produces a traditional SBATCH file)
     return `#!/bin/bash
@@ -323,13 +325,12 @@ vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${serverPort} \\
-  --served-model-name "${model}" \\
-  --served-model-name "${lcaseModel}" \\
-  --served-model-name "default" \\
-  --served-model-name "${jobName}"
+  --served-model-name "${model},${lcaseModel},default,${jobName}"
 } \\
   &
 VLLM_PID=$!
+
+echo "APP_PID_MATCH:$VLLM_PID"
 
 ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
@@ -346,7 +347,9 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
     // Interactive direct access relies on your local JS script executing the parent allocation:
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
-    ${runtimePayload}`;
+    ${runtimePayload}
+    echo "Submitted interactive job $VLLM_PID"
+    `;
   } else {
     // Traditional SBATCH batch script generation
     return `#!/bin/bash
@@ -480,9 +483,11 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node=1 \\
-  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model}\" --served-model-name \"${lcaseModel}\" --served-model-name \"default\" --served-model-name \"${jobName}\"" \\
+  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model},${lcaseModel},default,${jobName}\"" \\
   &
 VLLM_PID=$!
+
+echo "APP_PID_MATCH:$VLLM_PID"
 
 ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }

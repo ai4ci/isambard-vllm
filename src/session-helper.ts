@@ -656,9 +656,19 @@ export async function runInferenceSession(
     }
 
     console.log('Submitting SLURM job...');
-    let slurmJobId: string;
+    const monitorOpts: MonitorRuntimeOpts = {
+      localPort,
+      serverPort,
+      config,
+      model,
+      maxModelLen,
+      enableAutoToolChoice,
+      enableReasoning,
+      isInteractive: isInteractive || !!startArgs.mock,
+    };
+
     if (isInteractive || startArgs.mock) {
-      slurmJobId = await runInteractive(
+      await runInteractive(
         config,
         {
           jobName,
@@ -672,34 +682,32 @@ export async function runInferenceSession(
           nodeCount,
           timeLimit,
           isInteractive,
+          envVars,
         },
         remoteScriptPath,
+        sessionState,
+        startArgs,
+        monitorOpts,
+        monitorSession,
       );
     } else {
-      slurmJobId = await submitJob(config, remoteScriptPath);
+      await submitJob(
+        config,
+        remoteScriptPath,
+        sessionState,
+        startArgs,
+        monitorOpts,
+        monitorSession,
+      );
     }
-    console.log(`✓ SLURM job submitted: ${slurmJobId}`);
-    sessionState.slurmJobId = slurmJobId;
   } finally {
     if (existsSync(localScriptTmp)) unlinkSync(localScriptTmp);
   }
-
-  // ── 11. Monitor loop ──────────────────────────────────────────────────
-  // (nested to capture local variables via closure)
-  await monitorSession(sessionState, startArgs, {
-    localPort,
-    serverPort,
-    config,
-    model,
-    maxModelLen,
-    enableAutoToolChoice,
-    enableReasoning,
-  });
 }
 
 // ── Monitor helpers ───────────────────────────────────────────────────────
 
-interface MonitorRuntimeOpts {
+export interface MonitorRuntimeOpts {
   localPort: number;
   serverPort: number;
   config: Config;
@@ -707,6 +715,7 @@ interface MonitorRuntimeOpts {
   maxModelLen?: number;
   enableAutoToolChoice: boolean;
   enableReasoning: boolean;
+  isInteractive: boolean;
 }
 
 /**
@@ -802,7 +811,7 @@ async function monitorSession(
       lastStatus = details.status;
     }
 
-    if (details.status === 'initialising') {
+    if (!opts.isInteractive && details.status === 'initialising') {
       const slurmLogPath = `${sessionState.remoteWorkDir}/${jobName}.slurm.log`;
       const { stdout: newLines } = await sessionState.ops.runRemote(
         `tail -n +${logLineOffset + 1} ${slurmLogPath} 2>/dev/null`,
