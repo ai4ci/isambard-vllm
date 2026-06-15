@@ -96,11 +96,14 @@ export async function runInteractive(
   const isFullOrMultiNode = options.nodeCount > 1 || options.gpuCount === 4;
 
   // 1. Calculate --mem
-  // Use '0' for full/multi node, otherwise scale linearly (120GB per requested GPU)
+  // Use '0' for full/multi node, otherwise scale linearly (120GB per GPU, one
+  // Grace Hopper superchip per GPU).
   const mem = isFullOrMultiNode ? '0' : `${options.gpuCount * 120}G`;
 
   // 2. Calculate --cpus-per-task
-  // Use 64 for full/multi node. For fractional nodes, give 64 cores per GPU to accelerate loading
+  // Each Grace Hopper superchip has 72 physical cores + 1 H100 GPU. We use 64
+  // cores per GPU for fractional nodes (leaving ~8 for model-loading/IO).
+  // Full and multi-node get all 256 threads (4 × 64) since the node is exclusive.
   const cpusPerTask = isFullOrMultiNode ? '256' : `${options.gpuCount * 64}`;
 
   // 3. Add --exclusive if we are claiming the entire node or multiple nodes
@@ -115,7 +118,7 @@ export async function runInteractive(
     throw new Error(`srun failed (exit ${exitCode}): ${stdout}`);
   const jobId = parseJobId(stdout);
   if (!jobId)
-    throw new Error(`Could not parse job ID from sbatch output: ${stdout}`);
+    throw new Error(`Could not parse job ID from srun output: ${stdout}`);
   return jobId;
 }
 

@@ -29,6 +29,36 @@ describe('renderInferenceScript', () => {
     expect(renderInferenceScript(base)).toContain('#SBATCH --mem=0');
   });
 
+  it("omits --exclusive for fractional GPU requests", () => {
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 2 }),
+    ).not.toContain("#SBATCH --exclusive");
+  });
+
+  it("scales --mem per GPU (120GB) for fractional requests", () => {
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 1 }),
+    ).toContain("#SBATCH --mem=120G");
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 2 }),
+    ).toContain("#SBATCH --mem=240G");
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 3 }),
+    ).toContain("#SBATCH --mem=360G");
+  });
+
+  it("scales --cpus-per-task per GPU (64) for fractional requests", () => {
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 1 }),
+    ).toContain("#SBATCH --cpus-per-task=64");
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 2 }),
+    ).toContain("#SBATCH --cpus-per-task=128");
+    expect(
+      renderInferenceScript({ ...base, gpuCount: 3 }),
+    ).toContain("#SBATCH --cpus-per-task=192");
+  });
+
   it('sets SBATCH time limit', () => {
     expect(renderInferenceScript(base)).toContain('#SBATCH --time=4:00:00');
   });
