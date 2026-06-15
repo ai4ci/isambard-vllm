@@ -49,13 +49,13 @@ describe('renderInferenceScript', () => {
 
   it('scales --cpus-per-task per GPU (64) for fractional requests', () => {
     expect(renderInferenceScript({ ...base, gpuCount: 1 })).toContain(
-      '#SBATCH --cpus-per-task=64',
+      '#SBATCH --cpus-per-gpu=64',
     );
     expect(renderInferenceScript({ ...base, gpuCount: 2 })).toContain(
-      '#SBATCH --cpus-per-task=128',
+      '#SBATCH --cpus-per-gpu=64',
     );
     expect(renderInferenceScript({ ...base, gpuCount: 3 })).toContain(
-      '#SBATCH --cpus-per-task=192',
+      '#SBATCH --cpus-per-gpu=64',
     );
   });
 

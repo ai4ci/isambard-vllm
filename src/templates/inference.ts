@@ -236,7 +236,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 
   // Calculate resources using our fractional node logic
   const isFullNode = opts.gpuCount === 4;
-  const memValue = '0'; //isFullNode ? '0' : `${opts.gpuCount * 120}G`;
+  const memValue = isFullNode ? '0' : `${opts.gpuCount * 115}G`;
   const cpusPerTask = isFullNode ? '256' : `${opts.gpuCount * 64}`;
   const exclusiveFlag = isFullNode ? '#SBATCH --exclusive\n' : '';
 
@@ -250,12 +250,23 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     `;
   } else {
     // BATCH PROCESSING ACCESS (Produces a traditional SBATCH file)
+    // return `#!/bin/bash
+    // #SBATCH --job-name=${opts.jobName}
+    // #SBATCH --nodes=1
+    // #SBATCH --gpus=${opts.gpuCount}
+    // #SBATCH --mem=${memValue}
+    // #SBATCH --cpus-per-task=${cpusPerTask}
+    // #SBATCH --time=${opts.timeLimit}
+    // ${exclusiveFlag}
+    // # Write the runtime execution logic directly below the headers
+    // ${runtimePayload}`;
     return `#!/bin/bash
     #SBATCH --job-name=${opts.jobName}
     #SBATCH --nodes=1
     #SBATCH --gpus=${opts.gpuCount}
     #SBATCH --mem=${memValue}
-    #SBATCH --cpus-per-task=${cpusPerTask}
+    #SBATCH --cpus-per-gpu=64
+    #SBATCH --cpu-bind=cores
     #SBATCH --time=${opts.timeLimit}
     ${exclusiveFlag}
     # Write the runtime execution logic directly below the headers
@@ -283,9 +294,9 @@ function renderSingleNodePayload(opts: InferenceScriptOptions): string {
   } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
+  const logRedirect = isInteractive ? '' : `exec > "${workDir}/${jobName}.slurm.log" 2>&1\n`;
 
-  return `exec > "${workDir}/${jobName}.slurm.log" 2>&1
-umask 0002
+  return `${logRedirect}umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
@@ -381,6 +392,7 @@ function renderMultiNodePayload(opts: InferenceScriptOptions): string {
     nodeCount,
     timeLimit,
     envVars,
+    isInteractive,
   } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
@@ -392,8 +404,10 @@ function renderMultiNodePayload(opts: InferenceScriptOptions): string {
       : '';
   const cpusPerTask = '256';
   const lcaseModel = model.split('/').pop()!.toLowerCase();
+  const logRedirect = isInteractive ? '' : `exec > "${workDir}/${jobName}.slurm.log" 2>&1\n`;
 
-  return `exec > "${workDir}/${jobName}.slurm.log" 2>&1
+  return `${logRedirect}
+# Multi-node Ray inference payload
 umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
