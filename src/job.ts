@@ -23,6 +23,10 @@ export interface StartArgs {
   noLaunch: boolean; // skip assistant launch even in non-dryRun mode
 }
 
+/**
+ *
+ * @param raw
+ */
 export function parseJobDetails(raw: string): JobDetails | null {
   if (!raw.trim()) return null;
   try {
@@ -34,6 +38,11 @@ export function parseJobDetails(raw: string): JobDetails | null {
   }
 }
 
+/**
+ *
+ * @param projectDir
+ * @param model
+ */
 export function hfCachePath(projectDir: string, model: string): string {
   const cacheKey = model.includes('/')
     ? 'models--' + model.replace('/', '--')
@@ -41,6 +50,10 @@ export function hfCachePath(projectDir: string, model: string): string {
   return `${projectDir}/hub/${cacheKey}`;
 }
 
+/**
+ *
+ * @param args
+ */
 export function parseStartArgs(args: string[]): StartArgs {
   // First positional arg is job name — it must not start with --
   const jobName = args[0] && !args[0].startsWith('--') ? args[0] : null;

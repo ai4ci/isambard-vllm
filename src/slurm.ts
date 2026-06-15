@@ -8,10 +8,19 @@ export type SlurmQueueState = { state: string; reason: string };
 export const SACCT_DIAGNOSTICS_FORMAT =
   'JobID,JobName%24,NodeList%24,State,ExitCode,ReqMem,AllocTRES%40,MaxRSS,MaxRSSNode%18,MaxRSSTask,MaxVMSize';
 
+/**
+ *
+ * @param jobId
+ */
 export function buildSacctDiagnosticsCommand(jobId: string): string {
   return `sacct -j ${jobId} --format=${SACCT_DIAGNOSTICS_FORMAT}`;
 }
 
+/**
+ *
+ * @param sacctOutput
+ * @param jobId
+ */
 export function sacctDiagnosticsSettled(
   sacctOutput: string,
   jobId: string,
@@ -25,11 +34,19 @@ export function sacctDiagnosticsSettled(
   return !/\b(RUNNING|PENDING|CONFIGURING|COMPLETING)\b/i.test(jobLine);
 }
 
+/**
+ *
+ * @param sbatchOutput
+ */
 export function parseJobId(sbatchOutput: string): string | null {
   const match = sbatchOutput.match(/Submitted batch job (\d+)/);
   return match?.[1] ?? null;
 }
 
+/**
+ *
+ * @param sacctOutput
+ */
 export function parseJobState(sacctOutput: string): JobState | null {
   const state = sacctOutput.trim().split(/\s+/)[0]?.toUpperCase();
   if (!state) return null;
@@ -41,6 +58,8 @@ export function parseJobState(sacctOutput: string): JobState | null {
 /**
  * Run a job using sbatch. This will place it in the queue. The script must include all the node requirements
  * In the #SBATCH directives at the beginning of the script
+ * @param config
+ * @param remoteScriptPath
  */
 export async function submitJob(
   config: Config,
@@ -63,6 +82,9 @@ export async function submitJob(
  * Run interactively using srun. This will stil be queued but can use the section reserved for interactive.
  * The command must include all the node requirements as CLI flags.
  * #SBATCH directives at the beginning of the script are ignored.
+ * @param config
+ * @param options
+ * @param remoteScriptPath
  */
 export async function runInteractive(
   config: Config,
@@ -97,6 +119,11 @@ export async function runInteractive(
   return jobId;
 }
 
+/**
+ *
+ * @param config
+ * @param jobId
+ */
 export async function pollJobStatus(
   config: Config,
   jobId: string,
@@ -109,6 +136,11 @@ export async function pollJobStatus(
   return parseJobState(stdout) ?? 'running';
 }
 
+/**
+ *
+ * @param config
+ * @param logPath
+ */
 export async function getJobLog(
   config: Config,
   logPath: string,
@@ -119,6 +151,10 @@ export async function getJobLog(
   return stdout;
 }
 
+/**
+ *
+ * @param squeueOutput
+ */
 export function parseSlurmQueueState(
   squeueOutput: string,
 ): SlurmQueueState | null {
@@ -130,6 +166,11 @@ export function parseSlurmQueueState(
   return state ? { state, reason } : null;
 }
 
+/**
+ *
+ * @param config
+ * @param jobId
+ */
 export async function getSlurmQueueState(
   config: Config,
   jobId: string,

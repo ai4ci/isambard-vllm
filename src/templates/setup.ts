@@ -3,6 +3,10 @@ export interface SetupScriptOptions {
   hfToken?: string;
 }
 
+/**
+ *
+ * @param opts
+ */
 export function renderSetupScript(opts: SetupScriptOptions): string {
   const { vllmVersion, hfToken } = opts;
   const venvDir = `$PROJECTDIR/ivllm/${vllmVersion}`;

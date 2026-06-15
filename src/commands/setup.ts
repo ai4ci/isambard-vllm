@@ -17,6 +17,10 @@ const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler
 const REMOTE_SCRIPT_PATH = '~/.config/ivllm/setup.slurm.sh';
 const REMOTE_LOG_PATH = '~/.config/ivllm/setup.log';
 
+/**
+ *
+ * @param args
+ */
 export async function cmdSetup(args: string[]): Promise<void> {
   // Handle help flag
   if (args.includes('--help') || args.includes('-h')) {
@@ -168,6 +172,10 @@ Examples:
   }
 }
 
+/**
+ *
+ * @param ms
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

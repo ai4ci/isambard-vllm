@@ -4,6 +4,11 @@ import type { Config } from './config.ts';
 /**
  * Run a command on the LOGIN node via SSH, streaming stdout/stderr to the
  * current terminal. Returns a promise that resolves with the exit code.
+ * @param config
+ * @param command
+ * @param options
+ * @param options.env
+ * @param options.silent
  */
 export function runRemote(
   config: Config,
@@ -42,6 +47,9 @@ export function runRemote(
 /**
  * Copy a local file to a path on the LOGIN node via scp.
  * Returns a promise that resolves when the copy is complete.
+ * @param config
+ * @param localPath
+ * @param remotePath
  */
 export function copyFile(
   config: Config,
@@ -64,6 +72,9 @@ export function copyFile(
 /**
  * Tail a remote file continuously (tail -n +1 -f), streaming lines to
  * process.stdout with an optional prefix. Returns a handle to stop tailing.
+ * @param config
+ * @param remotePath
+ * @param prefix
  */
 export function tailRemoteLog(
   config: Config,
@@ -102,6 +113,10 @@ export function tailRemoteLog(
  * Spawn a persistent forward SSH tunnel as a background child process.
  * ssh -N -L localPort:remoteHost:remotePort user@loginHost
  * Returns the child process so the caller can kill it on shutdown.
+ * @param config
+ * @param localPort
+ * @param remoteHost
+ * @param remotePort
  */
 export function spawnTunnel(
   config: Config,

@@ -6,6 +6,10 @@ export interface OpencodeSnippetOptions {
   reasoning?: boolean;
 }
 
+/**
+ *
+ * @param opts
+ */
 export function formatOpencodeSnippet(opts: OpencodeSnippetOptions): string {
   const { model, localPort, maxModelLen, toolCall, reasoning } = opts;
   const context = maxModelLen ?? 4096;

@@ -17,6 +17,9 @@ export interface RemoteOps {
 /**
  * Returns real RemoteOps that execute SSH/SCP, or dry-run ops that print
  * what would happen and copy files to a local preview directory.
+ * @param config
+ * @param dryRun
+ * @param dryRunDir
  */
 export function makeRemoteOps(
   config: Config,

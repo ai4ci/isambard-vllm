@@ -31,6 +31,7 @@ interface V1ModelsResponse {
 
 /**
  * Handle the ivllm agent command for launching AI assistants connected to a local vLLM server
+ * @param args
  */
 export async function cmdAgent(args: string[]): Promise<void> {
   // Handle help flag
@@ -157,6 +158,13 @@ Examples:
 
 /**
  * Launch an assistant with the given options (assistant selected via menu)
+ * @param opts
+ * @param opts.model
+ * @param opts.localPort
+ * @param opts.maxModelLen
+ * @param opts.toolCall
+ * @param opts.reasoning
+ * @param opts.shutdown
  */
 export async function launchAssistant(opts: {
   model: string;
@@ -343,6 +351,13 @@ export async function launchAssistant(opts: {
 
 /**
  * Update ~/.pi/agent/models.json with isambard-vllm configuration before launching Pi
+ * @param opts
+ * @param opts.model
+ * @param opts.localPort
+ * @param opts.maxModelLen
+ * @param opts.toolCall
+ * @param opts.reasoning
+ * @param cwd
  */
 async function updatePiModelsConfigForLaunch(
   opts: {
@@ -424,6 +439,8 @@ async function updatePiModelsConfigForLaunch(
 
 /**
  * Prompt for assistant selection
+ * @param title
+ * @param options
  */
 async function promptMenu(
   title: string,
@@ -448,6 +465,7 @@ async function promptMenu(
 
 /**
  * Generic input prompt
+ * @param question
  */
 async function promptInput(question: string): Promise<string> {
   const { createInterface } = await import('readline');

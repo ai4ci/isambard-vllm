@@ -72,6 +72,10 @@ switch (command) {
     process.exit(command ? 1 : 0);
 }
 
+/**
+ *
+ * @param args
+ */
 async function cmdConfig(args: string[]): Promise<void> {
   // Handle help flag
   if (args.includes('--help') || args.includes('-h')) {

@@ -20,6 +20,9 @@ const DEFAULTS: Config = {
   defaultLocalPort: 11434,
 };
 
+/**
+ *
+ */
 export function loadConfig(): Config {
   if (!existsSync(CONFIG_PATH)) {
     return { ...DEFAULTS };
@@ -28,6 +31,10 @@ export function loadConfig(): Config {
   return { ...DEFAULTS, ...JSON.parse(raw) } as Config;
 }
 
+/**
+ *
+ * @param config
+ */
 export function saveConfig(config: Config): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
@@ -35,6 +42,10 @@ export function saveConfig(config: Config): void {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
+/**
+ *
+ * @param config
+ */
 export function assertConfigured(config: Config): void {
   if (!config.loginHost) {
     throw new Error(

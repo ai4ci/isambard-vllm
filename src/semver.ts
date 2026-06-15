@@ -1,4 +1,8 @@
-/** Returns true if semver string `a` is strictly less than `b`. */
+/**
+ * Returns true if semver string `a` is strictly less than `b`.
+ * @param a
+ * @param b
+ */
 export function semverLt(a: string, b: string): boolean {
   const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
   const [a1, a2, a3] = parse(a);
@@ -8,12 +12,19 @@ export function semverLt(a: string, b: string): boolean {
   return a3 < b3;
 }
 
-/** Returns true if semver string `a` is greater than or equal to `b`. */
+/**
+ * Returns true if semver string `a` is greater than or equal to `b`.
+ * @param a
+ * @param b
+ */
 export function semverGte(a: string, b: string): boolean {
   return !semverLt(a, b);
 }
 
-/** Returns a new array sorted descending (highest version first). */
+/**
+ * Returns a new array sorted descending (highest version first).
+ * @param versions
+ */
 export function semverSort(versions: string[]): string[] {
   return [...versions].sort((a, b) =>
     semverLt(a, b) ? 1 : semverLt(b, a) ? -1 : 0,

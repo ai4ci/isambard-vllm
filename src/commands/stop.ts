@@ -7,12 +7,20 @@ export interface StopArgs {
   jobName: string;
 }
 
+/**
+ *
+ * @param args
+ */
 export function parseStopArgs(args: string[]): StopArgs {
   const jobName = args[0] && !args[0].startsWith('--') ? args[0] : null;
   if (!jobName) throw new Error('Job name is required as the first argument');
   return { jobName };
 }
 
+/**
+ *
+ * @param args
+ */
 export async function cmdStop(args: string[]): Promise<void> {
   // Handle help flag
   if (args.includes('--help') || args.includes('-h')) {
@@ -95,7 +103,10 @@ Examples:
   console.log(`✓ Job '${jobName}' stopped and cleaned up.`);
 }
 
-/** Attempt to terminate any local SSH forward-tunnel processes for the given port. */
+/**
+ * Attempt to terminate any local SSH forward-tunnel processes for the given port.
+ * @param localPort
+ */
 function cleanupLocalTunnel(localPort: number): Promise<void> {
   return new Promise((resolve) => {
     const pattern = `ssh.*-L.*${localPort}:`;

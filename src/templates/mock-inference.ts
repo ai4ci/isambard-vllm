@@ -7,6 +7,10 @@ export interface MockInferenceScriptOptions {
   startupDelaySecs?: number;
 }
 
+/**
+ *
+ * @param opts
+ */
 export function renderMockInferenceScript(
   opts: MockInferenceScriptOptions,
 ): string {

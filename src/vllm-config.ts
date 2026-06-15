@@ -51,12 +51,19 @@ export function listJobConfigs(): JobConfigEntry[] {
   return entries;
 }
 
-/** Returns the path where a named job's vLLM config is stored locally. */
+/**
+ * Returns the path where a named job's vLLM config is stored locally.
+ * @param jobName
+ */
 export function jobConfigPath(jobName: string): string {
   return join(JOB_CONFIG_DIR, `${jobName}.yaml`);
 }
 
-/** Saves a copy of the given vLLM config file to the local job config store. */
+/**
+ * Saves a copy of the given vLLM config file to the local job config store.
+ * @param jobName
+ * @param sourcePath
+ */
 export function saveJobConfig(jobName: string, sourcePath: string): void {
   if (!existsSync(JOB_CONFIG_DIR)) {
     mkdirSync(JOB_CONFIG_DIR, { recursive: true });
@@ -81,6 +88,9 @@ export interface VllmConfig {
  * gpus = tensor_parallel_size * pipeline_parallel_size.
  * nodeCount = ceil(gpuCount / gpusPerNode).
  * If --gpus was explicitly set on the CLI, that takes precedence for gpuCount.
+ * @param cliGpus
+ * @param yamlConfig
+ * @param gpusPerNode
  */
 export function resolveGpuCount(
   cliGpus: number | undefined,
@@ -102,6 +112,7 @@ export function resolveGpuCount(
 /**
  * Parse a vLLM YAML config file and extract fields that ivllm needs locally
  * (for HF model download and SLURM GPU allocation).
+ * @param filePath
  */
 export function parseVllmConfig(filePath: string): VllmConfig {
   const raw = readFileSync(filePath, 'utf-8');
@@ -161,6 +172,7 @@ export function parseVllmConfig(filePath: string): VllmConfig {
 /**
  * Returns a cleaned YAML string with all ivllm-specific keys removed.
  * vLLM errors on unknown config keys — always use this when uploading to the remote.
+ * @param filePath
  */
 export function stripIvllmKeys(filePath: string): string {
   const raw = readFileSync(filePath, 'utf-8');
@@ -174,6 +186,7 @@ export function stripIvllmKeys(filePath: string): string {
 /**
  * Writes a stripped (ivllm-keys removed) copy of the YAML config to a temp file
  * and returns the temp file path. Caller is responsible for deleting it.
+ * @param filePath
  */
 export function writeStrippedConfig(filePath: string): string {
   const stripped = stripIvllmKeys(filePath);
@@ -191,6 +204,7 @@ export interface EnvVarEntry {
 /**
  * Reads env vars from a vLLM config file and returns them as an array
  * of { key, value } entries suitable for rendering into SLURM scripts.
+ * @param filePath
  */
 export function parseEnvVars(filePath: string): EnvVarEntry[] {
   const raw = readFileSync(filePath, 'utf-8');

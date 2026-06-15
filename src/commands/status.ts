@@ -6,11 +6,19 @@ export interface StatusArgs {
   jobName?: string;
 }
 
+/**
+ *
+ * @param args
+ */
 export function parseStatusArgs(args: string[]): StatusArgs {
   const jobName = args[0] && !args[0].startsWith('--') ? args[0] : undefined;
   return { jobName };
 }
 
+/**
+ *
+ * @param job
+ */
 export function formatJobRow(job: JobDetails): string {
   const parts: string[] = [
     job.job_name.padEnd(20),
@@ -22,6 +30,10 @@ export function formatJobRow(job: JobDetails): string {
   return parts.join('  ').trimEnd();
 }
 
+/**
+ *
+ * @param jobs
+ */
 export function formatJobTable(jobs: JobDetails[]): string {
   if (jobs.length === 0) return 'No active ivllm jobs found.';
   const header =
@@ -37,6 +49,10 @@ export function formatJobTable(jobs: JobDetails[]): string {
   return [header, separator, ...rows].join('\n');
 }
 
+/**
+ *
+ * @param args
+ */
 export async function cmdStatus(args: string[]): Promise<void> {
   // Handle help flag
   if (args.includes('--help') || args.includes('-h')) {

@@ -1,5 +1,9 @@
 import { listJobConfigs } from '../vllm-config.ts';
 
+/**
+ *
+ * @param args
+ */
 export async function cmdList(args: string[]): Promise<void> {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(

@@ -1,126 +1,64 @@
-import { writeFileSync, unlinkSync, existsSync } from 'fs';
-import { join, basename } from 'path';
+import { mkdtempSync } from 'fs';
+import { join } from 'path';
 import { tmpdir } from 'os';
 import { loadConfig, assertConfigured } from '../config.ts';
 import { makeRemoteOps } from '../remote-ops.ts';
-import { renderInferenceScript } from '../templates/inference.ts';
-import {
-  parseVllmConfig,
-  resolveGpuCount,
-  writeStrippedConfig,
-  parseEnvVars,
-} from '../vllm-config.ts';
-import {
-  selectBestVersion,
-  listInstalledVersions,
-  isLocalPortInUse,
-  sleep,
-  timestamp,
-} from '../session-helper.ts';
-import { semverSort } from '../semver.ts';
-import { spawn } from 'child_process';
 import { parseStartArgs } from '../job.ts';
+import { runInferenceSession } from '../session-helper.ts';
 
+/**
+ *
+ * @param args
+ */
 export async function cmdInteractive(args: string[]): Promise<void> {
+  // Handle help flag
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+Usage: ivllm interactive <job> [options]
+
+Options:
+  --config <file>       vLLM config YAML (contains model, parallelism and all serving options)
+  --local-port <n>      Local port to expose the API on (from ivllm config)
+  --gpus <n>            GPUs to request (overrides tensor-parallel-size × pipeline-parallel-size from YAML)
+  --time <hh:mm:ss>     SLURM time limit (default: 4:00:00)
+  --dry-run             Preview generated scripts and scp commands without running anything
+  --no-launch           Skip assistant launch menu, show config snippet only
+  --help, -h            Show this help message
+
+Examples:
+  ivllm interactive my-job --config examples/qwen2.5-instruct.yaml
+  ivllm interactive my-job --gpus 4
+
+Note: This runs vLLM directly via srun (no sbatch), so it blocks your terminal
+until you type 'exit' or press Ctrl+C. Use 'ivllm start' for background job submission.
+`);
+    return;
+  }
+
   const config = loadConfig();
-  assertConfigured(config);
-
-  const startArgs = parseStartArgs(args);
-  const { jobName, timeLimit, serverPort } = startArgs;
-  let configFile = startArgs.configFile;
-  const localPort = startArgs.localPort ?? config.defaultLocalPort;
-  const hfHome = `${config.projectDir}/hf`;
-  const remoteWorkDir = `$HOME/${jobName}`;
-  const remoteWorkDirScp = `~/${jobName}`;
-  const remoteJobDetails = `${remoteWorkDir}/job_details.json`;
-
-  const ops = makeRemoteOps(config, startArgs.dryRun, undefined);
-
-  // 1. Pre-flight checks
-  const portInUse = await isLocalPortInUse(localPort);
-  if (portInUse) {
-    console.error(`Error: Port ${localPort} in use by PID ${portInUse.pid}.`);
+  try {
+    assertConfigured(config);
+  } catch (e) {
+    console.error('Error:', (e as Error).message);
     process.exit(1);
   }
 
-  // 2. Resolve Config/Model/Version
-  const yamlConfig = parseVllmConfig(configFile!);
-  const model = yamlConfig.model!;
-  const { gpuCount, nodeCount } = resolveGpuCount(
-    startArgs.gpuCount,
-    yamlConfig,
-  );
-  const installed = await listInstalledVersions(config, ops);
-  const vllmVersion = selectBestVersion(
-    installed,
-    yamlConfig.minVllmVersion || '0.19.1',
-  )!;
-
-  // 3. Prepare script
-  const envVars = parseEnvVars(configFile!);
-  const script = renderInferenceScript({
-    jobName,
-    model,
-    vllmVersion,
-    hfHome,
-    configFileName: basename(configFile!),
-    workDir: remoteWorkDir,
-    serverPort,
-    gpuCount,
-    nodeCount,
-    timeLimit,
-    isInteractive: true,
-    envVars,
-  });
-
-  // 4. Submit via srun (synchronous, blocking)
-  console.log(`Launching interactive session '${jobName}'...`);
-  const srunArgs = [
-    config.loginHost,
-    `mkdir -p ${remoteWorkDir} && cat > ${remoteJobDetails} <<EOF
-{"status": "initialising", "job_name": "${jobName}"}
-EOF
-`,
-    `srun --nodes=${nodeCount} --gpus-per-node=${Math.floor(gpuCount / nodeCount)} --mem=0 --time=${timeLimit} bash -s < -`,
-  ];
-
-  // Actually, this is too complex for a single srun call.
-  // Better pattern: copy script, then run srun script.sh
-  const localScriptTmp = join(tmpdir(), `ivllm-interactive-${jobName}.sh`);
-  writeFileSync(localScriptTmp, script, 'utf-8');
-  await ops.copyFile(
-    localScriptTmp,
-    `${remoteWorkDirScp}/${jobName}.interactive.sh`,
-  );
-
-  console.log('Allocation requested. Waiting for resources...');
-
-  const srunProcess = spawn(
-    'ssh',
-    [config.loginHost, `bash ${remoteWorkDir}/${jobName}.interactive.sh`],
-    { stdio: 'inherit' },
-  );
-
-  // 5. Poll for "running" to start tunnel
-  console.log('Waiting for vLLM to be ready...');
-  while (true) {
-    const { stdout } = await ops.runRemote(`cat ${remoteJobDetails}`, {
-      silent: true,
-    });
-    if (stdout.includes('"status":"running"')) break;
-    await sleep(2000);
+  let startArgs;
+  try {
+    startArgs = parseStartArgs(args);
+  } catch (e) {
+    console.error('Error:', (e as Error).message);
+    console.error(
+      'Usage: ivllm interactive <job> [--config <file>] [--local-port <port>] [--gpus <n>] [--time <hh:mm:ss>]',
+    );
+    process.exit(1);
   }
 
-  console.log('Tunneling...');
-  const tunnel = spawn('ssh', [
-    '-N',
-    '-L',
-    `${localPort}:localhost:${serverPort}`,
-    config.loginHost,
-  ]);
+  const dryRunDir = startArgs.dryRun
+    ? mkdtempSync(join(tmpdir(), 'ivllm-dryrun-'))
+    : undefined;
+  const ops = makeRemoteOps(config, startArgs.dryRun, dryRunDir);
 
-  srunProcess.on('exit', () => {
-    tunnel.kill();
-    process.exit(0);
-  });
+  // Delegate to unified session pipeline (isInteractive: true → uses srun)
+  await runInferenceSession(config, startArgs, true, ops);
 }

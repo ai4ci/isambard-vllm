@@ -27,13 +27,20 @@ export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:
 export CC=gcc
 export CXX=g++`;
 
-/** Renders user-supplied env vars as `export KEY="VALUE"` lines. */
+/**
+ * Renders user-supplied env vars as `export KEY="VALUE"` lines.
+ * @param envVars
+ */
 function renderEnvVars(envVars: EnvVarEntry[]): string {
   if (envVars.length === 0) return '';
   const lines = envVars.map((e) => `export ${e.key}="${e.value}"`);
   return `# User-supplied environment variables\n${lines.join('\n')}`;
 }
 
+/**
+ *
+ * @param _workDir
+ */
 function renderExitDiagnostics(_workDir: string): string {
   return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
 
@@ -44,6 +51,13 @@ persist_slurm_accounting() {
 }`;
 }
 
+/**
+ *
+ * @param env
+ * @param cache
+ * @param defaultLocation
+ * @param model
+ */
 function renderRelocateCache(
   env: string,
   cache: string,
@@ -62,6 +76,11 @@ fi
 ln -sfn "$${env}" ${defaultLocation}`;
 }
 
+/**
+ *
+ * @param workDir
+ * @param model
+ */
 function renderWorkDirSetup(workDir: string, model: string): string {
   return `WORK_DIR="${workDir}"
 mkdir -p "$WORK_DIR/ivllm"
@@ -101,6 +120,10 @@ ${renderRelocateCache(
 ${renderRelocateCache('VLLM_CACHE_DIR', 'vllm_cache', '~/.cache/vllm', model)}`;
 }
 
+/**
+ *
+ * @param workDir
+ */
 function renderMultiNodeExitDiagnostics(workDir: string): string {
   return `${renderExitDiagnostics(workDir)}
 RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"
@@ -136,6 +159,10 @@ persist_ray_logs() {
 }`;
 }
 
+/**
+ *
+ * @param includeRayLogs
+ */
 function renderExitTrap(includeRayLogs: boolean): string {
   const maybePersistRayLogs = includeRayLogs ? '\n  persist_ray_logs' : '';
   return `collect_exit_diagnostics() {
@@ -163,6 +190,11 @@ on_exit() {
 trap on_exit EXIT`;
 }
 
+/**
+ *
+ * @param workDir
+ * @param serverPort
+ */
 function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
   return `# Poll /health until vLLM is ready
 echo "Waiting for vLLM to become healthy on port ${serverPort}..."
@@ -195,6 +227,10 @@ fi
 finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
+/**
+ *
+ * @param opts
+ */
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
   const runtimePayload = renderSingleNodePayload(opts);
 
@@ -225,6 +261,10 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
   }
 }
 
+/**
+ *
+ * @param opts
+ */
 function renderSingleNodePayload(opts: InferenceScriptOptions): string {
   const {
     jobName,
@@ -294,6 +334,10 @@ VLLM_PID=$!
 ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
+/**
+ *
+ * @param opts
+ */
 function renderMultiNodeScript(opts: InferenceScriptOptions): string {
   const runtimePayload = renderMultiNodePayload(opts);
   const gpusPerNode = Math.floor(opts.gpuCount / opts.nodeCount);
@@ -317,6 +361,10 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
   }
 }
 
+/**
+ *
+ * @param opts
+ */
 function renderMultiNodePayload(opts: InferenceScriptOptions): string {
   const {
     jobName,
@@ -439,6 +487,10 @@ VLLM_PID=$!
 ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
+/**
+ *
+ * @param opts
+ */
 export function renderInferenceScript(opts: InferenceScriptOptions): string {
   return (
     opts.nodeCount > 1

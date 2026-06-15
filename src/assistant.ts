@@ -61,6 +61,7 @@ const ASSISTANTS: AssistantDefinition[] = [
 
 /**
  * Check if a binary exists on PATH.
+ * @param name
  */
 export function binaryExists(name: string): boolean {
   const result = spawnSync('which', [name], {
@@ -96,10 +97,21 @@ export function getSbxAvailable(): boolean {
   return binaryExists('sbx');
 }
 
+/**
+ *
+ * @param assistant
+ */
 export function getAssistantLabel(assistant: AssistantName): string {
   return ASSISTANTS.find((item) => item.name === assistant)?.label ?? assistant;
 }
 
+/**
+ *
+ * @param assistant
+ * @param availableAssistants
+ * @param hasScoder
+ * @param hasSbx
+ */
 export function getAvailableWrappers(
   assistant: AssistantName,
   availableAssistants: string[],
@@ -127,6 +139,7 @@ export function getAvailableWrappers(
 
 /**
  * Generate OpenCode config content for ivllm launches.
+ * @param opts
  */
 export function generateOpencodeConfig(
   opts: OpencodeConfigOptions,
@@ -162,6 +175,7 @@ export function generateOpencodeConfig(
 
 /**
  * Generate runtime environment overrides for OpenCode.
+ * @param opts
  */
 export function generateOpencodeEnv(
   opts: OpencodeConfigOptions,
@@ -173,6 +187,7 @@ export function generateOpencodeEnv(
 
 /**
  * Generate Pi models.json configuration for vLLM integration.
+ * @param opts
  */
 export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
   const context = opts.maxModelLen ?? 4096;
@@ -217,6 +232,8 @@ export function generatePiModelsConfig(opts: OpencodeConfigOptions): unknown {
 
 /**
  * Generate environment variables for GitHub Copilot.
+ * @param localPort
+ * @param model
  */
 export function generateCopilotEnv(
   localPort: number,
@@ -230,6 +247,8 @@ export function generateCopilotEnv(
 
 /**
  * Generate environment variables for Claude Code.
+ * @param localPort
+ * @param model
  */
 export function generateClaudeEnv(
   localPort: number,
@@ -245,6 +264,11 @@ export function generateClaudeEnv(
   };
 }
 
+/**
+ *
+ * @param assistant
+ * @param opts
+ */
 export function generateAssistantEnv(
   assistant: AssistantName,
   opts: AssistantEnvOptions,
@@ -270,6 +294,11 @@ export function generateAssistantEnv(
   }
 }
 
+/**
+ *
+ * @param assistant
+ * @param cwd
+ */
 export function buildSandboxName(
   assistant: AssistantName | undefined,
   cwd: string,
@@ -281,6 +310,12 @@ export function buildSandboxName(
   return `${assistantName}-${workspace || 'workspace'}`;
 }
 
+/**
+ *
+ * @param assistant
+ * @param cwd
+ * @param sandboxName
+ */
 export function buildSandboxCreateCommand(
   assistant: AssistantName,
   cwd: string,
@@ -290,20 +325,36 @@ export function buildSandboxCreateCommand(
   return `sbx create --name ${shellQuote(name)} ${assistant} ${shellQuote(cwd)}`;
 }
 
+/**
+ *
+ * @param value
+ */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ *
+ * @param env
+ */
 function formatInlineEnv(env: Record<string, string>): string {
   return Object.entries(env ?? {})
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(' ');
 }
 
+/**
+ *
+ * @param assistant
+ */
 function getAssistantArgs(assistant: AssistantName): string[] {
   return assistant === 'copilot' ? ['--continue'] : [];
 }
 
+/**
+ *
+ * @param opts
+ */
 export function buildLaunchCommand(opts: LaunchCommandOptions): string {
   const endpointHost =
     opts.wrapper === 'sbx' ? 'host.docker.internal' : 'localhost';
@@ -330,6 +381,10 @@ export function buildLaunchCommand(opts: LaunchCommandOptions): string {
   return `cd ${shellQuote(opts.cwd)} && ${envPrefix} ${base}`.trim();
 }
 
+/**
+ *
+ * @param raw
+ */
 export function parseSbxSandboxes(raw: string): SbxSandbox[] {
   if (!raw.trim()) return [];
 
@@ -379,6 +434,9 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
     .filter((row): row is SbxSandbox => row !== null);
 }
 
+/**
+ *
+ */
 function listSbxSandboxes(): SbxSandbox[] {
   const result = spawnSync('sbx', ['ls', '--json'], {
     encoding: 'utf-8',
@@ -389,6 +447,12 @@ function listSbxSandboxes(): SbxSandbox[] {
   return parseSbxSandboxes(result.stdout);
 }
 
+/**
+ *
+ * @param sandboxes
+ * @param assistant
+ * @param cwd
+ */
 export function findMatchingSandbox(
   sandboxes: SbxSandbox[],
   assistant: AssistantName,
@@ -429,6 +493,11 @@ export function findMatchingSandbox(
   );
 }
 
+/**
+ *
+ * @param assistant
+ * @param cwd
+ */
 export function ensureSbxSandbox(
   assistant: AssistantName,
   cwd: string,
@@ -456,6 +525,8 @@ export function ensureSbxSandbox(
 
 /**
  * Build the list of menu options based on available assistants and scoder.
+ * @param assistants
+ * @param hasScoder
  */
 export function buildAssistantMenuOptions(
   assistants: string[],
@@ -486,6 +557,8 @@ export function buildAssistantMenuOptions(
 
 /**
  * Get the binary name and args for launching an assistant.
+ * @param assistant
+ * @param useScoder
  */
 export function getLaunchCommand(
   assistant: AssistantName,
