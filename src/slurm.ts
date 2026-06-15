@@ -133,7 +133,7 @@ export async function runInteractive(
   const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
 
   // Assemble the final command
-  const cmd = `srun --parsable --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
 
   console.log(`Executing: ${cmd}`);
 
