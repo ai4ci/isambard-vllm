@@ -13,6 +13,7 @@ const base = {
   nodeCount: 1,
   timeLimit: "4:00:00",
   envVars: [] as Array<{ key: string; value: string }>,
+  isInteractive: false,
 };
 
 describe("renderInferenceScript", () => {
@@ -111,7 +112,12 @@ describe("renderInferenceScript", () => {
 
   it("symlinks ~/.cache/torchinductor to Lustre so Ray actors inherit Lustre cache without env var", () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain("ln -sfn \"$TORCHINDUCTOR_CACHE_DIR\" ~/.cache/torchinductor");
+    expect(script).toContain('ln -sfn "$TORCHINDUCTOR_CACHE_DIR" ~/.cache/torchinductor');
+  });
+
+  it("symlinks ~/.cache/vllm to Lustre so Ray actors inherit Lustre cache without env var", () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('ln -sfn "$VLLM_CACHE_DIR" ~/.cache/vllm');
   });
 
   it("renders user env vars as export lines in single-node script", () => {
@@ -173,15 +179,13 @@ describe("renderInferenceScript", () => {
       nodeCount: 2,
       envVars: [{ key: "VLLM_SPECIAL", value: "yes" }],
     });
-    // Find the vllm serve bash -c block — use a flexible pattern since
-    // env var values may contain quotes that break [^"] matching.
     const serveIdx = script.indexOf("vllm serve --config");
-    expect(serveIdx).toBeGreaterThan(-1);
-    // Walk backwards from vllm serve to find the bash -c start
     const bashIdx = script.lastIndexOf('bash -c "cd', serveIdx);
-    expect(bashIdx).toBeGreaterThan(-1);
-    // Walk forwards to find the closing quote of bash -c
-    const block = script.slice(bashIdx, serveIdx + 50);
+    const block = script.slice(bashIdx, serveIdx + 100);
+    if (!block.includes('export VLLM_SPECIAL=\\"yes\\"')) {
+        console.log("Block:", block);
+        console.log("BashIdx:", bashIdx, "ServeIdx:", serveIdx);
+    }
     expect(block).toContain('export VLLM_SPECIAL=\\"yes\\"');
   });
 

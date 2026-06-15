@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { selectBestVersion } from "../src/commands/start.ts";
+import { selectBestVersion } from "../src/session-helper.ts";
 import { semverSort } from "../src/semver.ts";
 
 describe("selectBestVersion", () => {

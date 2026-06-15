@@ -1,5 +1,7 @@
 import type { Config } from './config.ts';
 import { runRemote } from './ssh.ts';
+import type { InferenceScriptOptions } from './templates/inference.ts';
+// import type { EnvVarEntry } from './vllm-config.ts';
 
 export type JobState = 'running' | 'completed' | 'failed';
 export type SlurmQueueState = { state: string; reason: string };
@@ -36,6 +38,10 @@ export function parseJobState(sacctOutput: string): JobState | null {
   return 'failed';
 }
 
+/**
+ * Run a job using sbatch. This will place it in the queue. The script must include all the node requirements
+ * In the #SBATCH directives at the beginning of the script
+ */
 export async function submitJob(
   config: Config,
   remoteScriptPath: string,
@@ -47,6 +53,44 @@ export async function submitJob(
   );
   if (exitCode !== 0)
     throw new Error(`sbatch failed (exit ${exitCode}): ${stdout}`);
+  const jobId = parseJobId(stdout);
+  if (!jobId)
+    throw new Error(`Could not parse job ID from sbatch output: ${stdout}`);
+  return jobId;
+}
+
+/**
+ * Run interactively using srun. This will stil be queued but can use the section reserved for interactive.
+ * The command must include all the node requirements as CLI flags.
+ * #SBATCH directives at the beginning of the script are ignored.
+ */
+export async function runInteractive(
+  config: Config,
+  options: InferenceScriptOptions,
+  remoteScriptPath: string,
+): Promise<string> {
+  // Calculate basic metrics
+  const gpusPerNode = Math.floor(options.gpuCount / options.nodeCount);
+  const isFullOrMultiNode = options.nodeCount > 1 || options.gpuCount === 4;
+
+  // 1. Calculate --mem
+  // Use '0' for full/multi node, otherwise scale linearly (120GB per requested GPU)
+  const mem = isFullOrMultiNode ? '0' : `${options.gpuCount * 120}G`;
+
+  // 2. Calculate --cpus-per-task
+  // Use 64 for full/multi node. For fractional nodes, give 64 cores per GPU to accelerate loading
+  const cpusPerTask = isFullOrMultiNode ? '256' : `${options.gpuCount * 64}`;
+
+  // 3. Add --exclusive if we are claiming the entire node or multiple nodes
+  const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
+
+  // Assemble the final command
+  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+
+  const { stdout, exitCode } = await runRemote(config, cmd, { silent: false });
+
+  if (exitCode !== 0)
+    throw new Error(`srun failed (exit ${exitCode}): ${stdout}`);
   const jobId = parseJobId(stdout);
   if (!jobId)
     throw new Error(`Could not parse job ID from sbatch output: ${stdout}`);

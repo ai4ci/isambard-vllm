@@ -4,6 +4,7 @@ import { cmdStart } from './commands/start.ts';
 import { cmdStatus } from './commands/status.ts';
 import { cmdStop } from './commands/stop.ts';
 import { cmdList } from './commands/list.ts';
+import { cmdInteractive } from './commands/interactive.ts';
 import { cmdAgent } from './commands/agent.ts';
 import { loadConfig, saveConfig } from './config.ts';
 
@@ -17,6 +18,7 @@ Usage: ivllm <command> [options]
 Commands:
   setup <version>         Install vLLM <version> on the HPC (one-off, e.g. ivllm setup 0.19.1)
   start <job>             Start an inference session and monitor it
+  interactive <job>       Start an interactive inference session (bound to terminal)
   list                    List stored vLLM job configs
   status [job]            Show status of a job (or all jobs)
   stop <job>              Stop a job and clean up (recovery)
@@ -52,6 +54,9 @@ switch (command) {
     break;
   case 'stop':
     await cmdStop(args);
+    break;
+  case 'interactive':
+    await cmdInteractive(args);
     break;
   case 'list':
     await cmdList(args);

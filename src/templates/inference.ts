@@ -13,6 +13,7 @@ export interface InferenceScriptOptions {
   nodeCount: number;
   timeLimit: string;
   envVars: EnvVarEntry[];
+  isInteractive: boolean;
 }
 
 const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
@@ -30,7 +31,7 @@ export CXX=g++`;
 function renderEnvVars(envVars: EnvVarEntry[]): string {
   if (envVars.length === 0) return '';
   const lines = envVars.map((e) => `export ${e.key}="${e.value}"`);
-  return `# User-supplied environment variables\n${lines.join('\n')}\n`;
+  return `# User-supplied environment variables\n${lines.join('\n')}`;
 }
 
 function renderExitDiagnostics(_workDir: string): string {
@@ -43,6 +44,24 @@ persist_slurm_accounting() {
 }`;
 }
 
+function renderRelocateCache(
+  env: string,
+  cache: string,
+  defaultLocation: string,
+  model: string,
+) {
+  const modelDir = model.replaceAll('/', '_').replaceAll('.', '_');
+  return `export ${env}=$SCRATCHDIR/${modelDir}/${cache}
+# Symlink ${defaultLocation} -> Lustre so that Ray actors (which don't inherit
+# ${env} from vLLM's ray_env.py propagation list) also use it.
+mkdir -p "$${env}" "$(dirname ${defaultLocation})"
+if [ -d ${defaultLocation} ] && [ ! -L ${defaultLocation} ]; then
+  cp -r ${defaultLocation}/. "$${env}/" 2>/dev/null || true
+  rm -rf ${defaultLocation}
+fi
+ln -sfn "$${env}" ${defaultLocation}`;
+}
+
 function renderWorkDirSetup(workDir: string, model: string): string {
   return `WORK_DIR="${workDir}"
 mkdir -p "$WORK_DIR/ivllm"
@@ -50,49 +69,36 @@ mkdir -p "$WORK_DIR/ivllm"
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
   ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
 fi
+
 # Model-scoped JIT cache directories under $SCRATCHDIR (Lustre).
 # Each model gets its own persistent cache to avoid kernel conflicts
 # between different models (different attention heads, MoE configs, etc.).
 # $SCRATCHDIR is always defined on Isambard AI and persists ~60 days.
-MODEL_SLUG=$(echo "${model}" | tr '/' '_' | tr '.' '_')
 
-export FLASHINFER_JIT_CACHE_DIR=$SCRATCHDIR/flashinfer_cache_\${MODEL_SLUG}
-# Symlink ~/.cache/flashinfer -> Lustre so that Ray actors (which don't inherit
-# FLASHINFER_JIT_CACHE_DIR from vLLM's ray_env.py propagation list) also use it.
-mkdir -p "$FLASHINFER_JIT_CACHE_DIR" ~/.cache
-if [ -d ~/.cache/flashinfer ] && [ ! -L ~/.cache/flashinfer ]; then
-  cp -r ~/.cache/flashinfer/. "$FLASHINFER_JIT_CACHE_DIR/" 2>/dev/null || true
-  rm -rf ~/.cache/flashinfer
-fi
-ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer
+${renderRelocateCache(
+  'FLASHINFER_JIT_CACHE_DIR',
+  'flashinfer_cache',
+  '~/.cache/flashinfer',
+  model,
+)}
 
-export DG_JIT_CACHE_DIR=$SCRATCHDIR/deep_gemm_cache_\${MODEL_SLUG}
-# Symlink ~/.deep_gemm -> Lustre for DeepGEMM JIT kernel cache.
-mkdir -p "$DG_JIT_CACHE_DIR"
-if [ -d ~/.deep_gemm ] && [ ! -L ~/.deep_gemm ]; then
-  cp -r ~/.deep_gemm/. "$DG_JIT_CACHE_DIR/" 2>/dev/null || true
-  rm -rf ~/.deep_gemm
-fi
-ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm
+${renderRelocateCache(
+  'DG_JIT_CACHE_DIR',
+  'deep_gemm_cache',
+  '~/.deep_gemm',
+  model,
+)}
 
-export TRITON_CACHE_DIR=$SCRATCHDIR/triton_cache_\${MODEL_SLUG}
-# Symlink ~/.triton -> Lustre for OpenAI Triton JIT kernel cache.
-mkdir -p "$TRITON_CACHE_DIR"
-if [ -d ~/.triton ] && [ ! -L ~/.triton ]; then
-  cp -r ~/.triton/. "$TRITON_CACHE_DIR/" 2>/dev/null || true
-  rm -rf ~/.triton
-fi
-ln -sfn "$TRITON_CACHE_DIR" ~/.triton
+${renderRelocateCache('TRITON_CACHE_DIR', 'triton_cache', '~/.triton', model)}
 
-export TORCHINDUCTOR_CACHE_DIR=$SCRATCHDIR/torchinductor_cache_\${MODEL_SLUG}
-# Symlink ~/.cache/torchinductor -> Lustre for PyTorch TorchInductor cache.
-mkdir -p "$TORCHINDUCTOR_CACHE_DIR" ~/.cache
-if [ -d ~/.cache/torchinductor ] && [ ! -L ~/.cache/torchinductor ]; then
-  cp -r ~/.cache/torchinductor/. "$TORCHINDUCTOR_CACHE_DIR/" 2>/dev/null || true
-  rm -rf ~/.cache/torchinductor
-fi
-ln -sfn "$TORCHINDUCTOR_CACHE_DIR" ~/.cache/torchinductor
-`;
+${renderRelocateCache(
+  'TORCHINDUCTOR_CACHE_DIR',
+  'torchinductor_cache',
+  '~/.cache/torchinductor',
+  model,
+)}
+
+${renderRelocateCache('VLLM_CACHE_DIR', 'vllm_cache', '~/.cache/vllm', model)}`;
 }
 
 function renderMultiNodeExitDiagnostics(workDir: string): string {
@@ -190,6 +196,36 @@ finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
 function renderSingleNodeScript(opts: InferenceScriptOptions): string {
+  const runtimePayload = renderSingleNodePayload(opts);
+
+  // Calculate resources using our fractional node logic
+  const isFullNode = opts.gpuCount === 4;
+  const memValue = isFullNode ? '0' : `${opts.gpuCount * 120}G`;
+  const cpusPerTask = isFullNode ? '256' : `${opts.gpuCount * 64}`;
+  const exclusiveFlag = isFullNode ? '#SBATCH --exclusive\n' : '';
+
+  if (opts.isInteractive) {
+    // DIRECT INTERACTIVE ACCESS (Via SSH execution wrapper)
+    // The script payload itself runs raw because your local orchestrator
+    // will invoke this string via an active 'srun' command over SSH.
+    return `#!/bin/bash
+    ${runtimePayload}`;
+  } else {
+    // BATCH PROCESSING ACCESS (Produces a traditional SBATCH file)
+    return `#!/bin/bash
+    #SBATCH --job-name=${opts.jobName}
+    #SBATCH --nodes=1
+    #SBATCH --gpus=${opts.gpuCount}
+    #SBATCH --mem=${memValue}
+    #SBATCH --cpus-per-task=${cpusPerTask}
+    #SBATCH --time=${opts.timeLimit}
+    ${exclusiveFlag}
+    # Write the runtime execution logic directly below the headers
+    ${runtimePayload}`;
+  }
+}
+
+function renderSingleNodePayload(opts: InferenceScriptOptions): string {
   const {
     jobName,
     model,
@@ -201,17 +237,12 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     gpuCount,
     timeLimit,
     envVars,
+    isInteractive,
   } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
+  const lcaseModel = model.split('/').pop()!.toLowerCase();
 
-  return `#!/bin/bash
-#SBATCH --job-name=${jobName}
-#SBATCH --nodes=1
-#SBATCH --gpus=${gpuCount}
-#SBATCH --mem=0
-#SBATCH --time=${timeLimit}
-
-exec > "${workDir}/${jobName}.slurm.log" 2>&1
+  return `exec > "${workDir}/${jobName}.slurm.log" 2>&1
 umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
@@ -240,26 +271,23 @@ ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderEnvVars(envVars)}${renderExitDiagnostics(workDir)}
+${renderEnvVars(envVars)}
+${renderExitDiagnostics(workDir)}
 ${renderExitTrap(false)}
 cd "$WORK_DIR"
 
-# vLLM is launched via srun in the background — model, tensor-parallel-size, and all tuning
+# vLLM is launched in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
-srun \\
-  --nodes=1 \\
-  --gpus=${gpuCount} \\
-  --mem=0 \\
-  --cpus-per-task 72 \\
-  --ntasks-per-node 1 \\
-  vllm serve \\
+
+vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${serverPort} \\
   --served-model-name "${model}" \\
-  --served-model-name "${model.split('/').pop()!.toLowerCase()}" \\
+  --served-model-name "${lcaseModel}" \\
   --served-model-name "default" \\
-  --served-model-name "${jobName}" \\
+  --served-model-name "${jobName}"
+} \\
   &
 VLLM_PID=$!
 
@@ -267,6 +295,29 @@ ${renderHealthCheckAndWait(workDir, serverPort)}`;
 }
 
 function renderMultiNodeScript(opts: InferenceScriptOptions): string {
+  const runtimePayload = renderMultiNodePayload(opts);
+  const gpusPerNode = Math.floor(opts.gpuCount / opts.nodeCount);
+
+  if (opts.isInteractive) {
+    // Interactive direct access relies on your local JS script executing the parent allocation:
+    // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
+    return `#!/bin/bash
+    ${runtimePayload}`;
+  } else {
+    // Traditional SBATCH batch script generation
+    return `#!/bin/bash
+    #SBATCH --job-name=${opts.jobName}
+    #SBATCH --nodes=${opts.nodeCount}
+    #SBATCH --gpus-per-node=${gpusPerNode}
+    #SBATCH --mem=0
+    #SBATCH --time=${opts.timeLimit}
+    #SBATCH --exclusive
+
+    ${runtimePayload}`;
+  }
+}
+
+function renderMultiNodePayload(opts: InferenceScriptOptions): string {
   const {
     jobName,
     model,
@@ -288,16 +339,10 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
       ? envVars.map((e) => `export ${e.key}=\\"${e.value}\\"`).join(' && ') +
         ' && '
       : '';
+  const cpusPerTask = '256';
+  const lcaseModel = model.split('/').pop()!.toLowerCase();
 
-  return `#!/bin/bash
-#SBATCH --job-name=${jobName}
-#SBATCH --nodes=${nodeCount}
-#SBATCH --gpus-per-node=${gpusPerNode}
-#SBATCH --mem=0
-#SBATCH --time=${timeLimit}
-#SBATCH --exclusive
-
-exec > "${workDir}/${jobName}.slurm.log" 2>&1
+  return `exec > "${workDir}/${jobName}.slurm.log" 2>&1
 umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
@@ -330,7 +375,8 @@ ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
 export HF_HUB_OFFLINE=1
-${renderEnvVars(envVars)}${renderMultiNodeExitDiagnostics(workDir)}
+${renderEnvVars(envVars)}
+${renderMultiNodeExitDiagnostics(workDir)}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
 
@@ -344,13 +390,13 @@ export VLLM_SKIP_CUSTOM_ALL_REDUCE=1
 # bash -c is used to guarantee venv PATH is active on the compute node,
 # and to avoid any .local/bin/env shadowing /usr/bin/env on login nodes.
 echo "Starting Ray head node ($HEAD_NODE)..."
-srun \\
+srun --overlap \\
   --nodelist "$HEAD_NODE" \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
-  --cpus-per-task 72 \\
-  --ntasks-per-node 1 \\
+  --cpus-per-task=${cpusPerTask} \\
+  --ntasks-per-node=1 \\
   bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 sleep 20
 
@@ -359,13 +405,13 @@ WORKER_NODES=$(scontrol show hostnames $SLURM_NODELIST | tail -n+2)
 for WORKER in $WORKER_NODES; do
   WORKER_IP=$(dig +short $WORKER)
   echo "Starting Ray worker node: $WORKER ($WORKER_IP)"
-  srun \\
+  srun --overlap \\
     --nodelist "$WORKER" \\
     --nodes=1 \\
     --gpus=$GPUS_PER_NODE \\
     --mem=0 \\
-    --cpus-per-task 72 \\
-    --ntasks-per-node 1 \\
+    --cpus-per-task=${cpusPerTask} \\
+    --ntasks-per-node=1 \\
     bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
 done
 sleep 20
@@ -376,7 +422,7 @@ srun --overlap \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
-  --ntasks-per-node 1 \\
+  --ntasks-per-node=1 \\
   bash -c "source ${venvPath}/bin/activate && ray status"
 
 # Start vLLM on the head node via srun --overlap (runs within existing job allocation)
@@ -385,8 +431,8 @@ srun --overlap \\
   --nodes=1 \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
-  --ntasks-per-node 1 \\
-  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model}\" --served-model-name \"${model.split('/').pop()!.toLowerCase()}\" --served-model-name \"default\" --served-model-name \"${jobName}\"" \\
+  --ntasks-per-node=1 \\
+  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model}\" --served-model-name \"${lcaseModel}\" --served-model-name \"default\" --served-model-name \"${jobName}\"" \\
   &
 VLLM_PID=$!
 
