@@ -1,5 +1,5 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
-import { EnvVarEntry } from '../vllm-config.ts';
+import { EnvVarEntry, IVLLM_ONLY_KEYS } from '../vllm-config.ts';
 
 export interface InferenceScriptOptions {
   jobName: string;
@@ -25,7 +25,11 @@ export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
 # Use gcc from gcc-native module for JIT compilation (flashinfer, torch.compile).
 export CC=gcc
-export CXX=g++`;
+export CXX=g++
+# Prevent torch from over-subscribing CPU cores across parallel workers.
+# GH200 has 72 cores; 16 threads/worker is safe for the 4-GPU-per-node case.
+export OMP_NUM_THREADS=16
+`;
 
 /**
  * Renders user-supplied env vars as `export KEY="VALUE"` lines.
@@ -51,30 +55,19 @@ persist_slurm_accounting() {
 }`;
 }
 
-/**
- *
- * @param env
- * @param cache
- * @param defaultLocation
- * @param model
- */
-function renderRelocateCache(
-  env: string,
-  cache: string,
-  defaultLocation: string,
-  model: string,
-) {
-  const modelDir = model.replaceAll('/', '_').replaceAll('.', '_');
-  return `export ${env}=$SCRATCHDIR/${modelDir}/${cache}
-# Symlink ${defaultLocation} -> Lustre so that Ray actors (which don't inherit
-# ${env} from vLLM's ray_env.py propagation list) also use it.
-mkdir -p "$${env}" "$(dirname ${defaultLocation})"
-if [ -d ${defaultLocation} ] && [ ! -L ${defaultLocation} ]; then
-  cp -r ${defaultLocation}/. "$${env}/" 2>/dev/null || true
-  rm -rf ${defaultLocation}
-fi
-ln -sfn "$${env}" ${defaultLocation}`;
-}
+// function renderRelocateCache(
+//   env: string,
+//   cache: string,
+//   defaultLocation: string,
+//   model: string,
+// ) {
+//   const modelDir = model.replaceAll('/', '_').replaceAll('.', '_');
+//   // N.B. renderArchBase must be called before this is.
+//   return `export ${env}=$SCRATCHDIR/${modelDir}_$ARCH_SUFFIX/${cache}
+// # Symlink ${defaultLocation} -> Lustre so that Ray actors (which don't inherit ${env} from vLLM's ray_env.py propagation list) also use it.
+// mkdir -p "$${env}" "$(dirname ${defaultLocation})"
+// ln -sfn "$${env}" ${defaultLocation}`;
+// }
 
 /**
  *
@@ -82,42 +75,140 @@ ln -sfn "$${env}" ${defaultLocation}`;
  * @param model
  */
 function renderWorkDirSetup(workDir: string, model: string): string {
-  return `WORK_DIR="${workDir}"
+  return `
+WORK_DIR="${workDir}"
 mkdir -p "$WORK_DIR/ivllm"
 # Look for and link the plugins directory
 if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
   ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
 fi
 
-# Model-scoped JIT cache directories under $SCRATCHDIR (Lustre).
-# Each model gets its own persistent cache to avoid kernel conflicts
-# between different models (different attention heads, MoE configs, etc.).
-# $SCRATCHDIR is always defined on Isambard AI and persists ~60 days.
+# 1. Compute cache key from vllm.yaml
+CACHE_KEY=$(sha256sum "$VLLM_CONFIG" | cut -d' ' -f1)
+TAR_FILE="$PROJECTDIR/ivllm/caches/\${CACHE_KEY}.tar.gz"
 
-${renderRelocateCache(
-  'FLASHINFER_JIT_CACHE_DIR',
-  'flashinfer_cache',
-  '~/.cache/flashinfer',
-  model,
-)}
+# 2. Move $HOME to fast local tmpfs
+export HOME="$LOCALDIR/user_home"
+mkdir -p "$HOME"
 
-${renderRelocateCache(
-  'DG_JIT_CACHE_DIR',
-  'deep_gemm_cache',
-  '~/.deep_gemm',
-  model,
-)}
+# 3. Try to restore cached JIT compilations
+if [ -f "$TAR_FILE" ]; then
+  echo "Restoring JIT cache from shared storage..."
+  tar xzf "$TAR_FILE" -C "$LOCALDIR" 2>/dev/null && echo "Cache restored" \
+  || echo "Cache corrupt — recompiling"
+fi
 
-${renderRelocateCache('TRITON_CACHE_DIR', 'triton_cache', '~/.triton', model)}
+export FLASHINFER_JIT_CACHE_DIR="$HOME/.cache/flashinfer"
+export DG_JIT_CACHE_DIR="$HOME/.deep_gemm"
+export TRITON_CACHE_DIR="$HOME/.triton"
+export TORCHINDUCTOR_CACHE_DIR="$HOME/.cache/torchinductor"
 
-${renderRelocateCache(
-  'TORCHINDUCTOR_CACHE_DIR',
-  'torchinductor_cache',
-  '~/.cache/torchinductor',
-  model,
-)}
+export VLLM_CACHE_ROOT="$HOME/.cache/vllm"
+`;
 
-${renderRelocateCache('VLLM_CACHE_DIR', 'vllm_cache', '~/.cache/vllm', model)}`;
+  // ${renderArchBase()}
+  //
+  // # Model-scoped JIT cache directories under $SCRATCHDIR (Lustre).
+  // # Each model gets its own persistent cache to avoid kernel conflicts
+  // # between different models (different attention heads, MoE configs, etc.).
+  // # $SCRATCHDIR is always defined on Isambard AI and persists ~60 days.
+  //
+  // ${renderRelocateCache(
+  //   'FLASHINFER_JIT_CACHE_DIR',
+  //   'flashinfer_cache',
+  //   '~/.cache/flashinfer',
+  //   model,
+  // )}
+  //
+  // ${renderRelocateCache(
+  //   'DG_JIT_CACHE_DIR',
+  //   'deep_gemm_cache',
+  //   '~/.deep_gemm',
+  //   model,
+  // )}
+  //
+  // ${renderRelocateCache('TRITON_CACHE_DIR', 'triton_cache', '~/.triton', model)}
+  //
+  // ${renderRelocateCache(
+  //   'TORCHINDUCTOR_CACHE_DIR',
+  //   'torchinductor_cache',
+  //   '~/.cache/torchinductor',
+  //   model,
+  // )}
+  //
+  // ${renderRelocateCache('VLLM_CACHE_ROOT', 'vllm_cache', '~/.cache/vllm', model)}`;
+}
+
+// Called after renderWorkDirSetup so OK to use variables from that.
+function renderMonitor(workDir: string): string {
+  const debug = !!process.env.IVLLM_DEBUG;
+  if (debug) {
+    return `
+    export VLLM_LOGGING_LEVEL=DEBUG
+    # to turn on more logging.
+    export VLLM_LOG_STATS_INTERVAL=1.
+    # to get log statistics more frequently for tracking running queue, waiting queue and cache hit states.
+
+    export VLLM_TRACE_FUNCTION=1
+    # to record all function calls for inspection in the log files to tell which function crashes or hangs. (WARNING: This flag will slow
+
+    # 1. Force NVIDIA NCCL to print full initialization, connection, and topology maps
+    export NCCL_DEBUG=TRACE
+    export NCCL_DEBUG_SUBSYS=INIT,COLL,ENV
+    export NCCL_DEBUG_FILE=${workDir}/nccl_log.log
+
+    # 2. Force PyTorch Distributed to log process group handshakes and tracking metrics
+    export TORCH_CPP_LOG_LEVEL=INFO
+    export TORCH_DISTRIBUTED_DEBUG=INFO
+    export TORCH_SHOW_CPP_STACKTRACES=1
+
+    # 3. Force Ray to log every internal actor IPC execution message
+    export RAY_LOG_TO_DRIVER=1
+
+    echo "=== Shared Memory Allocation ==="
+    df -h /dev/shm
+    # Start a background resource monitor
+    (
+      while true; do
+        echo "--- Memory Snapshot at $(date) ---"
+        # Filter by your Slurm Job ID, aggregate memory by process name, and sort
+        ps -u "$USER" -o rss,comm | awk '
+    NR>1 { mem[$2] += $1; count[$2]++ }
+    END {
+      for (cmd in mem) {
+        printf "Cmd: %-15s | Count: %-2d | Total RAM: %.2f MB\\n", cmd, count[cmd], mem[cmd]/1024
+      }
+    }' | sort -k8 -nr | head -n 5
+
+    # JIT Cache Growth Monitor
+    echo "--- JIT Cache Sizes at $(date) ---"
+    du -sh $FLASHINFER_JIT_CACHE_DIR $DG_JIT_CACHE_DIR $TRITON_CACHE_DIR $VLLM_CACHE_ROOT 2>/dev/null
+
+    sleep 5
+    done
+    ) &
+    MONITOR_PID=$!
+    `;
+  } else {
+    // A terse memory and disk usage monitor for startup
+    return `
+    # Compact progress monitor
+    (
+      while true; do
+        printf "[%s] RAM: %s | Cache: fi=%sK dg=%sK ti=%sK vc=%sK\n" \
+        "$(date +%H:%M:%S)" \
+        "$(ps -u $USER -o rss=,comm= | awk '{m[$2]+=$1} END{for(c in m) if(m[c]>1024) printf "%s=%dM ",c,m[c]/1024;
+          else printf "%s=%dK ",c,m[c]}')" \
+"$(du -sk $FLASHINFER_JIT_CACHE_DIR 2>/dev/null | cut -f1)" \
+"$(du -sk $DG_JIT_CACHE_DIR 2>/dev/null | cut -f1)" \
+"$(du -sk $TRITON_CACHE_DIR 2>/dev/null | cut -f1)" \
+"$(du -sk $VLLM_CACHE_ROOT 2>/dev/null | cut -f1)"
+sleep 20
+done
+    ) &
+    MONITOR_PID=$!
+    `;
+  }
 }
 
 /**
@@ -208,11 +299,35 @@ while true; do
       "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
     finalize_and_exit 1 "startup failure"
   fi
-  sleep 1
+  sleep 15
 done
 
 echo "vLLM is ready"
 jq '.status = "running"' "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
+
+# ═══ JIT CACHE SAVE (background) ═══
+# Health check passed → all JIT compilations complete.
+# Archive the tmpfs $HOME to shared storage for next cold start.
+CACHE_KEY=$(sha256sum "$VLLM_CONFIG" | cut -d' ' -f1)
+CACHE_FILE="$PROJECTDIR/ivllm/caches/\${CACHE_KEY}.tar.gz"
+
+(
+  # Stop the RAM monitor first — avoids noisy output during tar
+  if [ -n "\${MONITOR_PID:-}" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
+    kill "$MONITOR_PID" 2>/dev/null; wait "$MONITOR_PID" 2>/dev/null
+  fi
+
+  echo "[cache-save] Archiving JIT cache to shared storage..."
+
+  # Kill any lingering compilation processes so the tar is clean
+  sleep 2
+
+  tar czf "\${CACHE_FILE}.tmp" -C "$LOCALDIR" user_home 2>/dev/null && \\
+  mv "\${CACHE_FILE}.tmp" "\$CACHE_FILE" && \\
+  echo "[cache-save] Done: $(du -sh "\$CACHE_FILE" | cut -f1)" || \\
+  echo "[cache-save] Failed"
+) &
+disown
 
 # Keep SLURM job alive while vLLM runs
 wait $VLLM_PID
@@ -226,6 +341,8 @@ fi
 
 finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
+
+// TODO: does not exist clealy when running interactive
 
 /**
  *
@@ -245,6 +362,8 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     // The script payload itself runs raw because your local orchestrator
     // will invoke this string via an active 'srun' command over SSH.
     return `#!/bin/bash
+    # Redirect stdout and stderr to both the console and the log file simultaneously
+    exec > >(tee -a "${opts.workDir}/${opts.jobName}.slurm.log") 2>&1
     ${runtimePayload}
     echo "Submitted interactive job $VLLM_PID"
     `;
@@ -260,6 +379,10 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     // ${exclusiveFlag}
     // # Write the runtime execution logic directly below the headers
     // ${runtimePayload}`;
+
+    //#SBATCH --partition=interactive
+    //#SBATCH --reservation=interactive
+
     return `#!/bin/bash
     #SBATCH --job-name=${opts.jobName}
     #SBATCH --nodes=1
@@ -269,10 +392,21 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     #SBATCH --cpu-bind=cores
     #SBATCH --time=${opts.timeLimit}
     ${exclusiveFlag}
+
+    exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
     # Write the runtime execution logic directly below the headers
     ${runtimePayload}`;
   }
 }
+
+// function renderArchBase() {
+//   return `
+// # Safely extract values from your YAML config file (defaulting to 1 if not specified)
+// TP=$(awk '/tensor-parallel-size/ {print $2} END {if (!NR || !ORS) print "1"}' "$VLLM_CONFIG")
+// PP=$(awk '/pipeline-parallel-size/ {print $2} END {if (!NR || !ORS) print "1"}' "$VLLM_CONFIG")
+// # Construct a globally unique, multi-dimensional cache directory string
+// ARCH_SUFFIX="TP\${TP:-1}_PP\${PP:-1}"`;
+// }
 
 /**
  *
@@ -294,15 +428,20 @@ function renderSingleNodePayload(opts: InferenceScriptOptions): string {
   } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
-  const logRedirect = isInteractive ? '' : `exec > "${workDir}/${jobName}.slurm.log" 2>&1\n`;
+  const maxJobs = Math.min(gpuCount * 2, 8); // Safe, scalable compiler throttle
 
-  return `${logRedirect}umask 0002
+  return `umask 0002
 
 JOB_DETAILS="${workDir}/job_details.json"
 VLLM_CONFIG="${workDir}/${configFileName}"
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 SERVER_PORT=${serverPort}
 COMPUTE_HOSTNAME=$(hostname)
+
+export MAX_JOBS=${maxJobs}
+export TORCHINDUCTOR_PARALLEL_COMPILE_THREADS=${maxJobs}
+export FLASHINFER_NVCC_THREADS=${maxJobs}
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 
 # Write initialising status — LOCAL already created the file with "pending";
 # we overwrite with full details now that we have the SLURM context.
@@ -329,6 +468,8 @@ ${renderExitDiagnostics(workDir)}
 ${renderExitTrap(false)}
 cd "$WORK_DIR"
 
+${renderMonitor(workDir)}
+
 # vLLM is launched in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
 
@@ -336,8 +477,7 @@ vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${serverPort} \\
-  --served-model-name "${model},${lcaseModel},default,${jobName}"
-} \\
+  --served-model-name "${model}" "${lcaseModel}" "default" "${jobName}" \\
   &
 VLLM_PID=$!
 
@@ -358,6 +498,7 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
     // Interactive direct access relies on your local JS script executing the parent allocation:
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
+    exec > >(tee -a "${opts.workDir}/${opts.jobName}.slurm.log") 2>&1
     ${runtimePayload}
     echo "Submitted interactive job $VLLM_PID"
     `;
@@ -371,6 +512,7 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
     #SBATCH --time=${opts.timeLimit}
     #SBATCH --exclusive
 
+    exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
     ${runtimePayload}`;
   }
 }
@@ -404,9 +546,21 @@ function renderMultiNodePayload(opts: InferenceScriptOptions): string {
       : '';
   const cpusPerTask = '256';
   const lcaseModel = model.split('/').pop()!.toLowerCase();
-  const logRedirect = isInteractive ? '' : `exec > "${workDir}/${jobName}.slurm.log" 2>&1\n`;
 
-  return `${logRedirect}
+  //TODO: Need to propagate env variables to multi-node setup
+  // these need to go to every ray process:
+  //   MAX_JOBS: "4"
+  //   FLASHINFER_NVCC_THREADS: "4"
+  //   TORCHINDUCTOR_PARALLEL_COMPILE_THREADS: "4"
+  // however the value 4 needs to be computed based on per gpu number of cores
+  // and per CPU memory availble. TBD.
+
+  // Multi node compilation caching:
+  // E.g. Node 1 and Node 2 write to independent, clean compilation caches
+  // This is achieved by rewriting $HOME for each worker to $LOCALDIR which is node local
+  // Each node restores caches from $PROJECTDIR/ivllm/caches
+
+  return `
 # Multi-node Ray inference payload
 umask 0002
 
@@ -462,7 +616,16 @@ srun --overlap \\
   --mem=0 \\
   --cpus-per-task=${cpusPerTask} \\
   --ntasks-per-node=1 \\
-  bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head --node-ip-address=$HEAD_NODE_IP --port=$RAY_PORT --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
+  bash -c "
+    source ${venvPath}/bin/activate
+    ${envPreamble}
+    VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
+      --block \\
+      --head \\
+      --node-ip-address=$HEAD_NODE_IP \\
+      --port=$RAY_PORT \\
+      --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+    " &
 sleep 20
 
 # Start Ray worker nodes
@@ -477,7 +640,16 @@ for WORKER in $WORKER_NODES; do
     --mem=0 \\
     --cpus-per-task=${cpusPerTask} \\
     --ntasks-per-node=1 \\
-    bash -c "source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$WORKER_IP ray start --block --address=$HEAD_NODE_IP:$RAY_PORT --node-ip-address=$WORKER_IP --object-store-memory=$RAY_OBJECT_STORE_MEMORY" &
+    bash -c "
+      source ${venvPath}/bin/activate
+      ${envPreamble}
+      ${renderWorkDirSetup(workDir, model)}
+      VLLM_HOST_IP=$WORKER_IP ray start \\
+        --block \\
+        --address=$HEAD_NODE_IP:$RAY_PORT \\
+        --node-ip-address=$WORKER_IP \\
+        --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+      " &
 done
 sleep 20
 
@@ -497,7 +669,18 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node=1 \\
-  bash -c "cd ${workDir} && source ${venvPath}/bin/activate && ${envPreamble}VLLM_HOST_IP=$HEAD_NODE_IP vllm serve --config ${workDir}/${configFileName} --distributed-executor-backend ray --host 0.0.0.0 --port ${serverPort} --served-model-name \"${model},${lcaseModel},default,${jobName}\"" \\
+  bash -c "
+    cd ${workDir}
+
+    source ${venvPath}/bin/activate
+    ${envPreamble}
+    VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
+      --config $VLLM_CONFIG \\
+      --distributed-executor-backend ray \\
+      --host 0.0.0.0 \\
+      --port ${serverPort} \\
+      --served-model-name \"$model\" \"$lcaseModel\" \"default\" \"$jobName\"
+  " \\
   &
 VLLM_PID=$!
 

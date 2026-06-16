@@ -3,6 +3,15 @@ import { spawn } from 'child_process';
 import readline from 'readline';
 import type { Config } from './config.ts';
 
+// Reusable SSH multiplexing options. The first connection spawns a
+// background ControlMaster; subsequent connections within 10 minutes
+// reuse the existing socket, avoiding repeated handshakes and login
+// rate-limits on busy HPC login nodes.
+const SSH_MUX_OPTS = [
+  '-o', 'ControlMaster=auto',
+  '-o', 'ControlPersist=600',
+  '-o', 'ControlPath=/tmp/ivllm-ssh-%r@%h:%p',
+] as const;
 /**
  * Run a command on the LOGIN node via SSH, streaming stdout/stderr to the
  * current terminal. Returns a promise that resolves with the exit code.
@@ -26,7 +35,7 @@ export function runRemote(
       : '';
     const fullCommand = envPrefix + command;
 
-    const proc = spawn('ssh', ['-o', 'BatchMode=yes', target, fullCommand], {
+    const proc = spawn('ssh', [...SSH_MUX_OPTS, '-o', 'BatchMode=yes', target, fullCommand], {
       stdio: options.silent
         ? ['ignore', 'pipe', 'pipe']
         : ['ignore', 'inherit', 'inherit'],
@@ -68,7 +77,7 @@ export function streamSrun(
     // Use -t for pseudo-tty streaming to bypass log buffering
     const proc = spawn(
       'ssh',
-      ['-t', '-o', 'BatchMode=yes', target, fullCommand],
+      ['-t', ...SSH_MUX_OPTS, '-o', 'BatchMode=yes', target, fullCommand],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -141,7 +150,7 @@ export function copyFile(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const target = `${config.username}@${config.loginHost}:${remotePath}`;
-    const proc = spawn('scp', ['-o', 'BatchMode=yes', localPath, target], {
+    const proc = spawn('scp', [...SSH_MUX_OPTS, '-o', 'BatchMode=yes', localPath, target], {
       stdio: 'inherit',
     });
     proc.on('error', reject);
@@ -167,7 +176,7 @@ export function tailRemoteLog(
   const target = `${config.username}@${config.loginHost}`;
   const proc = spawn(
     'ssh',
-    ['-o', 'BatchMode=yes', target, `tail -n +1 -f ${remotePath} 2>/dev/null`],
+    [...SSH_MUX_OPTS, '-o', 'BatchMode=yes', target, `tail -n +1 -f ${remotePath} 2>/dev/null`],
     { stdio: ['ignore', 'pipe', 'ignore'] },
   );
 
@@ -212,6 +221,7 @@ export function spawnTunnel(
     'ssh',
     [
       '-N',
+      ...SSH_MUX_OPTS,
       '-o',
       'BatchMode=yes',
       '-o',

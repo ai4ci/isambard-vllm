@@ -119,9 +119,9 @@ export async function runInteractive(
   const isFullOrMultiNode = options.nodeCount > 1 || options.gpuCount === 4;
 
   // 1. Calculate --mem
-  // Use '0' for full/multi node, otherwise scale linearly (120GB per GPU, one
+  // Use '0' for full/multi node, otherwise scale linearly (115GB usable per GPU, one
   // Grace Hopper superchip per GPU).
-  const mem = '0'; // isFullOrMultiNode ? '0' : `${options.gpuCount * 120}G`;
+  const mem = isFullOrMultiNode ? '0' : `${options.gpuCount * 115}G`;
 
   // 2. Calculate --cpus-per-task
   // Each Grace Hopper superchip has 72 physical cores + 1 H100 GPU. We use 64
@@ -133,7 +133,9 @@ export async function runInteractive(
   const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
 
   // Assemble the final command
-  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+  // const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+
+  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-gpu=64 --cpu-bind=cores --ntasks-per-node=1 --partition=interactive --reservation=interactive --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
 
   console.log(`Executing: ${cmd}`);
 
@@ -149,14 +151,34 @@ export async function runInteractive(
       },
     });
   } catch (err) {
-    // srun returns exit code 255 when cancelled via SIGINT (user Ctrl+C).
-    // In this case the shutdown handler already called scancel. Treat as
-    // graceful cancellation rather than bubbling an unhandled error.
+    // srun exits non-zero for any terminal event: OOM kill (137), Ctrl+C (255),
+    // resource errors (1), etc. In all cases the job is already dead and the
+    // shutdown handler will scancel (harmless if already done) and clean up.
+    // Treat as graceful shutdown rather than crashing with an unhandled error.
     const msg = (err as Error).message ?? '';
-    if (msg.includes('exit 255')) {
-      process.exit(0);
+    console.log(`\n${msg}`);
+
+    // Graceful cleanup for any srun termination — mirrors shutdown() logic
+    // without importing it (would risk circular dependency).
+    if (!sessionState.shuttingDown) {
+      sessionState.shuttingDown = true;
+      if (sessionState.heartbeatTimer)
+        clearInterval(sessionState.heartbeatTimer);
+      if (sessionState.slurmJobId) {
+        process.stdout.write('  Cancelling SLURM job...');
+        void sessionState.ops
+          .runRemote(`scancel ${sessionState.slurmJobId}`, { silent: true })
+          .catch(() => {});
+        console.log(' done');
+      }
+      process.stdout.write('  Removing lockfile...');
+      void sessionState.ops
+        .runRemote(`rm -f ${sessionState.remoteJobDetails}`, { silent: true })
+        .catch(() => {});
+      console.log(' done');
+      console.log('✓ Session ended');
     }
-    throw err;
+    process.exit(1);
   }
 }
 

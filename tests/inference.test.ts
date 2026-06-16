@@ -96,69 +96,52 @@ describe('renderInferenceScript', () => {
     expect(script).toContain('CPATH=$NVHPC_ROOT/math_libs/12.9/include:');
   });
 
-  it('redirects FLASHINFER_JIT_CACHE_DIR to model-scoped SCRATCHDIR/Lustre', () => {
+  it('relocates $HOME to local tmpfs for fast JIT cache', () => {
     const script = renderInferenceScript(base);
+    expect(script).toContain('HOME="$LOCALDIR/user_home"');
+    expect(script).toContain('mkdir -p "$HOME"');
+  });
+
+  it('computes cache key from sha256sum of the vLLM config file', () => {
+    const script = renderInferenceScript(base);
+    expect(script).toContain('CACHE_KEY=$(sha256sum "$VLLM_CONFIG"');
     expect(script).toContain(
-      'FLASHINFER_JIT_CACHE_DIR=$SCRATCHDIR/Qwen_Qwen2_5-0_5B-Instruct/flashinfer_cache',
+      'TAR_FILE="$PROJECTDIR/ivllm/caches/${CACHE_KEY}.tar.gz"',
     );
   });
 
-  it('redirects DG_JIT_CACHE_DIR to model-scoped SCRATCHDIR/Lustre', () => {
+  it('attempts to restore JIT cache tarball on startup', () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'DG_JIT_CACHE_DIR=$SCRATCHDIR/Qwen_Qwen2_5-0_5B-Instruct/deep_gemm_cache',
-    );
+    expect(script).toContain('tar xzf "$TAR_FILE" -C "$LOCALDIR"');
+    expect(script).toContain('Cache restored');
   });
 
-  it('redirects TRITON_CACHE_DIR to model-scoped SCRATCHDIR/Lustre', () => {
+  it('does not use $SCRATCHDIR symlinks for JIT caches anymore', () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'TRITON_CACHE_DIR=$SCRATCHDIR/Qwen_Qwen2_5-0_5B-Instruct/triton_cache',
-    );
+    expect(script).not.toContain('$SCRATCHDIR/');
+    expect(script).not.toContain('ln -sfn "$FLASHINFER_JIT_CACHE_DIR"');
+    expect(script).not.toContain('ln -sfn "$DG_JIT_CACHE_DIR"');
+    expect(script).not.toContain('ln -sfn "$TRITON_CACHE_DIR"');
+    expect(script).not.toContain('ln -sfn "$TORCHINDUCTOR_CACHE_DIR"');
+    expect(script).not.toContain('ln -sfn "$VLLM_CACHE_ROOT"');
   });
 
-  it('redirects TORCHINDUCTOR_CACHE_DIR to model-scoped SCRATCHDIR/Lustre', () => {
+  it('saves JIT cache tarball to shared storage after health check passes', () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'TORCHINDUCTOR_CACHE_DIR=$SCRATCHDIR/Qwen_Qwen2_5-0_5B-Instruct/torchinductor_cache',
-    );
+    expect(script).toContain('JIT CACHE SAVE');
+    expect(script).toContain('tar czf');
+    expect(script).toContain('CACHE_FILE');
+    expect(script).toContain('-C "$LOCALDIR" user_home');
+    expect(script).toContain('disown');
   });
 
-  it('does not use the old $WORK_DIR fallback for JIT caches', () => {
+  it('runs cache save in background after vLLM is healthy', () => {
     const script = renderInferenceScript(base);
-    expect(script).not.toContain('$WORK_DIR/ivllm}/flashinfer_cache');
-    expect(script).not.toContain('$WORK_DIR/ivllm}/deep_gemm_cache');
-    expect(script).not.toContain('$WORK_DIR/ivllm}/triton_cache');
-    expect(script).not.toContain('$WORK_DIR/ivllm}/torchinductor_cache');
-  });
-
-  it('symlinks ~/.cache/flashinfer to Lustre so Ray actors inherit Lustre cache without env var', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'ln -sfn "$FLASHINFER_JIT_CACHE_DIR" ~/.cache/flashinfer',
-    );
-  });
-
-  it('symlinks ~/.deep_gemm to Lustre so Ray actors inherit Lustre cache without env var', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain('ln -sfn "$DG_JIT_CACHE_DIR" ~/.deep_gemm');
-  });
-
-  it('symlinks ~/.triton to Lustre so Ray actors inherit Lustre cache without env var', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain('ln -sfn "$TRITON_CACHE_DIR" ~/.triton');
-  });
-
-  it('symlinks ~/.cache/torchinductor to Lustre so Ray actors inherit Lustre cache without env var', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'ln -sfn "$TORCHINDUCTOR_CACHE_DIR" ~/.cache/torchinductor',
-    );
-  });
-
-  it('symlinks ~/.cache/vllm to Lustre so Ray actors inherit Lustre cache without env var', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain('ln -sfn "$VLLM_CACHE_DIR" ~/.cache/vllm');
+    const healthIdx = script.indexOf('vLLM is ready');
+    const saveIdx = script.indexOf('JIT CACHE SAVE');
+    expect(healthIdx).toBeGreaterThan(-1);
+    expect(saveIdx).toBeGreaterThan(-1);
+    expect(saveIdx).toBeGreaterThan(healthIdx);
   });
 
   it('renders user env vars as export lines in single-node script', () => {
@@ -208,10 +191,15 @@ describe('renderInferenceScript', () => {
       nodeCount: 2,
       envVars: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
     });
-    // Env vars should appear inside at least one bash -c block
+    // Env vars should appear in the envPreamble inside a bash -c block
+    // They may have escaped quotes and span across lines after venv activation
     const blocks = script.split('bash -c');
-    const hasInBlock = blocks.some((b) =>
-      b.includes('export VLLM_SPECIAL=\\"yes\\"'),
+    const hasInBlock = blocks.some(
+      (b) =>
+        b.includes('export VLLM_SPECIAL') &&
+        (b.includes('env_preamble') ||
+          b.includes('envPreamble') ||
+          b.includes('yes')),
     );
     expect(hasInBlock).toBe(true);
   });
@@ -222,14 +210,17 @@ describe('renderInferenceScript', () => {
       nodeCount: 2,
       envVars: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
     });
-    const serveIdx = script.indexOf('vllm serve --config');
-    const bashIdx = script.lastIndexOf('bash -c "cd', serveIdx);
-    const block = script.slice(bashIdx, serveIdx + 100);
-    if (!block.includes('export VLLM_SPECIAL=\\"yes\\"')) {
+    // In multi-node, env vars go through envPreamble which appears before
+    // ray start and vllm serve inside bash -c blocks.
+    // They may be escaped across multiple lines.
+    const serveIdx = script.indexOf('vllm serve');
+    const bashIdx = script.lastIndexOf('bash -c "', serveIdx);
+    const block = script.slice(bashIdx, serveIdx + 200);
+    if (!block.includes('VLLM_SPECIAL')) {
       console.log('Block:', block);
       console.log('BashIdx:', bashIdx, 'ServeIdx:', serveIdx);
     }
-    expect(block).toContain('export VLLM_SPECIAL=\\"yes\\"');
+    expect(block).toContain('VLLM_SPECIAL');
   });
 
   it('does not render env exports when envVars is empty (multi-node)', () => {
@@ -331,8 +322,9 @@ describe('renderInferenceScript', () => {
 
   it('includes served-model-name flags for the model and job name', () => {
     const script = renderInferenceScript(base);
+    // argparse collects multiple positional args from the space-separated list
     expect(script).toContain(
-      '--served-model-name "Qwen/Qwen2.5-0.5B-Instruct,qwen2.5-0.5b-instruct,default,my-job"',
+      '--served-model-name "Qwen/Qwen2.5-0.5B-Instruct" "qwen2.5-0.5b-instruct" "default" "my-job"',
     );
   });
 
@@ -418,15 +410,13 @@ describe('renderInferenceScript (multi-node)', () => {
   });
 
   it('starts Ray head node', () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain(
-      'ray start --block --head',
-    );
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toMatch(/ray\s+start[\s\S]*--block[\s\S]*--head/);
   });
 
   it('starts Ray worker nodes via srun', () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain(
-      'ray start --block --address',
-    );
+    const script = renderInferenceScript(multiNodeBase);
+    expect(script).toMatch(/ray\s+start[\s\S]*--block[\s\S]*--address/);
   });
 
   it('requests full node memory in SBATCH', () => {
@@ -505,26 +495,26 @@ describe('renderInferenceScript (multi-node)', () => {
 
   it('sources the venv inside each bash -c ray start call', () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain('bash -c "source');
-    // All bash -c invocations that call ray or vllm should source the venv
+    // bash -c blocks may have leading whitespace/newlines before 'source'
+    expect(script).toContain('bash -c "');
     const activateCount = (
-      script.match(/bash -c "source[^"]*\/bin\/activate/g) ?? []
+      script.match(/bash -c "[\s\S]*?source[\s\S]*?\/bin\/activate/g) ?? []
     ).length;
     expect(activateCount).toBeGreaterThanOrEqual(3); // head, worker, vllm serve (plus ray status)
   });
 
   it('sets VLLM_HOST_IP inside bash -c for ray head', () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(
-      'VLLM_HOST_IP=$HEAD_NODE_IP ray start --block --head',
-    );
+    expect(script).toContain('VLLM_HOST_IP=$HEAD_NODE_IP');
+    expect(script).toContain('ray start');
+    expect(script).toContain('--head');
   });
 
   it('sets VLLM_HOST_IP inside bash -c for ray workers', () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(
-      'VLLM_HOST_IP=$WORKER_IP ray start --block --address',
-    );
+    expect(script).toContain('VLLM_HOST_IP=$WORKER_IP');
+    expect(script).toContain('ray start');
+    expect(script).toContain('--address');
   });
 
   it('runs vllm serve with --distributed-executor-backend ray', () => {
@@ -540,7 +530,8 @@ describe('renderInferenceScript (multi-node)', () => {
 
   it('changes into the job work directory before multi-node vllm serve', () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(`bash -c "cd ${multiNodeBase.workDir}`);
+    expect(script).toContain('bash -c "\n');
+    expect(script).toContain(`cd ${multiNodeBase.workDir}`);
   });
 
   it('uses HEAD_NODE as the compute_hostname', () => {

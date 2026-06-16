@@ -180,7 +180,13 @@ export function stripIvllmKeys(filePath: string): string {
   for (const key of IVLLM_ONLY_KEYS) {
     delete doc[key];
   }
-  return yaml.dump(doc, { lineWidth: -1 });
+  // Sort keys alphabetically so identical configs produce identical cache keys
+  const sorted = Object.fromEntries(
+    Object.entries(doc).sort((a, b) =>
+      a[0].toLowerCase().localeCompare(b[0].toLowerCase()),
+    ),
+  );
+  return yaml.dump(sorted, { lineWidth: -1 });
 }
 
 /**

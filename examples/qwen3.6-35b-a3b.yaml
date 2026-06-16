@@ -15,12 +15,9 @@ model: Qwen/Qwen3.6-35B-A3B
 tensor-parallel-size: 4
 max-model-len: 262144
 gpu-memory-utilization: 0.85
-max-num-seqs: 128
+max-num-seqs: 8
+max-cudagraph-capture-size: 8
 dtype: bfloat16
-
-# Environment variables to aid startup/coordination
-env:
-  VLLM_SHM_BROADCAST_TIMEOUT: "300"
 
 # Reasoning (thinking mode enabled by default; use /no_think in prompt to disable)
 reasoning-parser: qwen3
@@ -37,6 +34,8 @@ enable-prefix-caching: true
 
 # Note: this model includes a vision encoder for image input.
 # To run text-only (frees ~a few GB of memory for extra KV cache), add:
-#   language-model-only: true
+language-model-only: true
 # An FP8 variant exists (Qwen/Qwen3.6-35B-A3B-FP8) — halves weight memory to ~35 GB.
 min-vllm-version: "0.17.0"
+
+gdn-prefill-backend: "triton"
