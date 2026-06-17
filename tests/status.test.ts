@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { parseStatusArgs, formatJobRow, formatJobTable } from "../src/commands/status.ts";
-import type { JobDetails } from "../src/job.ts";
+import type { JobDetails } from "../src/types.ts";
 
 describe("parseStatusArgs", () => {
   test("no args returns undefined jobName", () => {

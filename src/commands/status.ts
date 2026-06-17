@@ -1,6 +1,7 @@
 import { loadConfig, assertConfigured } from '../config.ts';
 import { runRemote } from '../ssh.ts';
-import { parseJobDetails, type JobDetails } from '../job.ts';
+import { parseJobDetails } from '../job.ts';
+import type { JobDetails } from "../types.ts";
 
 export interface StatusArgs {
   jobName?: string;

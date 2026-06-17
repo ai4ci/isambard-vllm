@@ -9,20 +9,13 @@ import {
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import yaml from 'js-yaml';
+import type { JobConfigEntry, VllmConfig, EnvVarEntry } from './types';
 
 /** Keys that are ivllm-specific and must be stripped before passing the config to `vllm serve`. */
-export const IVLLM_ONLY_KEYS = new Set(['min-vllm-version', 'env']);
 
+export const IVLLM_ONLY_KEYS = new Set(['min-vllm-version', 'env']);
 export const JOB_CONFIG_DIR = join(homedir(), '.config', 'ivllm');
 
-/** Metadata for a stored job config. */
-export interface JobConfigEntry {
-  jobName: string;
-  filePath: string;
-  model?: string;
-  tensorParallelSize?: number;
-  pipelineParallelSize?: number;
-}
 
 /** Lists all stored job configs in the job config directory. */
 export function listJobConfigs(): JobConfigEntry[] {
@@ -71,17 +64,6 @@ export function saveJobConfig(jobName: string, sourcePath: string): void {
   copyFileSync(sourcePath, jobConfigPath(jobName));
 }
 
-export interface VllmConfig {
-  model?: string;
-  tensorParallelSize?: number;
-  pipelineParallelSize?: number;
-  maxModelLen?: number;
-  enableAutoToolChoice?: boolean;
-  enableReasoning?: boolean;
-  minVllmVersion?: string;
-  /** Environment variables to set before launching vLLM. Always present (may be empty). */
-  env: Record<string, string>;
-}
 
 /**
  * Resolve the total GPU count and node count for a SLURM job from a vLLM config.
@@ -148,11 +130,11 @@ export function parseVllmConfig(filePath: string): VllmConfig {
       : undefined;
 
   const envBlock = doc['env'];
-  const env: Record<string, string> = {};
+  const env: EnvVarEntry[] = [];
   if (envBlock && typeof envBlock === 'object' && !Array.isArray(envBlock)) {
     for (const [k, v] of Object.entries(envBlock)) {
       if (typeof v === 'string' || typeof v === 'number') {
-        env[k] = String(v);
+        env.push({key:k,value:String(v)});
       }
     }
   }
@@ -166,7 +148,14 @@ export function parseVllmConfig(filePath: string): VllmConfig {
     enableReasoning,
     minVllmVersion,
     env,
+    raw: stripIvllmKeys(doc),
   };
+}
+
+export function readVllmYaml(filePath: string): Record<string, unknown> {
+  const raw = readFileSync(filePath, 'utf-8');
+  const doc = yaml.load(raw) as Record<string, unknown>;
+  return doc;
 }
 
 /**
@@ -174,9 +163,7 @@ export function parseVllmConfig(filePath: string): VllmConfig {
  * vLLM errors on unknown config keys — always use this when uploading to the remote.
  * @param filePath
  */
-export function stripIvllmKeys(filePath: string): string {
-  const raw = readFileSync(filePath, 'utf-8');
-  const doc = yaml.load(raw) as Record<string, unknown>;
+export function stripIvllmKeys(doc: Record<string, unknown>): Record<string, unknown> {
   for (const key of IVLLM_ONLY_KEYS) {
     delete doc[key];
   }
@@ -186,7 +173,7 @@ export function stripIvllmKeys(filePath: string): string {
       a[0].toLowerCase().localeCompare(b[0].toLowerCase()),
     ),
   );
-  return yaml.dump(sorted, { lineWidth: -1 });
+  return sorted;
 }
 
 /**
@@ -195,17 +182,15 @@ export function stripIvllmKeys(filePath: string): string {
  * @param filePath
  */
 export function writeStrippedConfig(filePath: string): string {
-  const stripped = stripIvllmKeys(filePath);
+  const raw = readVllmYaml(filePath);
+  const sorted = stripIvllmKeys(raw);
+  const stripped = yaml.dump(sorted, { lineWidth: -1 });
   const tmpPath = join(tmpdir(), `ivllm-stripped-${Date.now()}.yaml`);
   writeFileSync(tmpPath, stripped, 'utf-8');
   return tmpPath;
 }
 
-/** Parsed environment variable entry. */
-export interface EnvVarEntry {
-  key: string;
-  value: string;
-}
+
 
 /**
  * Reads env vars from a vLLM config file and returns them as an array

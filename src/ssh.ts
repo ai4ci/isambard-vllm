@@ -1,7 +1,9 @@
 import { spawn } from 'child_process';
 
+import type { CloseableEventEmitter} from './types.ts';
+
 import readline from 'readline';
-import type { Config } from './config.ts';
+import type { Config, RunRemoteOptions, RunRemoteResult } from './types.ts';
 
 // Reusable SSH multiplexing options. The first connection spawns a
 // background ControlMaster; subsequent connections within 10 minutes
@@ -24,16 +26,14 @@ const SSH_MUX_OPTS = [
 export function runRemote(
   config: Config,
   command: string,
-  options: { env?: Record<string, string>; silent?: boolean } = {},
-): Promise<{ exitCode: number; stdout: string }> {
+  options: RunRemoteOptions = {env: []},
+): Promise<RunRemoteResult> {
   return new Promise((resolve, reject) => {
     const target = `${config.username}@${config.loginHost}`;
     const envPrefix = options.env
-      ? Object.entries(options.env)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(' ') + ' '
-      : '';
-    const fullCommand = envPrefix + command;
+          .map((v) => `${v.key}=${v.value}`)
+          .join(' ') + " ";
+    const fullCommand = (envPrefix + command).trim();
 
     const proc = spawn('ssh', [...SSH_MUX_OPTS, '-o', 'BatchMode=yes', target, fullCommand], {
       stdio: options.silent
@@ -55,24 +55,21 @@ export function runRemote(
   });
 }
 
+// Executes remote task and streams output to local terminal.
 export function streamSrun(
   config: Config,
   command: string,
-  options: {
-    env?: Record<string, string>;
-    silent?: boolean;
-    onIdReceived?: (id: string) => void; // Dispatched instantly when found
-  } = {},
-): Promise<{ exitCode: number }> {
-  const cmd = `${command} & echo "SLURM_JOB_ID_MATCH:$!"`;
+  options: RunRemoteOptions = {env: []}
+): Promise<RunRemoteResult> {
+
+  const cmd = `${command} & echo "PROCESS_ID_MATCH:$!"`;
   return new Promise((resolve, reject) => {
+
     const target = `${config.username}@${config.loginHost}`;
     const envPrefix = options.env
-      ? Object.entries(options.env)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(' ') + ' '
-      : '';
-    const fullCommand = envPrefix + cmd;
+    .map((v) => `${v.key}=${v.value}`)
+    .join(' ') + " ";
+    const fullCommand = (envPrefix + cmd).trim();
 
     // Use -t for pseudo-tty streaming to bypass log buffering
     const proc = spawn(
@@ -89,38 +86,21 @@ export function streamSrun(
       terminal: false,
     });
 
-    let idReceived = false;
+    // let idReceived = false;
+    // let pid: string | unknown;
     rl.on('line', (line) => {
       // Print to local console unless silent
       if (!options.silent) {
         console.log(line);
       }
-
-      // Extremely robust matching of SLURM identifier formats
-      if (options.onIdReceived && !idReceived) {
-        let foundId: string | null = null;
-        const match = line.match(/Submitted (batch|interactive) job (\d+)/);
-        if (match) {
-          foundId = match[2];
-        } else {
-          const srunMatch = line.match(/srun: (?:job|Job) (\d+)/i);
-          if (srunMatch) {
-            foundId = srunMatch[1];
-          } else if (line.includes('SLURM_JOB_ID_MATCH:')) {
-            const pidMatch = line.match(/SLURM_JOB_ID_MATCH:(\d+)/);
-            if (pidMatch) {
-              foundId = pidMatch[1];
-            }
-          } else if (line.trim().match(/^\d+$/)) {
-            foundId = line.trim();
-          }
-        }
-
-        if (foundId) {
-          idReceived = true;
-          options.onIdReceived(foundId);
-        }
-      }
+      // // Match PID
+      // if (line.includes('PROCESS_ID_MATCH:')) {
+      //    const pidMatch = line.match(/PROCESS_ID_MATCH:(\d+)/);
+      //    if (pidMatch) {
+      //      idReceived = true;
+      //      pid = pidMatch[1];
+      //    }
+      // }
     });
 
     proc.stderr?.on('data', (chunk: Buffer) => {
@@ -130,9 +110,11 @@ export function streamSrun(
     });
 
     proc.on('error', reject);
+    // stdout has all been written to console
     proc.on('close', (code) => {
-      resolve({ exitCode: code ?? 1 });
+      resolve({ exitCode: code ?? 1, stdout: "" });
     });
+
   });
 }
 
@@ -207,7 +189,7 @@ export function tailRemoteLog(
  * Returns the child process so the caller can kill it on shutdown.
  * @param config
  * @param localPort
- * @param remoteHost
+ * @param remoteHost typically the compute node
  * @param remotePort
  */
 export function spawnTunnel(
@@ -215,7 +197,7 @@ export function spawnTunnel(
   localPort: number,
   remoteHost: string,
   remotePort: number,
-) {
+): CloseableEventEmitter {
   const target = `${config.username}@${config.loginHost}`;
   const proc = spawn(
     'ssh',
@@ -236,5 +218,6 @@ export function spawnTunnel(
     ],
     { stdio: 'ignore', detached: false },
   );
+
   return proc;
 }

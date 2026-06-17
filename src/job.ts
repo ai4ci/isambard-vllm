@@ -1,27 +1,6 @@
-type JobStatus = 'pending' | 'initialising' | 'running' | 'failed' | 'timeout';
+import type { JobDetails, StartArgs } from "./types";
+import { jobConfigPath, parseVllmConfig } from "./vllm-config";
 
-export interface JobDetails {
-  status: JobStatus;
-  job_name: string;
-  slurm_job_id?: string;
-  compute_hostname?: string;
-  model?: string;
-  server_port?: number;
-  error?: string;
-}
-
-export interface StartArgs {
-  jobName: string;
-  model?: string; // only populated for --mock mode; non-mock reads model from YAML
-  configFile?: string; // required unless mock: true
-  localPort?: number;
-  gpuCount?: number; // if unset, derived from tensor-parallel-size in YAML in start.ts
-  timeLimit: string;
-  serverPort: number;
-  mock: boolean;
-  dryRun: boolean;
-  noLaunch: boolean; // skip assistant launch even in non-dryRun mode
-}
 
 /**
  *
@@ -78,16 +57,21 @@ export function parseStartArgs(args: string[]): StartArgs {
   const mock = boolFlags.has('mock');
   const dryRun = boolFlags.has('dry-run');
   const noLaunch = boolFlags.has('no-launch');
+  const preCache = boolFlags.has('create-cache');
 
   if (mock && !flags['model'])
     throw new Error('--model <model> is required in mock mode');
 
   const gpuCount = flags['gpus'] ? parseInt(flags['gpus'], 10) : undefined;
 
+  let configPath = flags['config'] ?? jobConfigPath(jobName);
+  let yaml = parseVllmConfig(configPath);
+
   return {
     jobName,
     model: flags['model'],
-    configFile: flags['config'],
+    configFile: configPath,
+    configYaml: yaml,
     localPort: flags['local-port']
       ? parseInt(flags['local-port'], 10)
       : undefined,
@@ -99,5 +83,6 @@ export function parseStartArgs(args: string[]): StartArgs {
     mock,
     dryRun,
     noLaunch,
+    preCache,
   };
 }

@@ -7,9 +7,9 @@ export function semverLt(a: string, b: string): boolean {
   const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
   const [a1, a2, a3] = parse(a);
   const [b1, b2, b3] = parse(b);
-  if (a1 !== b1) return a1 < b1;
-  if (a2 !== b2) return a2 < b2;
-  return a3 < b3;
+  if (a1 !== b1) return (a1 ?? 0) < (b1 ?? 0);
+  if (a2 !== b2) return (a2 ?? 0) < (b2 ?? 0);
+  return (a3 ?? 0) < (b3 ?? 0);
 }
 
 /**

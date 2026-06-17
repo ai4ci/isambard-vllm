@@ -60,7 +60,7 @@ Examples:
   // Pre-flight: check SSH connectivity
   console.log('Checking SSH connectivity...');
   const { exitCode: sshCheck } = await runRemote(config, 'echo ok', {
-    silent: true,
+    env:[], silent: true,
   });
   if (sshCheck !== 0) {
     console.error(
@@ -75,7 +75,7 @@ Examples:
   const { exitCode: venvCheck } = await runRemote(
     config,
     `test -d ${venvDir}/bin`,
-    { silent: true },
+    { env:[], silent: true },
   );
   if (venvCheck === 0) {
     console.log(`✓ vLLM ${vllmVersion} already installed at ${venvDir}`);
@@ -91,7 +91,7 @@ Examples:
 
   try {
     console.log('Copying setup script to login node...');
-    await runRemote(config, `mkdir -p ~/.config/ivllm`, { silent: true });
+    await runRemote(config, `mkdir -p ~/.config/ivllm`, { env:[], silent: true });
     await copyFile(config, localTmp, REMOTE_SCRIPT_PATH);
     console.log('✓ Script copied');
 
@@ -104,7 +104,7 @@ Examples:
     await runRemote(
       config,
       `truncate -s 0 ${REMOTE_LOG_PATH} 2>/dev/null || true`,
-      { silent: true },
+      { env:[], silent: true },
     );
 
     // Wait for the job to leave the queue (PENDING → RUNNING)
@@ -157,7 +157,7 @@ Examples:
     const { exitCode: finalCheck } = await runRemote(
       config,
       `test -d ${venvDir}/bin`,
-      { silent: true },
+      { env: [], silent: true },
     );
     if (finalCheck !== 0) {
       console.error(`✗ venv not found at ${venvDir} after setup.`);

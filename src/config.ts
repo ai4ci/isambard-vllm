@@ -1,14 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-
-export interface Config {
-  loginHost: string;
-  username: string;
-  projectDir: string;
-  defaultLocalPort: number;
-  hfToken?: string;
-}
+import type {Config} from './types.ts';
 
 const CONFIG_DIR = join(homedir(), '.config', 'ivllm');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');

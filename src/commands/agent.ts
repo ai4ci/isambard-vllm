@@ -10,7 +10,7 @@ import {
   getSbxAvailable,
 } from '../assistant.ts';
 import type { AssistantName, LaunchWrapper } from '../assistant.ts';
-import { spawn, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { join } from 'path';
 import {
   existsSync,

@@ -6,7 +6,7 @@
 import { spawnSync } from 'child_process';
 import { basename } from 'path';
 
-interface AssistantConfig {
+export interface AssistantConfig {
   name: string;
   env: Record<string, string>;
   args: string[];

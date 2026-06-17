@@ -1,8 +1,6 @@
-import type { Config } from './config.ts';
 import { runRemote, streamSrun } from './ssh.ts';
-import type { InferenceScriptOptions } from './templates/inference.ts';
-import type { SessionState, MonitorRuntimeOpts } from './session-helper.ts';
-import type { StartArgs } from './job.ts';
+import type { InferenceScriptOptions, Config, SessionState, MonitorRuntimeOpts, RemoteMonitor } from './types.ts';
+import type { StartArgs } from "./types";
 
 export type JobState = 'running' | 'completed' | 'failed';
 export type SlurmQueueState = { state: string; reason: string };
@@ -68,16 +66,12 @@ export async function submitJob(
   sessionState: SessionState,
   startArgs: StartArgs,
   opts: MonitorRuntimeOpts,
-  monitor: (
-    state: SessionState,
-    args: StartArgs,
-    runtimeOpts: MonitorRuntimeOpts,
-  ) => Promise<void>,
+  monitor: RemoteMonitor,
 ): Promise<void> {
   const { stdout, exitCode } = await runRemote(
     config,
     `sbatch ${remoteScriptPath}`,
-    { silent: true },
+    { env: [], silent: true },
   );
   if (exitCode !== 0)
     throw new Error(`sbatch failed (exit ${exitCode}): ${stdout}`);
@@ -90,7 +84,7 @@ export async function submitJob(
   sessionState.slurmJobId = jobId;
 
   // Sbatch returns immediately, so block/await monitorSession here
-  await monitor(sessionState, startArgs, opts);
+  await monitor.start(sessionState, startArgs, opts);
 }
 
 /**
@@ -108,11 +102,7 @@ export async function runInteractive(
   sessionState: SessionState,
   startArgs: StartArgs,
   opts: MonitorRuntimeOpts,
-  monitor: (
-    state: SessionState,
-    args: StartArgs,
-    runtimeOpts: MonitorRuntimeOpts,
-  ) => Promise<void>,
+  monitor: RemoteMonitor,
 ): Promise<void> {
   // Calculate basic metrics
   const gpusPerNode = Math.floor(options.gpuCount / options.nodeCount);
@@ -141,14 +131,8 @@ export async function runInteractive(
 
   try {
     const { exitCode } = await streamSrun(config, cmd, {
-      silent: false,
-      onIdReceived: (jobId) => {
-        console.log(`\n🚀 Captured Slurm/Srun Identifier: ${jobId}`);
-        sessionState.slurmJobId = jobId;
-
-        // Start monitoring asynchronously in the background as srun logs stream
-        void monitor(sessionState, startArgs, opts);
-      },
+      env: [],
+      silent: false
     });
   } catch (err) {
     // srun exits non-zero for any terminal event: OOM kill (137), Ctrl+C (255),
@@ -167,13 +151,13 @@ export async function runInteractive(
       if (sessionState.slurmJobId) {
         process.stdout.write('  Cancelling SLURM job...');
         void sessionState.ops
-          .runRemote(`scancel ${sessionState.slurmJobId}`, { silent: true })
+          .runRemote(`scancel ${sessionState.slurmJobId}`, { env: [], silent: true })
           .catch(() => {});
         console.log(' done');
       }
       process.stdout.write('  Removing lockfile...');
       void sessionState.ops
-        .runRemote(`rm -f ${sessionState.remoteJobDetails}`, { silent: true })
+        .runRemote(`rm -f ${sessionState.remoteJobDetails}`, { env: [], silent: true })
         .catch(() => {});
       console.log(' done');
       console.log('✓ Session ended');
@@ -194,7 +178,7 @@ export async function pollJobStatus(
   const { stdout } = await runRemote(
     config,
     `sacct -j ${jobId} --format=State --noheader -X`,
-    { silent: true },
+    { env: [], silent: true },
   );
   return parseJobState(stdout) ?? 'running';
 }
@@ -209,7 +193,7 @@ export async function getJobLog(
   logPath: string,
 ): Promise<string> {
   const { stdout } = await runRemote(config, `cat ${logPath}`, {
-    silent: true,
+    env: [], silent: true,
   });
   return stdout;
 }
@@ -241,7 +225,7 @@ export async function getSlurmQueueState(
   const { stdout } = await runRemote(
     config,
     `squeue -j ${jobId} --format="%T %R" --noheader 2>/dev/null`,
-    { silent: true },
+    { env: [], silent: true },
   );
   return parseSlurmQueueState(stdout);
 }

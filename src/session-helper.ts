@@ -1,19 +1,15 @@
-import { type Config } from './config.ts';
-import { type RemoteOps } from './remote-ops.ts';
+import type {VllmConfig, SessionState, ResolvedSessionConfig, RemoteOps, EnvVarEntry, Config, MonitorRuntimeOpts} from './types.ts'
 import {
-  type StartArgs,
   hfCachePath,
   parseJobDetails,
-  type JobDetails,
 } from './job.ts';
+import type { StartArgs, JobDetails } from "./types";
 import { semverGte, semverSort } from './semver.ts';
-import { type ChildProcess } from 'child_process';
+
 import {
-  type VllmConfig,
   parseVllmConfig,
   resolveGpuCount,
   parseEnvVars,
-  type EnvVarEntry,
   jobConfigPath,
   writeStrippedConfig,
 } from './vllm-config.ts';
@@ -33,6 +29,13 @@ import { createInterface } from 'readline';
 import { writeFileSync, existsSync, unlinkSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, basename } from 'path';
+// import { createHash } from 'crypto';
+
+// function getHash(obj: Record<string, unknown>): string {
+//   // Sort keys so identical configs produce identical hashes regardless of input order
+//   const str = JSON.stringify(obj, Object.keys(obj).sort());
+//   return createHash('sha256').update(str).digest('hex').slice(0, 16);
+// }
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -41,32 +44,6 @@ const SLURM_POLL_INTERVAL_MS = 60_000;
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export interface SessionState {
-  jobName: string;
-  config: Config;
-  ops: RemoteOps;
-  remoteWorkDir: string;
-  remoteJobDetails: string;
-  slurmJobId: string | null;
-  tunnel: ChildProcess | null;
-  heartbeatTimer: ReturnType<typeof setInterval> | null;
-  crashDiagnosticsPrinted: boolean;
-  shuttingDown: boolean;
-}
-
-export interface ResolvedSessionConfig {
-  configFile: string;
-  usingStoredConfig: boolean;
-  yamlConfig: VllmConfig;
-  model: string;
-  gpuCount: number;
-  nodeCount: number;
-  maxModelLen?: number;
-  enableAutoToolChoice: boolean;
-  enableReasoning: boolean;
-  vllmVersion: string;
-  envVars: EnvVarEntry[];
-}
 
 // ── Configuration resolution ──────────────────────────────────────────────
 
@@ -82,6 +59,7 @@ export async function resolveSessionConfig(
   startArgs: StartArgs,
 ): Promise<ResolvedSessionConfig> {
   let configFile = startArgs.configFile;
+  let preCache = startArgs.preCache;
   let usingStoredConfig = false;
   if (!startArgs.mock) {
     if (!configFile) {
@@ -100,15 +78,21 @@ export async function resolveSessionConfig(
     return {
       configFile: configFile ?? '',
       usingStoredConfig: false,
-      yamlConfig: {},
+      yamlConfig: {
+        env: [],
+        raw: {}
+      },
       model: startArgs.model!,
       gpuCount: startArgs.gpuCount ?? 1,
       nodeCount: 1,
       maxModelLen: undefined,
+      tensorParallelSize: 1,
+      pipelineParallelSize: 1,
       enableAutoToolChoice: true,
       enableReasoning: true,
       vllmVersion: 'mock',
       envVars: [],
+      preCache: preCache,
     };
   }
 
@@ -154,10 +138,13 @@ export async function resolveSessionConfig(
     gpuCount,
     nodeCount,
     maxModelLen: yamlConfig.maxModelLen,
+    tensorParallelSize: yamlConfig.tensorParallelSize ?? 1,
+    pipelineParallelSize: yamlConfig.pipelineParallelSize ?? 1,
     enableAutoToolChoice: yamlConfig.enableAutoToolChoice ?? true,
     enableReasoning: yamlConfig.enableReasoning ?? true,
     vllmVersion: bestVersion,
     envVars,
+    preCache,
   };
 }
 
@@ -178,7 +165,7 @@ export async function preFlight(
   if (!startArgs.dryRun) {
     console.log('Checking SSH connectivity...');
     const { exitCode: sshCheck } = await ops.runRemote('echo ok', {
-      silent: true,
+      env:[], silent: true,
     });
     if (sshCheck !== 0) {
       console.error('Error: Cannot connect to login node.');
@@ -222,7 +209,7 @@ export async function ensureModelDownloaded(
   } else {
     const { exitCode: cacheCheck } = await ops.runRemote(
       `test -d ${cachePath}`,
-      { silent: true },
+      { env:[], silent: true },
     );
     if (cacheCheck === 0) {
       console.log(`✓ Model cached at ${cachePath}`);
@@ -230,7 +217,7 @@ export async function ensureModelDownloaded(
       console.log(`Downloading model ${model} to ${hfHome} on login node...`);
       await ops.runRemote(
         `mkdir -p ${hfHome} && chmod g+w ${hfHome} 2>/dev/null || true`,
-        { silent: true },
+        { env:[], silent: true },
       );
       const hfToken = config.hfToken ?? process.env['HF_TOKEN'] ?? '';
       const downloadCmd = `umask 0002 && source ${config.projectDir}/ivllm/${vllmVersion}/bin/activate && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ''} hf download ${model}`;
@@ -265,14 +252,14 @@ export async function createJobLockfile(
     );
   } else {
     console.log('Creating job working directory and lockfile...');
-    await ops.runRemote(`mkdir -p ${remoteWorkDir}`, { silent: true });
+    await ops.runRemote(`mkdir -p ${remoteWorkDir}`, { env:[], silent: true });
     const pendingJson = JSON.stringify({
       status: 'pending',
       job_name: jobName,
     });
     const { exitCode: lockCode } = await ops.runRemote(
       `set -C; echo '${pendingJson}' > ${remoteJobDetails}`,
-      { silent: true },
+      { env:[], silent: true },
     );
     if (lockCode !== 0) {
       console.error(
@@ -294,7 +281,7 @@ export async function printSlurmLog(state: SessionState): Promise<void> {
   console.error('\n--- SLURM log ---');
   const { stdout } = await state.ops.runRemote(
     `tail -50 ${state.remoteWorkDir}/${state.jobName}.slurm.log 2>/dev/null`,
-    { silent: true },
+    { env:[], silent: true },
   );
   if (stdout) console.error(stdout);
   console.error('--- end log ---\n');
@@ -315,7 +302,7 @@ export async function printCrashDiagnostics(
   for (let attempt = 0; attempt < 5; attempt++) {
     const result = await state.ops.runRemote(
       `${buildSacctDiagnosticsCommand(state.slurmJobId)} 2>/dev/null || true`,
-      { silent: true },
+      { env:[],  silent: true },
     );
     stdout = result.stdout;
     if (stdout.trim() && sacctDiagnosticsSettled(stdout, state.slurmJobId))
@@ -381,7 +368,7 @@ export async function shutdown(
   if (state.slurmJobId) {
     process.stdout.write('  Cancelling SLURM job...');
     await state.ops
-      .runRemote(`scancel ${state.slurmJobId}`, { silent: true })
+      .runRemote(`scancel ${state.slurmJobId}`, { env:[], silent: true })
       .catch(() => {});
     console.log(' done');
   }
@@ -394,7 +381,7 @@ export async function shutdown(
 
   process.stdout.write('  Removing lockfile...');
   await state.ops
-    .runRemote(`rm -f ${state.remoteJobDetails}`, { silent: true })
+    .runRemote(`rm -f ${state.remoteJobDetails}`, { env:[], silent: true })
     .catch(() => {});
   console.log(' done');
 
@@ -425,11 +412,11 @@ export function selectBestVersion(
  */
 export async function listInstalledVersions(
   config: Config,
-  ops: ReturnType<typeof makeRemoteOps>,
+  ops: RemoteOps,
 ): Promise<string[]> {
   const { stdout } = await ops.runRemote(
     `ls -d ${config.projectDir}/ivllm/*/bin 2>/dev/null | sed 's|.*/ivllm/||; s|/bin||'`,
-    { silent: true },
+    { env: [], silent: true },
   );
   return stdout
     .trim()
@@ -468,7 +455,7 @@ export async function isLocalPortInUse(
         resolve(null);
         return;
       }
-      const pid = stdout.trim().split('\n')[0];
+      const pid = stdout.trim().split('\n')[0] as string;
       execFile('ps', ['-p', pid, '-o', 'comm='], (_err2, psOut) => {
         const process = psOut?.trim() || 'unknown';
         resolve({ pid, process });
@@ -513,10 +500,17 @@ export async function runInferenceSession(
     envVars,
     configFile,
     maxModelLen,
+    tensorParallelSize,
+    pipelineParallelSize,
     enableAutoToolChoice,
     enableReasoning,
     usingStoredConfig,
+    preCache,
   } = resolved;
+
+  //const cacheKey = getHash({ model, gpuCount, nodeCount, maxModelLen });
+  // cache key is a filepath. Will have .tar.gz added.
+  const cacheKey = `${model}/${tensorParallelSize}/${pipelineParallelSize}/${maxModelLen ?? 'undefined'}/cached`;
 
   // ── 3. Build session state ────────────────────────────────────────────
   const sessionState: SessionState = {
@@ -542,6 +536,7 @@ export async function runInferenceSession(
   );
   console.log(`Job        : ${jobName}`);
   console.log(`Model      : ${model}`);
+  console.log(`Cached as  : ${cacheKey}`);
   console.log(
     `Config     : ${configFile ? `${configFile}${usingStoredConfig ? ' (stored)' : ''}` : '(N/A — mock mode)'}`,
   );
@@ -621,6 +616,8 @@ export async function runInferenceSession(
         timeLimit,
         envVars,
         isInteractive,
+        cacheKey,
+        preCache,
       });
 
   const localScriptTmp = join(tmpdir(), `ivllm-${jobName}.slurm.sh`);
@@ -655,7 +652,6 @@ export async function runInferenceSession(
       return;
     }
 
-    console.log('Submitting SLURM job...');
     const monitorOpts: MonitorRuntimeOpts = {
       localPort,
       serverPort,
@@ -668,6 +664,7 @@ export async function runInferenceSession(
     };
 
     if (isInteractive || startArgs.mock) {
+      console.log('Running interactive job...');
       await runInteractive(
         config,
         {
@@ -683,6 +680,8 @@ export async function runInferenceSession(
           timeLimit,
           isInteractive,
           envVars,
+          cacheKey,
+          preCache,
         },
         remoteScriptPath,
         sessionState,
@@ -691,13 +690,14 @@ export async function runInferenceSession(
         monitorSession,
       );
     } else {
+      console.log('Submitting SLURM job...');
       await submitJob(
         config,
         remoteScriptPath,
         sessionState,
         startArgs,
         monitorOpts,
-        monitorSession,
+        preCache ? detachSession : monitorSession,
       );
     }
   } finally {
@@ -707,15 +707,17 @@ export async function runInferenceSession(
 
 // ── Monitor helpers ───────────────────────────────────────────────────────
 
-export interface MonitorRuntimeOpts {
-  localPort: number;
-  serverPort: number;
-  config: Config;
-  model: string;
-  maxModelLen?: number;
-  enableAutoToolChoice: boolean;
-  enableReasoning: boolean;
-  isInteractive: boolean;
+
+
+async function detachSession(
+  sessionState: SessionState,
+  startArgs: StartArgs,
+  opts: MonitorRuntimeOpts,
+): Promise<void> {
+  console.log(
+    `\nBatch job submintted: to cancel: ivllm stop ${startArgs.jobName}...\n`,
+  );
+  return;
 }
 
 /**

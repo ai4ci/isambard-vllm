@@ -1,20 +1,5 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
-import { EnvVarEntry, IVLLM_ONLY_KEYS } from '../vllm-config.ts';
-
-export interface InferenceScriptOptions {
-  jobName: string;
-  model: string;
-  vllmVersion: string;
-  hfHome: string;
-  configFileName: string;
-  workDir: string;
-  serverPort: number;
-  gpuCount: number;
-  nodeCount: number;
-  timeLimit: string;
-  envVars: EnvVarEntry[];
-  isInteractive: boolean;
-}
+import type { EnvVarEntry , InferenceScriptOptions } from '../../src/types.ts';
 
 const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
 export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
@@ -74,7 +59,7 @@ persist_slurm_accounting() {
  * @param workDir
  * @param model
  */
-function renderWorkDirSetup(workDir: string, model: string): string {
+function renderWorkDirSetup(workDir: string, cacheKey: string): string {
   return `
 WORK_DIR="${workDir}"
 mkdir -p "$WORK_DIR/ivllm"
@@ -84,8 +69,7 @@ if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
 fi
 
 # 1. Compute cache key from vllm.yaml
-CACHE_KEY=$(sha256sum "$VLLM_CONFIG" | cut -d' ' -f1)
-TAR_FILE="$PROJECTDIR/ivllm/caches/\${CACHE_KEY}.tar.gz"
+TAR_FILE="$PROJECTDIR/ivllm/caches/${cacheKey}.tar.gz"
 
 # 2. Move $HOME to fast local tmpfs
 export HOME="$LOCALDIR/user_home"
@@ -281,12 +265,32 @@ on_exit() {
 trap on_exit EXIT`;
 }
 
+function renderWaitBlock(preCache: boolean) {
+  return preCache
+    ? `
+# Keep SLURM job alive while vLLM runs
+wait $VLLM_PID
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+  jq --arg error "vLLM exited with code $EXIT_CODE" \\
+  '.status = "failed" | .error = $error' \\
+  "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
+fi
+`
+    : '';
+}
+
 /**
  *
  * @param workDir
  * @param serverPort
  */
-function renderHealthCheckAndWait(workDir: string, serverPort: number): string {
+function renderHealthCheckAndWait(
+  workDir: string,
+  serverPort: number,
+  preCache: boolean,
+): string {
   return `# Poll /health until vLLM is ready
 echo "Waiting for vLLM to become healthy on port ${serverPort}..."
 while true; do
@@ -329,19 +333,10 @@ CACHE_FILE="$PROJECTDIR/ivllm/caches/\${CACHE_KEY}.tar.gz"
 ) &
 disown
 
-# Keep SLURM job alive while vLLM runs
-wait $VLLM_PID
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -ne 0 ]; then
-  jq --arg error "vLLM exited with code $EXIT_CODE" \\
-    '.status = "failed" | .error = $error' \\
-    "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS.tmp" "$JOB_DETAILS"
-fi
+${renderWaitBlock(preCache)}
 
 finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
-
 // TODO: does not exist clealy when running interactive
 
 /**
@@ -354,7 +349,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
   // Calculate resources using our fractional node logic
   const isFullNode = opts.gpuCount === 4;
   const memValue = isFullNode ? '0' : `${opts.gpuCount * 115}G`;
-  const cpusPerTask = isFullNode ? '256' : `${opts.gpuCount * 64}`;
+  // const cpusPerTask = isFullNode ? '256' : `${opts.gpuCount * 64}`;
   const exclusiveFlag = isFullNode ? '#SBATCH --exclusive\n' : '';
 
   if (opts.isInteractive) {
@@ -384,29 +379,21 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     //#SBATCH --reservation=interactive
 
     return `#!/bin/bash
-    #SBATCH --job-name=${opts.jobName}
-    #SBATCH --nodes=1
-    #SBATCH --gpus=${opts.gpuCount}
-    #SBATCH --mem=${memValue}
-    #SBATCH --cpus-per-gpu=64
-    #SBATCH --cpu-bind=cores
-    #SBATCH --time=${opts.timeLimit}
-    ${exclusiveFlag}
+#SBATCH --job-name=${opts.jobName}
+#SBATCH --nodes=1
+#SBATCH --gpus=${opts.gpuCount}
+#SBATCH --mem=${memValue}
+#SBATCH --cpus-per-gpu=64
+#SBATCH --cpu-bind=cores
+#SBATCH --time=${opts.timeLimit}
+${exclusiveFlag}
 
-    exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
-    # Write the runtime execution logic directly below the headers
-    ${runtimePayload}`;
+exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
+# Write the runtime execution logic directly below the headers
+${runtimePayload}
+`;
   }
 }
-
-// function renderArchBase() {
-//   return `
-// # Safely extract values from your YAML config file (defaulting to 1 if not specified)
-// TP=$(awk '/tensor-parallel-size/ {print $2} END {if (!NR || !ORS) print "1"}' "$VLLM_CONFIG")
-// PP=$(awk '/pipeline-parallel-size/ {print $2} END {if (!NR || !ORS) print "1"}' "$VLLM_CONFIG")
-// # Construct a globally unique, multi-dimensional cache directory string
-// ARCH_SUFFIX="TP\${TP:-1}_PP\${PP:-1}"`;
-// }
 
 /**
  *
@@ -425,6 +412,8 @@ function renderSingleNodePayload(opts: InferenceScriptOptions): string {
     timeLimit,
     envVars,
     isInteractive,
+    cacheKey,
+    preCache,
   } = opts;
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
@@ -458,7 +447,7 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir, model)}
+${renderWorkDirSetup(workDir, cacheKey)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
@@ -483,7 +472,7 @@ VLLM_PID=$!
 
 echo "APP_PID_MATCH:$VLLM_PID"
 
-${renderHealthCheckAndWait(workDir, serverPort)}`;
+${renderHealthCheckAndWait(workDir, serverPort, preCache)}`;
 }
 
 /**
@@ -505,15 +494,16 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
   } else {
     // Traditional SBATCH batch script generation
     return `#!/bin/bash
-    #SBATCH --job-name=${opts.jobName}
-    #SBATCH --nodes=${opts.nodeCount}
-    #SBATCH --gpus-per-node=${gpusPerNode}
-    #SBATCH --mem=0
-    #SBATCH --time=${opts.timeLimit}
-    #SBATCH --exclusive
+#SBATCH --job-name=${opts.jobName}
+#SBATCH --nodes=${opts.nodeCount}
+#SBATCH --gpus-per-node=${gpusPerNode}
+#SBATCH --mem=0
+#SBATCH --time=${opts.timeLimit}
+#SBATCH --exclusive
 
-    exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
-    ${runtimePayload}`;
+exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
+${runtimePayload}
+`;
   }
 }
 
@@ -535,6 +525,8 @@ function renderMultiNodePayload(opts: InferenceScriptOptions): string {
     timeLimit,
     envVars,
     isInteractive,
+    cacheKey,
+    preCache,
   } = opts;
   const gpusPerNode = Math.floor(gpuCount / nodeCount);
   const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
@@ -589,7 +581,7 @@ jq -n \\
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir, model)}
+${renderWorkDirSetup(workDir, cacheKey)}
 ${NVHPC_PREAMBLE}
 source ${venvPath}/bin/activate
 export HF_HOME=${hfHome}
@@ -643,7 +635,7 @@ for WORKER in $WORKER_NODES; do
     bash -c "
       source ${venvPath}/bin/activate
       ${envPreamble}
-      ${renderWorkDirSetup(workDir, model)}
+      ${renderWorkDirSetup(workDir, cacheKey)}
       VLLM_HOST_IP=$WORKER_IP ray start \\
         --block \\
         --address=$HEAD_NODE_IP:$RAY_PORT \\
@@ -679,14 +671,14 @@ srun --overlap \\
       --distributed-executor-backend ray \\
       --host 0.0.0.0 \\
       --port ${serverPort} \\
-      --served-model-name \"$model\" \"$lcaseModel\" \"default\" \"$jobName\"
+      --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${jobName}\"
   " \\
   &
 VLLM_PID=$!
 
 echo "APP_PID_MATCH:$VLLM_PID"
 
-${renderHealthCheckAndWait(workDir, serverPort)}`;
+${renderHealthCheckAndWait(workDir, serverPort, preCache)}`;
 }
 
 /**

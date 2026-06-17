@@ -14,24 +14,28 @@ const base = {
   timeLimit: '4:00:00',
   envVars: [] as Array<{ key: string; value: string }>,
   isInteractive: false,
+  cacheKey: 'test-key',
+  preCache: false,
 };
 
 describe('renderInferenceScript', () => {
   it('sets SBATCH job name', () => {
-    expect(renderInferenceScript(base)).toContain('#SBATCH --job-name=my-job');
+    expect(renderInferenceScript(base)).toContain(
+      '\n#SBATCH --job-name=my-job',
+    );
   });
 
   it('sets SBATCH GPU count', () => {
-    expect(renderInferenceScript(base)).toContain('#SBATCH --gpus=4');
+    expect(renderInferenceScript(base)).toContain('\n#SBATCH --gpus=4');
   });
 
   it('requests full node memory in SBATCH', () => {
-    expect(renderInferenceScript(base)).toContain('#SBATCH --mem=0');
+    expect(renderInferenceScript(base)).toContain('\n#SBATCH --mem=0');
   });
 
   it('omits --exclusive for fractional GPU requests', () => {
     expect(renderInferenceScript({ ...base, gpuCount: 2 })).not.toContain(
-      '#SBATCH --exclusive',
+      '\n#SBATCH --exclusive',
     );
   });
 
@@ -49,18 +53,18 @@ describe('renderInferenceScript', () => {
 
   it('scales --cpus-per-task per GPU (64) for fractional requests', () => {
     expect(renderInferenceScript({ ...base, gpuCount: 1 })).toContain(
-      '#SBATCH --cpus-per-gpu=64',
+      '\n#SBATCH --cpus-per-gpu=64',
     );
     expect(renderInferenceScript({ ...base, gpuCount: 2 })).toContain(
-      '#SBATCH --cpus-per-gpu=64',
+      '\n#SBATCH --cpus-per-gpu=64',
     );
     expect(renderInferenceScript({ ...base, gpuCount: 3 })).toContain(
-      '#SBATCH --cpus-per-gpu=64',
+      '\n#SBATCH --cpus-per-gpu=64',
     );
   });
 
   it('sets SBATCH time limit', () => {
-    expect(renderInferenceScript(base)).toContain('#SBATCH --time=4:00:00');
+    expect(renderInferenceScript(base)).toContain('\n#SBATCH --time=4:00:00');
   });
 
   it('redirects stdout/stderr to log file in workDir via exec', () => {
@@ -104,9 +108,8 @@ describe('renderInferenceScript', () => {
 
   it('computes cache key from sha256sum of the vLLM config file', () => {
     const script = renderInferenceScript(base);
-    expect(script).toContain('CACHE_KEY=$(sha256sum "$VLLM_CONFIG"');
     expect(script).toContain(
-      'TAR_FILE="$PROJECTDIR/ivllm/caches/${CACHE_KEY}.tar.gz"',
+      'TAR_FILE="$PROJECTDIR/ivllm/caches/test-key.tar.gz"',
     );
   });
 
@@ -396,7 +399,9 @@ const multiNodeBase = {
 
 describe('renderInferenceScript (multi-node)', () => {
   it('sets --nodes=2 in SBATCH for 2-node job', () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain('#SBATCH --nodes=2');
+    expect(renderInferenceScript(multiNodeBase)).toContain(
+      '\n#SBATCH --nodes=2',
+    );
   });
 
   it('sets umask 0002 for shared group-writable files', () => {
@@ -405,8 +410,8 @@ describe('renderInferenceScript (multi-node)', () => {
 
   it('requests GPUs per node in SBATCH for multi-node overlap compatibility', () => {
     const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain('#SBATCH --gpus-per-node=4');
-    expect(script).not.toContain('#SBATCH --gpus=8');
+    expect(script).toContain('\n#SBATCH --gpus-per-node=4');
+    expect(script).not.toContain('\n#SBATCH --gpus=8');
   });
 
   it('starts Ray head node', () => {
@@ -420,7 +425,7 @@ describe('renderInferenceScript (multi-node)', () => {
   });
 
   it('requests full node memory in SBATCH', () => {
-    expect(renderInferenceScript(multiNodeBase)).toContain('#SBATCH --mem=0');
+    expect(renderInferenceScript(multiNodeBase)).toContain('\n#SBATCH --mem=0');
   });
 
   it('requests full node memory for all multi-node srun steps', () => {
