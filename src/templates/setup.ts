@@ -29,15 +29,15 @@ export function renderSetupScript(
   ].join(':');
 
   return `#!/bin/bash
-# ivllm-setup version 0.2.9000
+# ivllm setup version ${__VERSION__}
 #SBATCH --job-name=ivllm-setup
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --time=02:00:00
+#SBATCH --output=${remoteSetupLog}
 
 set -euo pipefail
 
-exec > "${remoteSetupLog}" 2>&1
 echo "=== ivllm-setup version ${__VERSION__} ==="
 
 # Install uv if not already present
@@ -73,6 +73,9 @@ if [ ! -d ${venvDir} ]; then
   module load gcc-native/14.2
   export NVHPC_ROOT=${nvhpcRoot}
   export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
+  export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
+  export MAX_JOBS=16
+  export FLASHINFER_NVCC_THREADS=4
   export PATH=$CUDA_HOME/bin:$PATH
   export LD_LIBRARY_PATH=${ldLibPath}
   # UV_CACHE_DIR: use $LOCALDIR (per-user in-job scratch) so multiple project

@@ -325,7 +325,7 @@ export async function runInferenceSession(
   const { model } = startArgs.configYaml;
 
   // ── 1. Pre-flight ──────────────────────────────────────────────────────
-  await checkSSH(config);
+  ops.checkSSH();
   await preFlight(startArgs, ops, localOps);
 
   const yaml = startArgs.configYaml;

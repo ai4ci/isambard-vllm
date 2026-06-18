@@ -69,7 +69,6 @@ export async function parseStartArgs(
 
   const mock = boolFlags.has('mock');
   const dryRun = boolFlags.has('dry-run');
-
   const noLaunch = boolFlags.has('no-launch');
   const preCache = boolFlags.has('create-cache');
   let configPath = flags['config'] ?? jobConfigPath(jobName);
@@ -118,7 +117,7 @@ export function makeSimplePaths(
   vllmVersion: string,
 ): SimplePaths {
   const remoteProjectDir = config.projectDir;
-  const remoteHomeDir = `${remoteProjectDir.replace('/project', '/home')}/${config.username}`;
+  const remoteHomeDir = `${remoteProjectDir.replace('/projects', '/home')}/${config.username}`;
   const remoteProjectVllmDir = `${remoteProjectDir}/ivllm`;
   const remoteProjectVllmPluginsDir = `${remoteProjectVllmDir}/plugins`;
   const remoteProjectVllmVersionDir = `${remoteProjectVllmDir}/${vllmVersion}`;

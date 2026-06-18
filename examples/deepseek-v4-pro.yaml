@@ -29,10 +29,10 @@
 # Usage (8-GPU, tight):  ivllm start <job-name> --config examples/deepseek-v4-pro.yaml --gpus 8
 
 model: deepseek-ai/DeepSeek-V4-Pro
-# Default: TP=8 + PP=2 (16 GPUs, 4 nodes) — satisfies FP8 block alignment.
+# Default: TP=4 + PP=4 (16 GPUs, 4 nodes) — satisfies FP8 block alignment.
 # To use TP=16 instead, comment out the two lines below and uncomment the TP=16 block.
-tensor-parallel-size: 8
-pipeline-parallel-size: 2
+tensor-parallel-size: 4
+pipeline-parallel-size: 4
 
 # Alternative: TP=16 (4 nodes, pure tensor parallel)
 # May fail with "not divisible by weight quantization block_k=128" in vLLM < 0.23.

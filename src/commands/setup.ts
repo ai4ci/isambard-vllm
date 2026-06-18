@@ -17,6 +17,8 @@ import { makeLocalOps } from '../local-ops.ts';
 
 const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler more than once per minute
 
+// TODO: --dry-run flag
+
 /**
  *
  * @param args
@@ -75,8 +77,7 @@ Examples:
   };
 
   // Pre-flight: check SSH connectivity
-  console.log('Checking SSH connectivity...');
-  checkSSH(config);
+  ops.checkSSH();
 
   // Check if versioned venv already exists
 

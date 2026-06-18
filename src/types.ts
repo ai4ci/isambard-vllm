@@ -167,6 +167,7 @@ export interface RemoteOps {
     remotePort: number,
   ): CloseableEventEmitter;
   matchVllmVersion(minVllmVersion: string): Promise<string>;
+  checkSSH(): Promise<boolean>;
 }
 
 export interface LocalOps {

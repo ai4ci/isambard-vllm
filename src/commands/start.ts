@@ -1,4 +1,4 @@
-import {  } from 'fs';
+import {} from 'fs';
 import { loadCredentials, assertConfigured } from '../config.ts';
 import { makeRemoteOps } from '../remote-ops.ts';
 import { makeLocalOps } from '../local-ops.ts';
@@ -45,9 +45,10 @@ ivllm start test-job --mock --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
   let startArgs;
   try {
     startArgs = await parseStartArgs(args, config);
+
     startArgs.isInteractive = false;
     const ops = makeRemoteOps(config, startArgs.dryRun);
-    const localOps = makeLocalOps(startArgs);
+    const localOps = makeLocalOps(startArgs.localPort, startArgs.dryRun);
 
     // Delegate to unified session pipeline
     await runInferenceSession(startArgs, ops, localOps);

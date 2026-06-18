@@ -1,4 +1,4 @@
-import { copyFileSync, mkdtempSync } from 'fs';
+import { copyFileSync, mkdirSync } from 'fs';
 import { basename, join } from 'path';
 import EventEmitter from 'node:events';
 import { spawn } from 'child_process';
@@ -14,6 +14,7 @@ import type {
   RunRemoteOptions,
   RunRemoteResult,
 } from './types.ts';
+import { tmpdir } from 'node:os';
 
 /**
  * Returns real RemoteOps that execute SSH/SCP, or dry-run ops that print
@@ -34,6 +35,7 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
         spawnTunnel(config, localPort, remoteHost, remotePort),
       matchVllmVersion: (minVllmVersion) =>
         matchVllmVersion(config, minVllmVersion),
+      checkSSH: () => checkSSH(config),
     };
   }
 
@@ -57,9 +59,10 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
       };
     },
     async copyFile(localPath, remotePath) {
-      const dryRunDir = mkdtempSync(join(process.cwd(), 'ivllm-dryrun-'));
+      const dryRunDir = join(tmpdir(), 'ivllm-dryrun');
+      mkdirSync(dryRunDir, { recursive: true });
       const destName = basename(remotePath);
-      const dest = join(dryRunDir!, destName);
+      const dest = join(dryRunDir, destName);
       copyFileSync(localPath, dest);
       console.log(`  [dry-run] Would scp: ${localPath} → ${remotePath}`);
       console.log(`           (preview: ${dest})`);
@@ -86,6 +89,10 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
     },
     async matchVllmVersion(minVllmVersion) {
       return minVllmVersion;
+    },
+    async checkSSH() {
+      console.log('  [dry-run] skipping SSH check');
+      return true;
     },
   };
 }
@@ -395,7 +402,7 @@ export function selectBestVersion(
   return semverSort(candidates)[0]!;
 }
 
-export async function checkSSH(credentials: Credentials) {
+export async function checkSSH(credentials: Credentials): Promise<boolean> {
   console.log('Checking SSH connectivity...');
   const { exitCode: sshCheck } = await runRemote(credentials, 'echo ok');
   if (sshCheck !== 0) {
@@ -403,4 +410,5 @@ export async function checkSSH(credentials: Credentials) {
     process.exit(1);
   }
   console.log('✓ SSH connectivity OK');
+  return true;
 }

@@ -16,7 +16,6 @@ import type { JobConfigEntry, ServeOptions, EnvVarEntry } from './types';
 export const IVLLM_ONLY_KEYS = new Set(['min-vllm-version', 'env']);
 export const JOB_CONFIG_DIR = join(homedir(), '.config', 'ivllm');
 
-
 /** Lists all stored job configs in the job config directory. */
 export function listJobConfigs(): JobConfigEntry[] {
   if (!existsSync(JOB_CONFIG_DIR)) return [];
@@ -74,12 +73,16 @@ export function parseVllmConfig(filePath: string): ServeOptions {
   const doc = yaml.load(raw) as Record<string, unknown>;
 
   const model = doc['model'];
-  if (typeof model !== 'string') throw new Error("Configuration file does not have `model` paramter")
+  if (typeof model !== 'string')
+    throw new Error('Configuration file does not have `model` paramter');
 
   const maxModelLen = doc['max-model-len'] ?? doc['max_model_len'];
-  if (typeof maxModelLen !== 'number') throw new Error("Configuration file does not have a numeric `max-model-len` paramter");
+  if (typeof maxModelLen !== 'number')
+    throw new Error(
+      'Configuration file does not have a numeric `max-model-len` paramter',
+    );
 
-   // vLLM YAML uses kebab-case keys; also accept underscore variant
+  // vLLM YAML uses kebab-case keys; also accept underscore variant
   const tp = doc['tensor-parallel-size'] ?? doc['tensor_parallel_size'];
   const tensorParallelSize = typeof tp === 'number' ? tp : 1;
 
@@ -91,7 +94,7 @@ export function parseVllmConfig(filePath: string): ServeOptions {
   const dataParallelSize = typeof dp === 'number' ? dp : 1;
 
   const minVer = doc['min-vllm-version'];
-  const minVllmVersion = typeof minVer === 'string' ? minVer : "0.15.0";
+  const minVllmVersion = typeof minVer === 'string' ? minVer : '0.15.0';
 
   const toolChoice =
     doc['enable-auto-tool-choice'] ?? doc['enable_auto_tool_choice'];
@@ -111,7 +114,7 @@ export function parseVllmConfig(filePath: string): ServeOptions {
   if (envBlock && typeof envBlock === 'object' && !Array.isArray(envBlock)) {
     for (const [k, v] of Object.entries(envBlock)) {
       if (typeof v === 'string' || typeof v === 'number') {
-        env.push({key:k,value:String(v)});
+        env.push({ key: k, value: String(v) });
       }
     }
   }
@@ -141,7 +144,9 @@ export function readVllmYaml(filePath: string): Record<string, unknown> {
  * vLLM errors on unknown config keys — always use this when uploading to the remote.
  * @param filePath
  */
-export function stripIvllmKeys(doc: Record<string, unknown>): Record<string, unknown> {
+export function stripIvllmKeys(
+  doc: Record<string, unknown>,
+): Record<string, unknown> {
   for (const key of IVLLM_ONLY_KEYS) {
     delete doc[key];
   }
@@ -167,8 +172,6 @@ export function writeStrippedConfig(filePath: string): string {
   writeFileSync(tmpPath, stripped, 'utf-8');
   return tmpPath;
 }
-
-
 
 /**
  * Reads env vars from a vLLM config file and returns them as an array
