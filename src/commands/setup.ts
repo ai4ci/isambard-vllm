@@ -1,8 +1,7 @@
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { loadConfig, assertConfigured } from '../config.ts';
-import { runRemote, copyFile } from '../ssh.ts';
+import { loadCredentials, assertConfigured } from '../config.ts';
 import { renderSetupScript } from '../templates/setup.ts';
 import {
   submitJob,
@@ -10,12 +9,13 @@ import {
   getJobLog,
   getSlurmQueueState,
 } from '../slurm.ts';
-
-import { tailRemoteLog } from '../ssh.ts';
+import { checkSSH, makeRemoteOps } from '../remote-ops.ts';
+import type { ProcessState } from '../types.ts';
+import { detachSession } from '../monitors.ts';
+import { makeSimplePaths } from '../job.ts';
+import { makeLocalOps } from '../local-ops.ts';
 
 const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler more than once per minute
-const REMOTE_SCRIPT_PATH = '~/.config/ivllm/setup.slurm.sh';
-const REMOTE_LOG_PATH = '~/.config/ivllm/setup.log';
 
 /**
  *
@@ -43,7 +43,8 @@ Examples:
     console.error('Usage: ivllm setup <version>  (e.g. ivllm setup 0.19.1)');
     process.exit(1);
   }
-  const config = loadConfig();
+
+  const config = loadCredentials();
   try {
     assertConfigured(config);
   } catch (e) {
@@ -51,32 +52,35 @@ Examples:
     process.exit(1);
   }
 
-  console.log('=== ivllm setup ===');
+  const ops = makeRemoteOps(config, false);
+  const paths = makeSimplePaths(config, vllmVersion);
+  const venvDir = paths.remoteProjectVllmVersionDir;
+  const remoteSetupDir = `${paths.remoteHomeDir}/.config/ivllm/${vllmVersion}`;
+  const remoteSetupScript = `${remoteSetupDir}/slurm.sh`;
+  const remoteSetupLog = `${remoteSetupDir}/setup.log`;
+
+  console.log(`=== ivllm setup (version ${__VERSION__}) ===`);
   console.log(`Login node  : ${config.loginHost}`);
   console.log(`vLLM        : ${vllmVersion}`);
-  console.log(`Install dir : ${config.projectDir}/ivllm/${vllmVersion}`);
+  console.log(`Install dir : ${venvDir}`);
   console.log('');
+
+  // ── 3. Build session state ────────────────────────────────────────────
+
+  const sessionState: ProcessState = {
+    sessionName: 'vllm install',
+    vllmVersion,
+    ops,
+    paths,
+  };
 
   // Pre-flight: check SSH connectivity
   console.log('Checking SSH connectivity...');
-  const { exitCode: sshCheck } = await runRemote(config, 'echo ok', {
-    env:[], silent: true,
-  });
-  if (sshCheck !== 0) {
-    console.error(
-      'Error: Cannot connect to login node. Check your SSH configuration.',
-    );
-    process.exit(1);
-  }
-  console.log('✓ SSH connectivity OK');
+  checkSSH(config);
 
   // Check if versioned venv already exists
-  const venvDir = `${config.projectDir}/ivllm/${vllmVersion}`;
-  const { exitCode: venvCheck } = await runRemote(
-    config,
-    `test -d ${venvDir}/bin`,
-    { env:[], silent: true },
-  );
+
+  const { exitCode: venvCheck } = await ops.runRemote(`test -d ${venvDir}/bin`);
   if (venvCheck === 0) {
     console.log(`✓ vLLM ${vllmVersion} already installed at ${venvDir}`);
     console.log('  Delete the directory first to reinstall.');
@@ -84,36 +88,37 @@ Examples:
   }
 
   // Render and copy setup script to LOGIN
-  const script = renderSetupScript({ vllmVersion, hfToken: config.hfToken });
+  const script = renderSetupScript(sessionState, remoteSetupLog);
 
   const localTmp = join(tmpdir(), 'ivllm-setup.slurm.sh');
   writeFileSync(localTmp, script, 'utf-8');
 
   try {
     console.log('Copying setup script to login node...');
-    await runRemote(config, `mkdir -p ~/.config/ivllm`, { env:[], silent: true });
-    await copyFile(config, localTmp, REMOTE_SCRIPT_PATH);
+    await ops.runRemote(`mkdir -p ${remoteSetupDir})`);
+    await ops.copyFile(localTmp, remoteSetupScript);
     console.log('✓ Script copied');
 
     // Submit SLURM job
     console.log('Submitting SLURM setup job...');
-    const jobId = await submitJob(config, REMOTE_SCRIPT_PATH);
+
+    //TODO: This is using old approach and could be refactored using a monitor.
+
+    await submitJob(remoteSetupScript, sessionState);
+    const jobId = sessionState.slurmJobId!;
     console.log(`✓ SLURM job submitted: ${jobId}`);
 
     // Truncate the log so we only stream this run's output
-    await runRemote(
-      config,
-      `truncate -s 0 ${REMOTE_LOG_PATH} 2>/dev/null || true`,
-      { env:[], silent: true },
-    );
+    await ops.runRemote(`truncate -s 0 ${remoteSetupLog} 2>/dev/null || true`);
 
     // Wait for the job to leave the queue (PENDING → RUNNING)
     console.log('Waiting for compute node allocation...');
     while (true) {
-      const queueState = await getSlurmQueueState(config, jobId);
+      const queueState = await getSlurmQueueState(ops, jobId);
       if (!queueState || queueState.state !== 'PENDING') break;
       await sleep(POLL_INTERVAL_MS);
     }
+
     console.log(
       '✓ Job started — streaming setup log (this may take 10–20 minutes)...',
     );
@@ -122,13 +127,13 @@ Examples:
     // Stream the remote log to stdout in real time
     // Give the job a moment to start writing the log before tailing
     await sleep(3_000);
-    const tail = tailRemoteLog(config, REMOTE_LOG_PATH, '  ');
+    const tail = ops.tailRemoteLog(remoteSetupLog, '  ');
 
     // Poll for job completion while log streams in the background
-    let state = await pollJobStatus(config, jobId);
+    let state = await pollJobStatus(ops, jobId);
     while (state === 'running') {
       await sleep(POLL_INTERVAL_MS);
-      state = await pollJobStatus(config, jobId);
+      state = await pollJobStatus(ops, jobId);
     }
 
     // Give tail a moment to flush remaining lines before stopping
@@ -137,7 +142,7 @@ Examples:
     console.log('─'.repeat(60));
 
     // Fetch log
-    const log = await getJobLog(config, REMOTE_LOG_PATH);
+    const log = await getJobLog(ops, remoteSetupLog);
 
     if (state === 'failed') {
       console.error('✗ Setup job failed. Log output:');
@@ -154,10 +159,8 @@ Examples:
     }
 
     // Validate venv exists
-    const { exitCode: finalCheck } = await runRemote(
-      config,
+    const { exitCode: finalCheck } = await ops.runRemote(
       `test -d ${venvDir}/bin`,
-      { env: [], silent: true },
     );
     if (finalCheck !== 0) {
       console.error(`✗ venv not found at ${venvDir} after setup.`);

@@ -1,46 +1,33 @@
-export interface MockInferenceScriptOptions {
-  jobName: string;
-  model: string;
-  workDir: string;
-  serverPort: number;
-  timeLimit: string;
-  startupDelaySecs?: number;
-}
+import type { SessionState } from '../types';
 
 /**
  *
  * @param opts
  */
-export function renderMockInferenceScript(
-  opts: MockInferenceScriptOptions,
-): string {
-  const {
-    jobName,
-    model,
-    workDir,
-    serverPort,
-    timeLimit,
-    startupDelaySecs = 5,
-  } = opts;
+export function renderMockInferenceScript(ss: SessionState): string {
+  if (ss.startArgs === undefined)
+    throw new Error('Incorrectly setup SessionState.');
+  const opts = ss.startArgs;
+  const startupDelaySecs = 5;
 
   return `#!/bin/bash
-#SBATCH --job-name=${jobName}
+#SBATCH --job-name=${opts.jobName}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --time=${timeLimit}
+#SBATCH --time=${opts.timeLimit}
 
 set -euo pipefail
 
-WORK_DIR="${workDir}"
-exec > "$WORK_DIR/${jobName}.slurm.log" 2>&1
+WORK_DIR="${ss.paths.remoteJobDir}"
+exec > "$WORK_DIR/${opts.jobName}.slurm.log" 2>&1
 JOB_DETAILS="$WORK_DIR/job_details.json"
-SERVER_PORT=${serverPort}
-MODEL="${model}"
+SERVER_PORT=${opts.serverPort}
+MODEL="${opts.configYaml.model}"
 
 # Write initialising status
 jq -n \\
   --arg status "initialising" \\
-  --arg job_name "${jobName}" \\
+  --arg job_name "${opts.jobName}" \\
   --arg slurm_job_id "$SLURM_JOB_ID" \\
   --arg compute_hostname "$(hostname)" \\
   --arg model "$MODEL" \\

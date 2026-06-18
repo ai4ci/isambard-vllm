@@ -1,4 +1,4 @@
-import { loadConfig } from '../config.ts';
+import { loadCredentials } from '../config.ts';
 import {
   getAvailableAssistants,
   getAvailableWrappers,
@@ -19,15 +19,8 @@ import {
   copyFileSync,
   readFileSync,
 } from 'fs';
+import type { V1ModelsResponse } from '../types.ts';
 
-interface V1ModelsResponse {
-  object: 'list';
-  data: Array<{
-    id: string;
-    [key: string]: any;
-    max_model_len?: number;
-  }>;
-}
 
 /**
  * Handle the ivllm agent command for launching AI assistants connected to a local vLLM server
@@ -78,7 +71,7 @@ Examples:
   // If port not specified, get from config or use default
   if (port === undefined) {
     try {
-      const config = loadConfig();
+      const config = loadCredentials();
       port = config.defaultLocalPort ?? 11434;
     } catch (error) {
       // If config loading fails, use default

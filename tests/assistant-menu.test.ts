@@ -7,19 +7,6 @@ import {
   getLaunchCommand,
 } from "../src/assistant.ts";
 
-describe("F2.6 — menu displays cwd", () => {
-  it("menu text includes cwd placeholder", () => {
-    const cwd = "/projects/b6ax/my-project";
-    const assistants = ["opencode", "claude"];
-    const hasScoder = true;
-    const options = buildAssistantMenuOptions(assistants, hasScoder);
-
-    // Verify menu would display cwd
-    const menuText = `Launching in ${cwd}\n`;
-    expect(menuText).toContain(cwd);
-  });
-});
-
 describe("F2.6 — menu shows scoder options when available", () => {
   it("includes scoder options for each assistant", () => {
     const options = buildAssistantMenuOptions(["opencode", "claude"], true);

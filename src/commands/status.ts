@@ -1,7 +1,8 @@
-import { loadConfig, assertConfigured } from '../config.ts';
-import { runRemote } from '../ssh.ts';
+import { loadCredentials, assertConfigured } from '../config.ts';
+
 import { parseJobDetails } from '../job.ts';
 import type { JobDetails } from "../types.ts";
+import { makeRemoteOps } from "../remote-ops.ts";
 
 export interface StatusArgs {
   jobName?: string;
@@ -71,7 +72,7 @@ Examples:
     return;
   }
 
-  const config = loadConfig();
+  const config = loadCredentials();
   try {
     assertConfigured(config);
   } catch (e) {
@@ -79,14 +80,14 @@ Examples:
     process.exit(1);
   }
 
+  const ops = makeRemoteOps(config, false);
+
   const { jobName } = parseStatusArgs(args);
 
   if (jobName) {
     // Single job
-    const { exitCode, stdout } = await runRemote(
-      config,
-      `cat ~/${jobName}/job_details.json 2>/dev/null`,
-      { silent: true },
+    const { exitCode, stdout } = await ops.runRemote(
+      `cat ~/${jobName}/job_details.json 2>/dev/null`
     );
     if (exitCode !== 0 || !stdout.trim()) {
       console.error(
@@ -102,10 +103,8 @@ Examples:
     console.log(formatJobTable([details]));
   } else {
     // All jobs — use jq to combine all job_details.json into a JSON array
-    const { stdout } = await runRemote(
-      config,
+    const { stdout } = await ops.runRemote(
       `shopt -s nullglob; files=(~/*/job_details.json); if [ \${#files[@]} -eq 0 ]; then echo '[]'; else jq -s '.' "\${files[@]}"; fi`,
-      { silent: true },
     );
     let jobs: JobDetails[] = [];
     try {

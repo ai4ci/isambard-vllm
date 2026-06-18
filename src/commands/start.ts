@@ -1,8 +1,7 @@
 import {  } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { loadConfig, assertConfigured } from '../config.ts';
+import { loadCredentials, assertConfigured } from '../config.ts';
 import { makeRemoteOps } from '../remote-ops.ts';
+import { makeLocalOps } from '../local-ops.ts';
 import { parseStartArgs } from '../job.ts';
 import { runInferenceSession } from '../session-helper.ts';
 
@@ -35,7 +34,7 @@ ivllm start test-job --mock --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
     return;
   }
 
-  const config = loadConfig();
+  const config = loadCredentials();
   try {
     assertConfigured(config);
   } catch (e) {
@@ -45,11 +44,13 @@ ivllm start test-job --mock --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
 
   let startArgs;
   try {
-    startArgs = parseStartArgs(args);
-    const ops = makeRemoteOps(config, startArgs);
+    startArgs = await parseStartArgs(args, config);
+    startArgs.isInteractive = false;
+    const ops = makeRemoteOps(config, startArgs.dryRun);
+    const localOps = makeLocalOps(startArgs);
 
     // Delegate to unified session pipeline
-    await runInferenceSession(config, startArgs, false, ops);
+    await runInferenceSession(startArgs, ops, localOps);
   } catch (e) {
     console.error('Error:', (e as Error).message);
     console.log(help);

@@ -1,7 +1,8 @@
 import { spawn } from 'child_process';
-import { loadConfig, assertConfigured } from '../config.ts';
-import { runRemote } from '../ssh.ts';
+import { loadCredentials, assertConfigured } from '../config.ts';
+
 import { parseJobDetails } from '../job.ts';
+import { makeRemoteOps } from "../remote-ops.ts";
 
 export interface StopArgs {
   jobName: string;
@@ -37,13 +38,15 @@ Examples:
     return;
   }
 
-  const config = loadConfig();
+  const config = loadCredentials();
   try {
     assertConfigured(config);
   } catch (e) {
     console.error('Error:', (e as Error).message);
     process.exit(1);
   }
+
+  const ops = makeRemoteOps(config, false);
 
   let stopArgs: StopArgs;
   try {
@@ -60,10 +63,8 @@ Examples:
   console.log(`=== ivllm stop: ${jobName} ===`);
 
   // Read job_details.json to get SLURM job ID
-  const { stdout } = await runRemote(
-    config,
-    `cat ${remoteJobDetails} 2>/dev/null`,
-    { silent: true },
+  const { stdout } = await ops.runRemote(
+    `cat ${remoteJobDetails} 2>/dev/null`
   );
   const details = parseJobDetails(stdout);
 
@@ -77,10 +78,8 @@ Examples:
   // Cancel SLURM job if we have an ID
   if (details.slurm_job_id) {
     process.stdout.write(`  Cancelling SLURM job ${details.slurm_job_id}...`);
-    const { exitCode } = await runRemote(
-      config,
+    const { exitCode } = await ops.runRemote(
       `scancel ${details.slurm_job_id}`,
-      { silent: true },
     );
     console.log(
       exitCode === 0
@@ -93,7 +92,7 @@ Examples:
 
   // Remove lockfile on HPC
   process.stdout.write('  Removing lockfile on HPC...');
-  await runRemote(config, `rm -f ${remoteJobDetails}`, { silent: true });
+  await ops.runRemote(`rm -f ${remoteJobDetails}`);
   console.log(' done');
 
   // Best-effort: terminate any local orphaned tunnel for the default port

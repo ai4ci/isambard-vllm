@@ -8,8 +8,9 @@ import { cmdInteractive } from './commands/interactive.ts';
 import { cmdAgent } from './commands/agent.ts';
 import { cmdConfig } from './commands/config.ts';
 
-
+// Assign globally across Node.js/Browser using the universal globalThis object
 const { version } = await import('../package.json');
+(globalThis as any).__VERSION__ = version;
 
 const [, , command, ...args] = process.argv;
 
@@ -41,9 +42,8 @@ For command-specific help, run:
 switch (command) {
   case '--version':
   case '-v':
-    console.log(`ivllm ${version}`);
+    console.log(`ivllm ${__VERSION__}`);
     process.exit(0);
-    break;
   case 'setup':
     await cmdSetup(args);
     break;
@@ -72,4 +72,3 @@ switch (command) {
     console.log(USAGE);
     process.exit(command ? 1 : 0);
 }
-

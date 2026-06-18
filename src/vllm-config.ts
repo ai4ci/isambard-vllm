@@ -9,7 +9,7 @@ import {
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import yaml from 'js-yaml';
-import type { JobConfigEntry, VllmConfig, EnvVarEntry } from './types';
+import type { JobConfigEntry, ServeOptions, EnvVarEntry } from './types';
 
 /** Keys that are ivllm-specific and must be stripped before passing the config to `vllm serve`. */
 
@@ -64,62 +64,39 @@ export function saveJobConfig(jobName: string, sourcePath: string): void {
   copyFileSync(sourcePath, jobConfigPath(jobName));
 }
 
-
-/**
- * Resolve the total GPU count and node count for a SLURM job from a vLLM config.
- * gpus = tensor_parallel_size * pipeline_parallel_size.
- * nodeCount = ceil(gpuCount / gpusPerNode).
- * If --gpus was explicitly set on the CLI, that takes precedence for gpuCount.
- * @param cliGpus
- * @param yamlConfig
- * @param gpusPerNode
- */
-export function resolveGpuCount(
-  cliGpus: number | undefined,
-  yamlConfig: VllmConfig,
-  gpusPerNode = 4,
-): { gpuCount: number; nodeCount: number; error?: string } {
-  if (cliGpus !== undefined) {
-    return { gpuCount: cliGpus, nodeCount: Math.ceil(cliGpus / gpusPerNode) };
-  }
-
-  const tp = yamlConfig.tensorParallelSize ?? 4;
-  const pp = yamlConfig.pipelineParallelSize ?? 1;
-  const gpuCount = tp * pp;
-  const nodeCount = Math.ceil(gpuCount / gpusPerNode);
-
-  return { gpuCount, nodeCount };
-}
-
 /**
  * Parse a vLLM YAML config file and extract fields that ivllm needs locally
  * (for HF model download and SLURM GPU allocation).
  * @param filePath
  */
-export function parseVllmConfig(filePath: string): VllmConfig {
+export function parseVllmConfig(filePath: string): ServeOptions {
   const raw = readFileSync(filePath, 'utf-8');
   const doc = yaml.load(raw) as Record<string, unknown>;
 
-  const model = typeof doc['model'] === 'string' ? doc['model'] : undefined;
+  const model = doc['model'];
+  if (typeof model !== 'string') throw new Error("Configuration file does not have `model` paramter")
 
-  // vLLM YAML uses kebab-case keys; also accept underscore variant
+  const maxModelLen = doc['max-model-len'] ?? doc['max_model_len'];
+  if (typeof maxModelLen !== 'number') throw new Error("Configuration file does not have a numeric `max-model-len` paramter");
+
+   // vLLM YAML uses kebab-case keys; also accept underscore variant
   const tp = doc['tensor-parallel-size'] ?? doc['tensor_parallel_size'];
-  const tensorParallelSize = typeof tp === 'number' ? tp : undefined;
+  const tensorParallelSize = typeof tp === 'number' ? tp : 1;
 
   // vLLM YAML uses kebab-case keys; also accept underscore variant
   const pp = doc['pipeline-parallel-size'] ?? doc['pipeline_parallel_size'];
-  const pipelineParallelSize = typeof pp === 'number' ? pp : undefined;
+  const pipelineParallelSize = typeof pp === 'number' ? pp : 1;
+
+  const dp = doc['data-parallel-size'] ?? doc['data_parallel_size'];
+  const dataParallelSize = typeof dp === 'number' ? dp : 1;
 
   const minVer = doc['min-vllm-version'];
-  const minVllmVersion = typeof minVer === 'string' ? minVer : undefined;
-
-  const mml = doc['max-model-len'] ?? doc['max_model_len'];
-  const maxModelLen = typeof mml === 'number' ? mml : undefined;
+  const minVllmVersion = typeof minVer === 'string' ? minVer : "0.15.0";
 
   const toolChoice =
     doc['enable-auto-tool-choice'] ?? doc['enable_auto_tool_choice'];
   const enableAutoToolChoice =
-    typeof toolChoice === 'boolean' ? toolChoice : undefined;
+    typeof toolChoice === 'boolean' ? toolChoice : true;
 
   // Derive enableReasoning from the presence of reasoning-parser (not from enable-reasoning,
   // which is an opencode.js concept and not a valid vLLM config key).
@@ -127,7 +104,7 @@ export function parseVllmConfig(filePath: string): VllmConfig {
   const enableReasoning =
     typeof reasoningParser === 'string' && reasoningParser.length > 0
       ? true
-      : undefined;
+      : false;
 
   const envBlock = doc['env'];
   const env: EnvVarEntry[] = [];
@@ -143,6 +120,7 @@ export function parseVllmConfig(filePath: string): VllmConfig {
     model,
     tensorParallelSize,
     pipelineParallelSize,
+    dataParallelSize,
     maxModelLen,
     enableAutoToolChoice,
     enableReasoning,

@@ -1,3 +1,5 @@
+import type { ProcessState } from '../types';
+
 export interface SetupScriptOptions {
   vllmVersion: string;
   hfToken?: string;
@@ -7,11 +9,15 @@ export interface SetupScriptOptions {
  *
  * @param opts
  */
-export function renderSetupScript(opts: SetupScriptOptions): string {
-  const { vllmVersion, hfToken } = opts;
-  const venvDir = `$PROJECTDIR/ivllm/${vllmVersion}`;
-  const nvhpcDir = `$PROJECTDIR/ivllm/nvhpc`;
-  const nvhpcRoot = `${nvhpcDir}/Linux_aarch64/26.3`;
+export function renderSetupScript(
+  ss: ProcessState,
+  remoteSetupLog: string,
+): string {
+  const paths = ss.paths;
+  const vllmVersion = ss.vllmVersion;
+  const venvDir = paths.remoteProjectVllmDir;
+  const nvhpcDir = paths.nvhpcDir;
+  const nvhpcRoot = paths.nvhpcRoot;
   const ldLibPath = [
     `$NVHPC_ROOT/cuda/12.9/compat`,
     `$NVHPC_ROOT/cuda/12.9/lib64`,
@@ -31,9 +37,8 @@ export function renderSetupScript(opts: SetupScriptOptions): string {
 
 set -euo pipefail
 
-${hfToken ? `export HF_TOKEN=${hfToken}` : ''}
-exec > "$HOME/.config/ivllm/setup.log" 2>&1
-echo "=== ivllm-setup version 0.2.9000 ==="
+exec > "${remoteSetupLog}" 2>&1
+echo "=== ivllm-setup version ${__VERSION__} ==="
 
 # Install uv if not already present
 if ! command -v uv &>/dev/null; then

@@ -1,7 +1,8 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
-import type { EnvVarEntry , InferenceScriptOptions } from '../../src/types.ts';
+import type { EnvVarEntry, SessionState, Paths } from '../../src/types.ts';
 
-const NVHPC_PREAMBLE = `export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
+const NVHPC_PREAMBLE = `
+export NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3
 export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
 export PATH=$CUDA_HOME/bin:$PATH
 # NVHPC separates math library headers (cuBLAS, cuSPARSE) from the CUDA SDK headers.
@@ -28,9 +29,8 @@ function renderEnvVars(envVars: EnvVarEntry[]): string {
 
 /**
  *
- * @param _workDir
  */
-function renderExitDiagnostics(_workDir: string): string {
+function renderExitDiagnostics(): string {
   return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
 
 persist_slurm_accounting() {
@@ -59,17 +59,17 @@ persist_slurm_accounting() {
  * @param workDir
  * @param model
  */
-function renderWorkDirSetup(workDir: string, cacheKey: string): string {
+function renderWorkDirSetup(paths: Paths): string {
   return `
-WORK_DIR="${workDir}"
-mkdir -p "$WORK_DIR/ivllm"
+WORK_DIR="${paths.remoteJobDir}"
+mkdir -p "${paths.remoteJobDir}"
 # Look for and link the plugins directory
-if [ -d "$PROJECTDIR/ivllm/plugins" ]; then
-  ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"
+if [ -d "${paths.remoteProjectVllmPluginsDir}" ]; then
+  ln -sfn "${paths.remoteProjectVllmPluginsDir}" "${paths.remoteJobVllmPluginsDir}"
 fi
 
 # 1. Compute cache key from vllm.yaml
-TAR_FILE="$PROJECTDIR/ivllm/caches/${cacheKey}.tar.gz"
+TAR_FILE="${paths.remoteProjectJobCacheFile}"
 
 # 2. Move $HOME to fast local tmpfs
 export HOME="$LOCALDIR/user_home"
@@ -89,42 +89,10 @@ export TORCHINDUCTOR_CACHE_DIR="$HOME/.cache/torchinductor"
 
 export VLLM_CACHE_ROOT="$HOME/.cache/vllm"
 `;
-
-  // ${renderArchBase()}
-  //
-  // # Model-scoped JIT cache directories under $SCRATCHDIR (Lustre).
-  // # Each model gets its own persistent cache to avoid kernel conflicts
-  // # between different models (different attention heads, MoE configs, etc.).
-  // # $SCRATCHDIR is always defined on Isambard AI and persists ~60 days.
-  //
-  // ${renderRelocateCache(
-  //   'FLASHINFER_JIT_CACHE_DIR',
-  //   'flashinfer_cache',
-  //   '~/.cache/flashinfer',
-  //   model,
-  // )}
-  //
-  // ${renderRelocateCache(
-  //   'DG_JIT_CACHE_DIR',
-  //   'deep_gemm_cache',
-  //   '~/.deep_gemm',
-  //   model,
-  // )}
-  //
-  // ${renderRelocateCache('TRITON_CACHE_DIR', 'triton_cache', '~/.triton', model)}
-  //
-  // ${renderRelocateCache(
-  //   'TORCHINDUCTOR_CACHE_DIR',
-  //   'torchinductor_cache',
-  //   '~/.cache/torchinductor',
-  //   model,
-  // )}
-  //
-  // ${renderRelocateCache('VLLM_CACHE_ROOT', 'vllm_cache', '~/.cache/vllm', model)}`;
 }
 
 // Called after renderWorkDirSetup so OK to use variables from that.
-function renderMonitor(workDir: string): string {
+function renderMonitor(): string {
   const debug = !!process.env.IVLLM_DEBUG;
   if (debug) {
     return `
@@ -139,7 +107,7 @@ function renderMonitor(workDir: string): string {
     # 1. Force NVIDIA NCCL to print full initialization, connection, and topology maps
     export NCCL_DEBUG=TRACE
     export NCCL_DEBUG_SUBSYS=INIT,COLL,ENV
-    export NCCL_DEBUG_FILE=${workDir}/nccl_log.log
+    export NCCL_DEBUG_FILE=$WORK_DIR/nccl_log.log
 
     # 2. Force PyTorch Distributed to log process group handshakes and tracking metrics
     export TORCH_CPP_LOG_LEVEL=INFO
@@ -197,45 +165,6 @@ done
 
 /**
  *
- * @param workDir
- */
-function renderMultiNodeExitDiagnostics(workDir: string): string {
-  return `${renderExitDiagnostics(workDir)}
-RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"
-
-persist_ray_logs() {
-  mkdir -p "$RAY_LOG_ARCHIVE_DIR"
-  for NODE_NAME in $(scontrol show hostnames $SLURM_NODELIST); do
-    RAY_DESTINATION="$RAY_LOG_ARCHIVE_DIR/$NODE_NAME"
-    ARCHIVE_STATUS_FILE="$RAY_DESTINATION/archive-status.txt"
-    mkdir -p "$RAY_DESTINATION"
-    printf "%s\\n" "Starting Ray log archival for $NODE_NAME" > "$ARCHIVE_STATUS_FILE"
-    if srun --overlap \\
-      --nodelist "$NODE_NAME" \\
-      --nodes=1 \\
-      --ntasks-per-node 1 \\
-      --cpus-per-task 1 \\
-      bash -c '
-        RAY_SESSION_DIR=$(readlink -f /local/user/$UID/ray/session_latest 2>/dev/null || true)
-        RAY_DEST_LITERAL="'"\$RAY_DESTINATION"'"
-        mkdir -p "\$RAY_DEST_LITERAL"
-        if [ -n "\$RAY_SESSION_DIR" ] && [ -d "\$RAY_SESSION_DIR/logs" ]; then
-          cp -a "\$RAY_SESSION_DIR/logs/." "\$RAY_DEST_LITERAL/" 2>/dev/null || true
-          printf "%s\\n" "\$RAY_SESSION_DIR" > "\$RAY_DEST_LITERAL/session_dir.txt"
-        else
-          printf "%s\\n" "No Ray logs found at /local/user/$UID/ray/session_latest" > "\$RAY_DEST_LITERAL/missing.txt"
-        fi
-      '; then
-      printf "%s\\n" "Finished Ray log archival for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
-    else
-      printf "%s\\n" "Ray log archival srun failed for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
-    fi
-  done
-}`;
-}
-
-/**
- *
  * @param includeRayLogs
  */
 function renderExitTrap(includeRayLogs: boolean): string {
@@ -287,7 +216,6 @@ fi
  * @param serverPort
  */
 function renderHealthCheckAndWait(
-  workDir: string,
   serverPort: number,
   preCache: boolean,
 ): string {
@@ -343,8 +271,11 @@ finalize_and_exit $EXIT_CODE "vLLM exit"`;
  *
  * @param opts
  */
-function renderSingleNodeScript(opts: InferenceScriptOptions): string {
-  const runtimePayload = renderSingleNodePayload(opts);
+function renderSingleNodeScript(ss: SessionState): string {
+  const opts = ss.startArgs!;
+  const paths = ss.paths;
+
+  const runtimePayload = renderSingleNodePayload(ss);
 
   // Calculate resources using our fractional node logic
   const isFullNode = opts.gpuCount === 4;
@@ -358,7 +289,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
     // will invoke this string via an active 'srun' command over SSH.
     return `#!/bin/bash
     # Redirect stdout and stderr to both the console and the log file simultaneously
-    exec > >(tee -a "${opts.workDir}/${opts.jobName}.slurm.log") 2>&1
+    exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
     ${runtimePayload}
     echo "Submitted interactive job $VLLM_PID"
     `;
@@ -388,7 +319,7 @@ function renderSingleNodeScript(opts: InferenceScriptOptions): string {
 #SBATCH --time=${opts.timeLimit}
 ${exclusiveFlag}
 
-exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
+exec > "${paths.remoteJobLogFile}" 2>&1
 # Write the runtime execution logic directly below the headers
 ${runtimePayload}
 `;
@@ -399,32 +330,20 @@ ${runtimePayload}
  *
  * @param opts
  */
-function renderSingleNodePayload(opts: InferenceScriptOptions): string {
-  const {
-    jobName,
-    model,
-    vllmVersion,
-    hfHome,
-    configFileName,
-    workDir,
-    serverPort,
-    gpuCount,
-    timeLimit,
-    envVars,
-    isInteractive,
-    cacheKey,
-    preCache,
-  } = opts;
-  const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
+function renderSingleNodePayload(ss: SessionState): string {
+  const opts = ss.startArgs!;
+  const paths = ss.paths;
+  const model = opts.configYaml.model;
+
   const lcaseModel = model.split('/').pop()!.toLowerCase();
-  const maxJobs = Math.min(gpuCount * 2, 8); // Safe, scalable compiler throttle
+  const maxJobs = Math.min(opts.gpuCount * 2, 8); // Safe, scalable compiler throttle
 
   return `umask 0002
 
-JOB_DETAILS="${workDir}/job_details.json"
-VLLM_CONFIG="${workDir}/${configFileName}"
+JOB_DETAILS="${paths.remoteJobLockFile}"
+VLLM_CONFIG="${paths.remoteJobVllmConfigFile}"
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-SERVER_PORT=${serverPort}
+SERVER_PORT=${opts.serverPort}
 COMPUTE_HOSTNAME=$(hostname)
 
 export MAX_JOBS=${maxJobs}
@@ -436,28 +355,28 @@ export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 # we overwrite with full details now that we have the SLURM context.
 jq -n \\
   --arg status "initialising" \\
-  --arg job_name "${jobName}" \\
+  --arg job_name "${opts.jobName}" \\
   --arg slurm_job_id "$SLURM_JOB_ID" \\
   --arg compute_hostname "$COMPUTE_HOSTNAME" \\
   --arg model "${model}" \\
-  --argjson server_port ${serverPort} \\
+  --argjson server_port ${opts.serverPort} \\
   '{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
   > "$JOB_DETAILS"
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir, cacheKey)}
+${renderWorkDirSetup(paths)}
 ${NVHPC_PREAMBLE}
-source ${venvPath}/bin/activate
-export HF_HOME=${hfHome}
+source ${paths.remoteProjectVllmVenvActivate}
+export HF_HOME=${paths.remoteProjectHfDir}
 export HF_HUB_OFFLINE=1
-${renderEnvVars(envVars)}
-${renderExitDiagnostics(workDir)}
+${renderEnvVars(opts.configYaml.env)}
+${renderExitDiagnostics()}
 ${renderExitTrap(false)}
 cd "$WORK_DIR"
 
-${renderMonitor(workDir)}
+${renderMonitor()}
 
 # vLLM is launched in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
@@ -465,29 +384,32 @@ ${renderMonitor(workDir)}
 vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
-  --port ${serverPort} \\
-  --served-model-name "${model}" "${lcaseModel}" "default" "${jobName}" \\
+  --port ${opts.serverPort} \\
+  --served-model-name "${model}" "${lcaseModel}" "default" "${opts.jobName}" \\
   &
 VLLM_PID=$!
 
 echo "APP_PID_MATCH:$VLLM_PID"
 
-${renderHealthCheckAndWait(workDir, serverPort, preCache)}`;
+${renderHealthCheckAndWait(opts.serverPort, opts.preCache)}`;
 }
 
 /**
  *
  * @param opts
  */
-function renderMultiNodeScript(opts: InferenceScriptOptions): string {
-  const runtimePayload = renderMultiNodePayload(opts);
-  const gpusPerNode = Math.floor(opts.gpuCount / opts.nodeCount);
+function renderMultiNodeScript(ss: SessionState): string {
+  const opts = ss.startArgs!;
+  const paths = ss.paths;
+  const runtimePayload = renderMultiNodePayload(ss);
+  const nodeCount = Math.ceil(opts.gpuCount / 4);
+  const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
 
   if (opts.isInteractive) {
     // Interactive direct access relies on your local JS script executing the parent allocation:
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
-    exec > >(tee -a "${opts.workDir}/${opts.jobName}.slurm.log") 2>&1
+    exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
     ${runtimePayload}
     echo "Submitted interactive job $VLLM_PID"
     `;
@@ -495,13 +417,13 @@ function renderMultiNodeScript(opts: InferenceScriptOptions): string {
     // Traditional SBATCH batch script generation
     return `#!/bin/bash
 #SBATCH --job-name=${opts.jobName}
-#SBATCH --nodes=${opts.nodeCount}
+#SBATCH --nodes=${nodeCount}
 #SBATCH --gpus-per-node=${gpusPerNode}
 #SBATCH --mem=0
 #SBATCH --time=${opts.timeLimit}
 #SBATCH --exclusive
 
-exec > "${opts.workDir}/${opts.jobName}.slurm.log" 2>&1
+exec > "${paths.remoteJobLogFile}" 2>&1
 ${runtimePayload}
 `;
   }
@@ -511,32 +433,21 @@ ${runtimePayload}
  *
  * @param opts
  */
-function renderMultiNodePayload(opts: InferenceScriptOptions): string {
-  const {
-    jobName,
-    model,
-    vllmVersion,
-    hfHome,
-    configFileName,
-    workDir,
-    serverPort,
-    gpuCount,
-    nodeCount,
-    timeLimit,
-    envVars,
-    isInteractive,
-    cacheKey,
-    preCache,
-  } = opts;
-  const gpusPerNode = Math.floor(gpuCount / nodeCount);
-  const venvPath = `$PROJECTDIR/ivllm/${vllmVersion}`;
+function renderMultiNodePayload(ss: SessionState): string {
+  const opts = ss.startArgs!;
+  const paths = ss.paths;
+  const nodeCount = Math.ceil(opts.gpuCount / 4);
+  const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
+
   const rayObjectStoreMemoryGiB = 64;
+  const envVars = opts.configYaml.env;
   const envPreamble =
     envVars.length > 0
       ? envVars.map((e) => `export ${e.key}=\\"${e.value}\\"`).join(' && ') +
         ' && '
       : '';
   const cpusPerTask = '256';
+  const model = opts.configYaml.model;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
 
   //TODO: Need to propagate env variables to multi-node setup
@@ -556,10 +467,10 @@ function renderMultiNodePayload(opts: InferenceScriptOptions): string {
 # Multi-node Ray inference payload
 umask 0002
 
-JOB_DETAILS="${workDir}/job_details.json"
-VLLM_CONFIG="${workDir}/${configFileName}"
+JOB_DETAILS="${paths.remoteJobLockFile}"
+VLLM_CONFIG="${paths.remoteJobVllmConfigFile}"
 VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-SERVER_PORT=${serverPort}
+SERVER_PORT=${opts.serverPort}
 GPUS_PER_NODE=${gpusPerNode}
 HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
 COMPUTE_HOSTNAME=$HEAD_NODE
@@ -570,24 +481,24 @@ RAY_PORT=6378
 # we overwrite with full details now that we have the SLURM context.
 jq -n \\
   --arg status "initialising" \\
-  --arg job_name "${jobName}" \\
+  --arg job_name "${opts.jobName}" \\
   --arg slurm_job_id "$SLURM_JOB_ID" \\
   --arg compute_hostname "$COMPUTE_HOSTNAME" \\
   --arg model "${model}" \\
-  --argjson server_port ${serverPort} \\
+  --argjson server_port ${opts.serverPort} \\
   '{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
   > "$JOB_DETAILS"
 
 module load brics/nccl gcc-native
 
-${renderWorkDirSetup(workDir, cacheKey)}
+${renderWorkDirSetup(paths)}
 ${NVHPC_PREAMBLE}
-source ${venvPath}/bin/activate
-export HF_HOME=${hfHome}
+source ${paths.remoteProjectVllmVenvActivate}
+export HF_HOME=${paths.remoteProjectHfDir}
 export HF_HUB_OFFLINE=1
 ${renderEnvVars(envVars)}
-${renderMultiNodeExitDiagnostics(workDir)}
+${renderMultiNodeExitDiagnostics()}
 ${renderExitTrap(true)}
 RAY_OBJECT_STORE_MEMORY=$((${rayObjectStoreMemoryGiB} * 1024 * 1024 * 1024))
 
@@ -609,7 +520,7 @@ srun --overlap \\
   --cpus-per-task=${cpusPerTask} \\
   --ntasks-per-node=1 \\
   bash -c "
-    source ${venvPath}/bin/activate
+    source ${paths.remoteProjectVllmVenvActivate}
     ${envPreamble}
     VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
       --block \\
@@ -633,9 +544,9 @@ for WORKER in $WORKER_NODES; do
     --cpus-per-task=${cpusPerTask} \\
     --ntasks-per-node=1 \\
     bash -c "
-      source ${venvPath}/bin/activate
+      source ${paths.remoteProjectVllmVenvActivate}
       ${envPreamble}
-      ${renderWorkDirSetup(workDir, cacheKey)}
+      ${renderWorkDirSetup(paths)}
       VLLM_HOST_IP=$WORKER_IP ray start \\
         --block \\
         --address=$HEAD_NODE_IP:$RAY_PORT \\
@@ -652,7 +563,7 @@ srun --overlap \\
   --gpus=$GPUS_PER_NODE \\
   --mem=0 \\
   --ntasks-per-node=1 \\
-  bash -c "source ${venvPath}/bin/activate && ray status"
+  bash -c "source ${paths.remoteProjectVllmVenvActivate} && ray status"
 
 # Start vLLM on the head node via srun --overlap (runs within existing job allocation)
 srun --overlap \\
@@ -662,32 +573,73 @@ srun --overlap \\
   --mem=0 \\
   --ntasks-per-node=1 \\
   bash -c "
-    cd ${workDir}
+    cd ${paths.remoteJobDir}
 
-    source ${venvPath}/bin/activate
+    source ${paths.remoteProjectVllmVenvActivate}
     ${envPreamble}
     VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
       --config $VLLM_CONFIG \\
       --distributed-executor-backend ray \\
       --host 0.0.0.0 \\
-      --port ${serverPort} \\
-      --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${jobName}\"
+      --port ${opts.serverPort} \\
+      --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${opts.jobName}\"
   " \\
   &
 VLLM_PID=$!
 
 echo "APP_PID_MATCH:$VLLM_PID"
 
-${renderHealthCheckAndWait(workDir, serverPort, preCache)}`;
+${renderHealthCheckAndWait(opts.serverPort, opts.preCache)}`;
+}
+
+/**
+ *
+ * @param workDir
+ */
+function renderMultiNodeExitDiagnostics(): string {
+  return `${renderExitDiagnostics()}
+  RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"
+
+  persist_ray_logs() {
+    mkdir -p "$RAY_LOG_ARCHIVE_DIR"
+    for NODE_NAME in $(scontrol show hostnames $SLURM_NODELIST); do
+      RAY_DESTINATION="$RAY_LOG_ARCHIVE_DIR/$NODE_NAME"
+      ARCHIVE_STATUS_FILE="$RAY_DESTINATION/archive-status.txt"
+      mkdir -p "$RAY_DESTINATION"
+      printf "%s\\n" "Starting Ray log archival for $NODE_NAME" > "$ARCHIVE_STATUS_FILE"
+      if srun --overlap \\
+        --nodelist "$NODE_NAME" \\
+        --nodes=1 \\
+        --ntasks-per-node 1 \\
+        --cpus-per-task 1 \\
+        bash -c '
+    RAY_SESSION_DIR=$(readlink -f /local/user/$UID/ray/session_latest 2>/dev/null || true)
+    RAY_DEST_LITERAL="'"\$RAY_DESTINATION"'"
+    mkdir -p "\$RAY_DEST_LITERAL"
+    if [ -n "\$RAY_SESSION_DIR" ] && [ -d "\$RAY_SESSION_DIR/logs" ]; then
+      cp -a "\$RAY_SESSION_DIR/logs/." "\$RAY_DEST_LITERAL/" 2>/dev/null || true
+      printf "%s\\n" "\$RAY_SESSION_DIR" > "\$RAY_DEST_LITERAL/session_dir.txt"
+      else
+        printf "%s\\n" "No Ray logs found at /local/user/$UID/ray/session_latest" > "\$RAY_DEST_LITERAL/missing.txt"
+        fi
+        '; then
+        printf "%s\\n" "Finished Ray log archival for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
+        else
+          printf "%s\\n" "Ray log archival srun failed for $NODE_NAME" >> "$ARCHIVE_STATUS_FILE"
+          fi
+          done
+  }`;
 }
 
 /**
  *
  * @param opts
  */
-export function renderInferenceScript(opts: InferenceScriptOptions): string {
+export function renderInferenceScript(opts: SessionState): string {
+  if (opts.startArgs === undefined)
+    throw new Error('SessionState not correctly set up');
   return (
-    opts.nodeCount > 1
+    opts.startArgs.gpuCount > 4
       ? renderMultiNodeScript(opts)
       : renderSingleNodeScript(opts)
   ).trimStart();

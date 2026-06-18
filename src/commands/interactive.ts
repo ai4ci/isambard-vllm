@@ -1,5 +1,6 @@
-import { loadConfig, assertConfigured } from '../config.ts';
+import { loadCredentials, assertConfigured } from '../config.ts';
 import { makeRemoteOps } from '../remote-ops.ts';
+import { makeLocalOps } from '../local-ops.ts';
 import { parseStartArgs } from '../job.ts';
 import { runInferenceSession } from '../session-helper.ts';
 
@@ -33,9 +34,9 @@ until you type 'exit' or press Ctrl+C. Use 'ivllm start' for background job subm
     return;
   }
 
-  const config = loadConfig();
+  const credentials = loadCredentials();
   try {
-    assertConfigured(config);
+    assertConfigured(credentials);
   } catch (e) {
     console.error('Error:', (e as Error).message);
     process.exit(1);
@@ -43,13 +44,12 @@ until you type 'exit' or press Ctrl+C. Use 'ivllm start' for background job subm
 
   try {
 
-    let startArgs = parseStartArgs(args);
-    const ops = makeRemoteOps(config, startArgs);
-
-
-
+    let startArgs = await parseStartArgs(args, credentials);
+    startArgs.isInteractive = true;
+    const ops = makeRemoteOps(credentials, startArgs.dryRun);
+    const localOps = makeLocalOps(startArgs);
     // Delegate to unified session pipeline (isInteractive: true → uses srun)
-    await runInferenceSession(config, startArgs, true, ops);
+    await runInferenceSession(startArgs, ops, localOps);
   } catch (e) {
     console.error('Error:', (e as Error).message);
     console.log(help);

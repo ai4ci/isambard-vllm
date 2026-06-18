@@ -1,6 +1,9 @@
-import { runRemote, streamSrun } from './ssh.ts';
-import type { InferenceScriptOptions, Config, SessionState, MonitorRuntimeOpts, RemoteMonitor } from './types.ts';
-import type { StartArgs } from "./types";
+import type {
+  SessionState,
+  RemoteMonitor,
+  RemoteOps,
+  ProcessState,
+} from './types.ts';
 
 export type JobState = 'running' | 'completed' | 'failed';
 export type SlurmQueueState = { state: string; reason: string };
@@ -61,17 +64,13 @@ export function parseJobState(sacctOutput: string): JobState | null {
  * @param remoteScriptPath
  */
 export async function submitJob(
-  config: Config,
   remoteScriptPath: string,
-  sessionState: SessionState,
-  startArgs: StartArgs,
-  opts: MonitorRuntimeOpts,
-  monitor: RemoteMonitor,
+  sessionState: ProcessState,
+  monitor?: RemoteMonitor,
 ): Promise<void> {
-  const { stdout, exitCode } = await runRemote(
-    config,
+  const ops = sessionState.ops;
+  const { stdout, exitCode } = await ops.runRemote(
     `sbatch ${remoteScriptPath}`,
-    { env: [], silent: true },
   );
   if (exitCode !== 0)
     throw new Error(`sbatch failed (exit ${exitCode}): ${stdout}`);
@@ -83,8 +82,9 @@ export async function submitJob(
   console.log(`✓ SLURM job submitted: ${jobId}`);
   sessionState.slurmJobId = jobId;
 
-  // Sbatch returns immediately, so block/await monitorSession here
-  await monitor.start(sessionState, startArgs, opts);
+  // Sbatch returns immediately, so no process to manage
+  // monitor may detach or keep alive.
+  if (monitor) await monitor.start(sessionState);
 }
 
 /**
@@ -96,17 +96,16 @@ export async function submitJob(
  * @param remoteScriptPath
  */
 export async function runInteractive(
-  config: Config,
-  options: InferenceScriptOptions,
+  ops: RemoteOps,
   remoteScriptPath: string,
   sessionState: SessionState,
-  startArgs: StartArgs,
-  opts: MonitorRuntimeOpts,
   monitor: RemoteMonitor,
 ): Promise<void> {
+  const options = sessionState.startArgs!;
+  const nodeCount = Math.ceil(options.gpuCount / 4);
   // Calculate basic metrics
-  const gpusPerNode = Math.floor(options.gpuCount / options.nodeCount);
-  const isFullOrMultiNode = options.nodeCount > 1 || options.gpuCount === 4;
+  const gpusPerNode = Math.ceil(options.gpuCount / nodeCount);
+  const isFullOrMultiNode = nodeCount > 1 || options.gpuCount === 4;
 
   // 1. Calculate --mem
   // Use '0' for full/multi node, otherwise scale linearly (115GB usable per GPU, one
@@ -117,53 +116,21 @@ export async function runInteractive(
   // Each Grace Hopper superchip has 72 physical cores + 1 H100 GPU. We use 64
   // cores per GPU for fractional nodes (leaving ~8 for model-loading/IO).
   // Full and multi-node get all 256 threads (4 × 64) since the node is exclusive.
-  const cpusPerTask = isFullOrMultiNode ? '256' : `${options.gpuCount * 64}`;
+  // const cpusPerTask = isFullOrMultiNode ? '256' : `${options.gpuCount * 64}`;
 
   // 3. Add --exclusive if we are claiming the entire node or multiple nodes
   const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
 
-  // Assemble the final command
-  // const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-task=${cpusPerTask} --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
-
-  const cmd = `srun --nodes=${options.nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-gpu=64 --cpu-bind=cores --ntasks-per-node=1 --partition=interactive --reservation=interactive --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+  const cmd = `srun --nodes=${nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-gpu=64 --cpu-bind=cores --ntasks-per-node=1 --partition=interactive --reservation=interactive --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
 
   console.log(`Executing: ${cmd}`);
 
-  try {
-    const { exitCode } = await streamSrun(config, cmd, {
-      env: [],
-      silent: false
-    });
-  } catch (err) {
-    // srun exits non-zero for any terminal event: OOM kill (137), Ctrl+C (255),
-    // resource errors (1), etc. In all cases the job is already dead and the
-    // shutdown handler will scancel (harmless if already done) and clean up.
-    // Treat as graceful shutdown rather than crashing with an unhandled error.
-    const msg = (err as Error).message ?? '';
-    console.log(`\n${msg}`);
+  sessionState.process = ops.streamSrun(cmd, sessionState, {
+    env: [],
+    silent: false,
+  });
+  monitor.start(sessionState);
 
-    // Graceful cleanup for any srun termination — mirrors shutdown() logic
-    // without importing it (would risk circular dependency).
-    if (!sessionState.shuttingDown) {
-      sessionState.shuttingDown = true;
-      if (sessionState.heartbeatTimer)
-        clearInterval(sessionState.heartbeatTimer);
-      if (sessionState.slurmJobId) {
-        process.stdout.write('  Cancelling SLURM job...');
-        void sessionState.ops
-          .runRemote(`scancel ${sessionState.slurmJobId}`, { env: [], silent: true })
-          .catch(() => {});
-        console.log(' done');
-      }
-      process.stdout.write('  Removing lockfile...');
-      void sessionState.ops
-        .runRemote(`rm -f ${sessionState.remoteJobDetails}`, { env: [], silent: true })
-        .catch(() => {});
-      console.log(' done');
-      console.log('✓ Session ended');
-    }
-    process.exit(1);
-  }
 }
 
 /**
@@ -172,11 +139,10 @@ export async function runInteractive(
  * @param jobId
  */
 export async function pollJobStatus(
-  config: Config,
+  ops: RemoteOps,
   jobId: string,
 ): Promise<JobState> {
-  const { stdout } = await runRemote(
-    config,
+  const { stdout } = await ops.runRemote(
     `sacct -j ${jobId} --format=State --noheader -X`,
     { env: [], silent: true },
   );
@@ -189,11 +155,12 @@ export async function pollJobStatus(
  * @param logPath
  */
 export async function getJobLog(
-  config: Config,
+  ops: RemoteOps,
   logPath: string,
 ): Promise<string> {
-  const { stdout } = await runRemote(config, `cat ${logPath}`, {
-    env: [], silent: true,
+  const { stdout } = await ops.runRemote(`cat ${logPath}`, {
+    env: [],
+    silent: true,
   });
   return stdout;
 }
@@ -219,11 +186,10 @@ export function parseSlurmQueueState(
  * @param jobId
  */
 export async function getSlurmQueueState(
-  config: Config,
+  ops: RemoteOps,
   jobId: string,
 ): Promise<SlurmQueueState | null> {
-  const { stdout } = await runRemote(
-    config,
+  const { stdout } = await ops.runRemote(
     `squeue -j ${jobId} --format="%T %R" --noheader 2>/dev/null`,
     { env: [], silent: true },
   );

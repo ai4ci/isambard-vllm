@@ -45,10 +45,10 @@ pipeline-parallel-size: 1
 `);
     const entries = listJobConfigs().filter((e) => e.jobName.startsWith("ivllm-test-"));
     expect(entries.length).toBe(1);
-    expect(entries[0].jobName).toBe("ivllm-test-single");
-    expect(entries[0].model).toBe("Qwen/Qwen2.5-0.5B-Instruct");
-    expect(entries[0].tensorParallelSize).toBe(4);
-    expect(entries[0].pipelineParallelSize).toBe(1);
+    expect(entries[0]!.jobName).toBe("ivllm-test-single");
+    expect(entries[0]!.model).toBe("Qwen/Qwen2.5-0.5B-Instruct");
+    expect(entries[0]!.tensorParallelSize).toBe(4);
+    expect(entries[0]!.pipelineParallelSize).toBe(1);
   });
 
   it("lists multiple configs sorted alphabetically", () => {
@@ -56,16 +56,16 @@ pipeline-parallel-size: 1
     writeTestConfig("ivllm-test-alpha", "model: org/alpha\n");
     const entries = listJobConfigs().filter((e) => e.jobName.startsWith("ivllm-test-"));
     expect(entries.length).toBe(2);
-    expect(entries[0].jobName).toBe("ivllm-test-alpha");
-    expect(entries[1].jobName).toBe("ivllm-test-zulu");
+    expect(entries[0]!.jobName).toBe("ivllm-test-alpha");
+    expect(entries[1]!.jobName).toBe("ivllm-test-zulu");
   });
 
   it("handles malformed config gracefully", () => {
     writeTestConfig("ivllm-test-broken", "not: valid: yaml: [");
     const entries = listJobConfigs().filter((e) => e.jobName.startsWith("ivllm-test-"));
     expect(entries.length).toBe(1);
-    expect(entries[0].jobName).toBe("ivllm-test-broken");
-    expect(entries[0].model).toBeUndefined();
+    expect(entries[0]!.jobName).toBe("ivllm-test-broken");
+    expect(entries[0]!.model).toBeUndefined();
   });
 
   it("ignores non-yaml files in the config directory", () => {
@@ -75,7 +75,7 @@ pipeline-parallel-size: 1
     writeTestConfig("ivllm-test-valid", "model: org/model\n");
     const entries = listJobConfigs().filter((e) => e.jobName.startsWith("ivllm-test-"));
     expect(entries.length).toBe(1);
-    expect(entries[0].jobName).toBe("ivllm-test-valid");
+    expect(entries[0]!.jobName).toBe("ivllm-test-valid");
     // Cleanup non-yaml test files
     rmSync(join(JOB_CONFIG_DIR, "ivllm-test-config.json"));
     rmSync(join(JOB_CONFIG_DIR, "ivllm-test-readme.txt"));

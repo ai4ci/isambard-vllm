@@ -81,7 +81,7 @@ describe("generateOpencodeEnv", () => {
 
   it("encodes the same config shape used for manual snippets", () => {
     const env = generateOpencodeEnv({ model: "test/model", localPort: 8080, toolCall: true });
-    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
     expect(parsed.provider["isambard-vllm"].options.baseURL).toBe("http://localhost:8080/v1");
     expect(parsed.provider["isambard-vllm"].models["test/model"].tool_call).toBe(true);
   });
@@ -132,7 +132,7 @@ describe("generateAssistantEnv", () => {
       localPort: 11434,
       endpointHost: "host.docker.internal",
     });
-    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    const parsed = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
     expect(parsed.provider["isambard-vllm"].options.baseURL).toBe("http://host.docker.internal:11434/v1");
   });
 
@@ -261,30 +261,30 @@ describe("buildAssistantMenuOptions", () => {
   it("includes both direct and scoder options when scoder available", () => {
     const options = buildAssistantMenuOptions(["opencode", "claude"], true);
     expect(options.length).toBe(4); // 2 assistants × 2 launch modes
-    expect(options[0].label).toBe("opencode");
-    expect(options[0].useScoder).toBe(false);
-    expect(options[1].label).toBe("scoder opencode");
-    expect(options[1].useScoder).toBe(true);
-    expect(options[2].label).toBe("claude");
-    expect(options[3].label).toBe("scoder claude");
+    expect(options[0]!.label).toBe("opencode");
+    expect(options[0]!.useScoder).toBe(false);
+    expect(options[1]!.label).toBe("scoder opencode");
+    expect(options[1]!.useScoder).toBe(true);
+    expect(options[2]!.label).toBe("claude");
+    expect(options[3]!.label).toBe("scoder claude");
   });
 
   it("includes only direct options when scoder not available", () => {
     const options = buildAssistantMenuOptions(["opencode", "claude"], false);
     expect(options.length).toBe(2);
-    expect(options[0].label).toBe("opencode");
-    expect(options[0].useScoder).toBe(false);
-    expect(options[1].label).toBe("claude");
-    expect(options[1].useScoder).toBe(false);
+    expect(options[0]!.label).toBe("opencode");
+    expect(options[0]!.useScoder).toBe(false);
+    expect(options[1]!.label).toBe("claude");
+    expect(options[1]!.useScoder).toBe(false);
   });
 
   it("numbers menu options sequentially", () => {
     const options = buildAssistantMenuOptions(["opencode", "claude", "code"], true);
     expect(options.length).toBe(6);
-    expect(options[0].id).toBe(1);
-    expect(options[1].id).toBe(2);
-    expect(options[2].id).toBe(3);
-    expect(options[5].id).toBe(6);
+    expect(options[0]!.id).toBe(1);
+    expect(options[1]!.id).toBe(2);
+    expect(options[2]!.id).toBe(3);
+    expect(options[5]!.id).toBe(6);
   });
 
   it("handles empty assistant list", () => {

@@ -1,4 +1,4 @@
-import { loadConfig, saveConfig } from '../config.ts';
+import { loadCredentials, saveConfig } from '../config.ts';
 
 /**
  *
@@ -26,7 +26,7 @@ export async function cmdConfig(args: string[]): Promise<void> {
         return;
     }
 
-    const config = loadConfig();
+    const config = loadCredentials();
     const flags: Record<string, string> = {};
     for (let i = 0; i < args.length - 1; i++) {
         if (args[i]?.startsWith('--')) flags[args[i]!.slice(2)] = args[i + 1] ?? '';

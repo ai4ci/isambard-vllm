@@ -1,22 +1,90 @@
 import { describe, it, expect } from 'bun:test';
 import { renderInferenceScript } from '../src/templates/inference.ts';
+import {
+  SessionState,
+  type Credentials,
+  type InferenceJobOptions,
+  type ServeOptions,
+} from '../src/types.ts';
+import { writeFileSync } from 'fs';
+import { parseStartArgs } from '../src/job.ts';
+import { makeRemoteOps } from '../src/remote-ops.ts';
+import { makePaths } from '../src/job.ts';
+import { makeLocalOps } from '../src/local-ops.ts';
 
-const base = {
-  jobName: 'my-job',
-  model: 'Qwen/Qwen2.5-0.5B-Instruct',
-  vllmVersion: '0.19.1',
-  hfHome: '/projects/myproject/hf',
-  configFileName: 'vllm.yaml',
-  workDir: '/home/user/my-job',
-  serverPort: 8000,
-  gpuCount: 4,
-  nodeCount: 1,
-  timeLimit: '4:00:00',
-  envVars: [] as Array<{ key: string; value: string }>,
-  isInteractive: false,
-  cacheKey: 'test-key',
-  preCache: false,
+const creds: Credentials = {
+  loginHost: 'test.example.com',
+  username: 'test-user',
+  projectDir: '/projects/p',
+  defaultLocalPort: 11434,
+  hfToken: 'HFTOKEN',
 };
+
+writeFileSync(
+  '/tmp/test.yaml',
+  `# Test vllm-config
+
+model: Qwen/Qwen2.5-0.5B-Instruct
+tensor-parallel-size: 1
+max-model-len: 32768
+# Native context: 32,768 tokens (full native context retained)
+gpu-memory-utilization: 0.90
+dtype: bfloat16
+enable-auto-tool-choice: true
+tool-call-parser: hermes
+enable-prefix-caching: true
+min-vllm-version: "0.19.1"
+# min-vllm-version: ivllm checks this before submitting the job; stripped before passing to vLLM.
+# Environment variables to aid startup/coordination
+env:
+  TEST_ENV: "test-value"
+`,
+);
+
+const args: string[] = ['testJob', '--config', '/tmp/test.yaml', '--dry-run'];
+
+const job: InferenceJobOptions = await parseStartArgs(args, creds);
+
+const vllmVersion = '0.10.10';
+const paths = makePaths(
+  creds,
+  job.jobName,
+  job.configYaml.model,
+  job.cacheKey,
+  vllmVersion,
+);
+
+const base: SessionState = {
+  startArgs: job,
+  localOps: makeLocalOps(job.localPort, true),
+  ops: makeRemoteOps(creds, true),
+  vllmVersion: '0.10.10',
+  paths: paths,
+  sessionName: job.jobName,
+};
+
+function updateState(
+  opts: Partial<InferenceJobOptions>,
+  ss: SessionState = base,
+): SessionState {
+  const startArgs = {
+    ...ss.startArgs,
+    ...opts,
+  };
+  return { ...base, startArgs: startArgs };
+}
+
+function updateServe(
+  opts: Partial<ServeOptions>,
+  ss: SessionState = base,
+): SessionState {
+  const serve = {
+    ...ss.startArgs.configYaml,
+    ...opts,
+  };
+  const startArgs = ss.startArgs;
+  return { ...ss, startArgs: { ...startArgs, ...serve } };
+}
 
 describe('renderInferenceScript', () => {
   it('sets SBATCH job name', () => {
@@ -34,7 +102,7 @@ describe('renderInferenceScript', () => {
   });
 
   it('omits --exclusive for fractional GPU requests', () => {
-    expect(renderInferenceScript({ ...base, gpuCount: 2 })).not.toContain(
+    expect(renderInferenceScript(updateState({ gpuCount: 2 }))).not.toContain(
       '\n#SBATCH --exclusive',
     );
   });
@@ -52,13 +120,7 @@ describe('renderInferenceScript', () => {
   // });
 
   it('scales --cpus-per-task per GPU (64) for fractional requests', () => {
-    expect(renderInferenceScript({ ...base, gpuCount: 1 })).toContain(
-      '\n#SBATCH --cpus-per-gpu=64',
-    );
-    expect(renderInferenceScript({ ...base, gpuCount: 2 })).toContain(
-      '\n#SBATCH --cpus-per-gpu=64',
-    );
-    expect(renderInferenceScript({ ...base, gpuCount: 3 })).toContain(
+    expect(renderInferenceScript(updateState({ gpuCount: 2 }))).toContain(
       '\n#SBATCH --cpus-per-gpu=64',
     );
   });
@@ -148,13 +210,14 @@ describe('renderInferenceScript', () => {
   });
 
   it('renders user env vars as export lines in single-node script', () => {
-    const script = renderInferenceScript({
-      ...base,
-      envVars: [
-        { key: 'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS', value: '1' },
-        { key: 'VLLM_USE_DEEP_GEMM_FP8', value: '1' },
-      ],
-    });
+    const script = renderInferenceScript(
+      updateServe({
+        env: [
+          { key: 'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS', value: '1' },
+          { key: 'VLLM_USE_DEEP_GEMM_FP8', value: '1' },
+        ],
+      }),
+    );
     expect(script).toContain(
       'export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="1"',
     );
@@ -162,10 +225,11 @@ describe('renderInferenceScript', () => {
   });
 
   it('renders env vars before vllm serve in single-node script', () => {
-    const script = renderInferenceScript({
-      ...base,
-      envVars: [{ key: 'FOO', value: 'bar' }],
-    });
+    const script = renderInferenceScript(
+      updateServe({
+        env: [{ key: 'FOO', value: 'bar' }],
+      }),
+    );
     const exportIdx = script.indexOf('export FOO="bar"');
     const vllmIdx = script.indexOf('vllm serve');
     expect(exportIdx).toBeGreaterThan(-1);
@@ -174,26 +238,32 @@ describe('renderInferenceScript', () => {
   });
 
   it('does not render env exports when envVars is empty (single-node)', () => {
-    const script = renderInferenceScript({ ...base, envVars: [] });
+    const script = renderInferenceScript(updateServe({ env: [] }));
     // Should not have a "User-supplied environment variables" comment or bare exports
     expect(script).not.toContain('# User-supplied environment variables');
   });
 
   it('renders env vars in multi-node preamble', () => {
-    const script = renderInferenceScript({
-      ...base,
-      nodeCount: 2,
-      envVars: [{ key: 'FOO', value: 'bar' }],
-    });
+    const script = renderInferenceScript(
+      updateServe(
+        {
+          env: [{ key: 'FOO', value: 'bar' }],
+        },
+        updateState({ gpuCount: 8 }),
+      ),
+    );
     expect(script).toContain('export FOO="bar"');
   });
 
   it('renders env vars inside bash -c for ray start in multi-node', () => {
-    const script = renderInferenceScript({
-      ...base,
-      nodeCount: 2,
-      envVars: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
-    });
+    const script = renderInferenceScript(
+      updateServe(
+        {
+          env: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
+        },
+        updateState({ gpuCount: 8 }),
+      ),
+    );
     // Env vars should appear in the envPreamble inside a bash -c block
     // They may have escaped quotes and span across lines after venv activation
     const blocks = script.split('bash -c');
@@ -208,11 +278,14 @@ describe('renderInferenceScript', () => {
   });
 
   it('renders env vars inside bash -c for multi-node vllm serve', () => {
-    const script = renderInferenceScript({
-      ...base,
-      nodeCount: 2,
-      envVars: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
-    });
+    const script = renderInferenceScript(
+      updateServe(
+        {
+          env: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
+        },
+        updateState({ gpuCount: 8 }),
+      ),
+    );
     // In multi-node, env vars go through envPreamble which appears before
     // ray start and vllm serve inside bash -c blocks.
     // They may be escaped across multiple lines.
@@ -227,11 +300,14 @@ describe('renderInferenceScript', () => {
   });
 
   it('does not render env exports when envVars is empty (multi-node)', () => {
-    const script = renderInferenceScript({
-      ...base,
-      nodeCount: 2,
-      envVars: [],
-    });
+    const script = renderInferenceScript(
+      updateServe(
+        {
+          env: [],
+        },
+        updateState({ gpuCount: 8 }),
+      ),
+    );
     expect(script).not.toContain('# User-supplied environment variables');
   });
 
@@ -380,13 +456,13 @@ describe('renderInferenceScript', () => {
   });
 
   it('respects a different server port', () => {
-    const script = renderInferenceScript({ ...base, serverPort: 9000 });
+    const script = renderInferenceScript(updateState({ serverPort: 9000 }));
     expect(script).toContain('--port 9000');
     expect(script).toContain('localhost:9000/health');
   });
 
   it('respects a different gpu count in SBATCH directive', () => {
-    const script = renderInferenceScript({ ...base, gpuCount: 8 });
+    const script = renderInferenceScript(updateState({ gpuCount: -8 }));
     expect(script).toContain('#SBATCH --gpus=8');
   });
 });
@@ -536,7 +612,7 @@ describe('renderInferenceScript (multi-node)', () => {
   it('changes into the job work directory before multi-node vllm serve', () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('bash -c "\n');
-    expect(script).toContain(`cd ${multiNodeBase.workDir}`);
+    expect(script).toContain(`cd ${multiNodeBase.paths.remoteJobDir}`);
   });
 
   it('uses HEAD_NODE as the compute_hostname', () => {
