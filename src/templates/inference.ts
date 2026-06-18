@@ -303,6 +303,7 @@ function renderSingleNodeScript(ss: SessionState): string {
     return `#!/bin/bash
 # Redirect stdout and stderr to both the console and the log file simultaneously
 exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
+echo "=== IVLLM version ${__VERSION__} ==="
 ${runtimePayload}
 echo "Submitted interactive job $VLLM_PID"
     `;
@@ -316,11 +317,13 @@ echo "Submitted interactive job $VLLM_PID"
 #SBATCH --gpus=${opts.gpuCount}
 #SBATCH --mem=${memValue}
 #SBATCH --cpus-per-gpu=64
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpu-bind=cores
 #SBATCH --time=${opts.timeLimit}
 #SBATCH --output=${paths.remoteJobLogFile}
 ${exclusiveFlag}
 
+echo "=== IVLLM version ${__VERSION__} ==="
 ${runtimePayload}
 `;
   }
@@ -414,6 +417,7 @@ function renderMultiNodeScript(ss: SessionState): string {
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
 exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
+echo "=== IVLLM version ${__VERSION__} ==="
 ${runtimePayload}
 echo "Submitted interactive job $VLLM_PID"
 `;
@@ -425,11 +429,13 @@ echo "Submitted interactive job $VLLM_PID"
 #SBATCH --gpus-per-node=${gpusPerNode}
 #SBATCH --mem=0
 #SBATCH --cpus-per-gpu=64
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpu-bind=cores
 #SBATCH --time=${opts.timeLimit}
 #SBATCH --exclusive
 #SBATCH --output=${paths.remoteJobLogFile}
 
+echo "=== IVLLM version ${__VERSION__} ==="
 ${runtimePayload}
 `;
   }
