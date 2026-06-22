@@ -8,7 +8,7 @@ export function renderMockInferenceScript(ss: SessionState): string {
   if (ss.startArgs === undefined)
     throw new Error('Incorrectly setup SessionState.');
   const opts = ss.startArgs;
-  const startupDelaySecs = 5;
+  const startupDelaySecs = opts.startupDelaySecs ?? 5;
 
   return `#!/bin/bash
 #SBATCH --job-name=${opts.jobName}

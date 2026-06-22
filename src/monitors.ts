@@ -33,7 +33,7 @@ export const monitorSession: RemoteMonitor = {
     const opts = sessionState.startArgs!;
     const { model, maxModelLen, enableAutoToolChoice, enableReasoning } =
       opts.configYaml;
-    const jobName = sessionState.startArgs.jobName;
+    // const jobName = sessionState.startArgs.jobName;
 
     console.log("\nMonitoring job status (Ctrl+C or type 'exit' to stop)...\n");
 
@@ -166,7 +166,7 @@ export const monitorSession: RemoteMonitor = {
 
       const heartbeatTimer = setInterval(async () => {
         let alive = false;
-        let tests = 5;
+        let tests = 20;
         while (!alive && tests > 0) {
           alive =
             alive ||
@@ -174,7 +174,7 @@ export const monitorSession: RemoteMonitor = {
           tests -= 1;
           if (!alive) {
             console.warn(`Dropped a heartbeat. (retries: ${tests})`);
-            sleep(200);
+            sleep(5_000);
           }
         }
 

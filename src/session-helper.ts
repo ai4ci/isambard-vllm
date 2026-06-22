@@ -83,32 +83,62 @@ export async function preFlight(
  */
 export async function ensureModelDownloaded(ss: SessionState): Promise<void> {
   const hfHome = ss.paths.remoteProjectHfDir;
+
+  debugger;
+
   const model = ss.startArgs.configYaml.model;
   const cachePath = ss.paths.remoteProjectHfModelDir;
-  const hfToken =
-    ss.startArgs.credentials.hfToken ?? process.env['HF_TOKEN'] ?? '';
+  const hfToken = ss.startArgs.credentials.hfToken ?? process.env['HF_TOKEN'];
+  const hfEnv: EnvVarEntry[] = hfToken
+    ? [
+        { key: 'HF_HOME', value: hfHome },
+        { key: 'HF_TOKEN', value: hfToken },
+      ]
+    : [{ key: 'HF_HOME', value: hfHome }];
+
   const ops = ss.ops;
 
-  if (ss.startArgs.dryRun) {
-    console.log(`[dry-run] HF cache check skipped (would check: ${cachePath})`);
-  } else if (ss.startArgs.mock) {
+  if (ss.startArgs.mock) {
     console.log(`[mock] Model download skipped`);
   } else {
     const { exitCode: cacheCheck } = await ops.runRemote(
       `test -d ${cachePath}`,
       { env: [], silent: true },
     );
-    if (cacheCheck === 0) {
+    if (cacheCheck === 0 && !ss.startArgs.dryRun) {
       console.log(`✓ Model cached at ${cachePath}`);
     } else {
-      console.log(`Downloading model ${model} to ${hfHome} on login node...`);
+      console.log(`Downloading model ${model} to ${hfHome} on compute node...`);
       await ops.runRemote(
         `mkdir -p ${hfHome} && chmod g+w ${hfHome} 2>/dev/null || true`,
         { env: [], silent: true },
       );
 
-      const downloadCmd = `umask 0002 && source ${ss.paths.remoteProjectVllmVenvActivate} && HF_HOME=${hfHome}${hfToken ? ` HF_TOKEN=${hfToken}` : ''} hf download ${model}`;
-      const { exitCode: dlCode } = await ops.runRemote(downloadCmd);
+      console.log(`activate venv: ${ss.paths.remoteProjectVllmVenvActivate}`);
+      await ops.runRemote(
+        `umask 0002 && source ${ss.paths.remoteProjectVllmVenvActivate}`,
+      );
+
+      // srun on the interactve partition to download model. Seems to be blocked on login nodes.
+      const remoteSrun = `srun \\
+--job-name="${ss.startArgs.jobName}_download" \\
+--nodes=1 \\
+--ntasks-per-node=1 \\
+--cpus-per-task=4 \\
+--gpus-per-node=0 \\
+--partition=interactive \\
+--reservation=interactive \\
+--interactive \\
+--mem=16G \\
+--time=00:30:00 \\
+--export=ALL \\
+hf download "${model}"
+`;
+      const { exitCode: dlCode } = await ops.runRemote(remoteSrun, {
+        env: hfEnv,
+        silent: false,
+      });
+
       if (dlCode !== 0) {
         console.error('Error: Model download failed.');
         process.exit(1);
@@ -237,7 +267,7 @@ export async function shutdown(
 
 /**
  *
- * @param state
+ * @param processState
  * @param reason
  * @param exitCode
  */
@@ -260,13 +290,20 @@ export async function shutdown(
 
   if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
 
+  let cancelString: string;
   if (state.slurmJobId) {
-    process.stdout.write('  Cancelling SLURM job...');
-    await state.ops
-      .runRemote(`scancel ${state.slurmJobId}`, { env: [], silent: true })
-      .catch(() => {});
-    console.log(' done');
+    cancelString = state.slurmJobId;
+  } else {
+    cancelString = `--name ${state.sessionName}`;
   }
+  process.stdout.write(`  Cancelling SLURM job (${cancelString})...`);
+  await state.ops
+    .runRemote(`scancel ${cancelString}}`, {
+      env: [],
+      silent: true,
+    })
+    .catch(() => {});
+  console.log(' done');
 
   if (state.tunnel) {
     process.stdout.write('  Closing SSH tunnel...');
@@ -277,16 +314,39 @@ export async function shutdown(
   if (state instanceof SessionState) {
     process.stdout.write('  Removing lockfile...');
     await state.ops
-      .runRemote(`rm -f ${state.paths.remoteJobLogFile}`)
+      .runRemote(`rm -f "${state.paths.remoteJobLockFile}"`)
       .catch(() => {});
     console.log(' done');
   }
 
-  console.log('✓ Session ended');
+  console.log('✓ Session shut down');
+
+  // Best-effort: terminate any local orphaned tunnel for the default port
+  // const localPort = state.config.defaultLocalPort ?? 11434;
+  // await cleanupLocalTunnel(localPort);
+
   process.exit(exitCode);
 }
 
-// ── Utility functions ─────────────────────────────────────────────────────
+// ── Shutdown helper ─────────────────────────────────────────────────────
+
+/**
+ * Attempt to terminate any local SSH forward-tunnel processes for the given port.
+ * @param localPort
+ */
+// function cleanupLocalTunnel(localPort: number): Promise<void> {
+//   return new Promise((resolve) => {
+//     const pattern = `ssh.*-L.*${localPort}:`;
+//     const proc = spawn('pkill', ['-f', pattern], { stdio: 'ignore' });
+//     proc.on('close', (code) => {
+//       if (code === 0)
+//         console.log(`  Terminated local SSH tunnel on port ${localPort}`);
+//       // exit code 1 means no process matched — that's fine
+//       resolve();
+//     });
+//     proc.on('error', () => resolve()); // pkill not available — ignore
+//   });
+// }
 
 /**
  *
@@ -341,14 +401,14 @@ export async function runInferenceSession(
   );
 
   // ── 3. Build session state ────────────────────────────────────────────
-  const sessionState: SessionState = {
+  const sessionState = new SessionState({
     sessionName: jobName,
     ops,
     localOps,
     paths: paths,
     startArgs,
     vllmVersion,
-  };
+  });
 
   // ── 4. Signal handlers ────────────────────────────────────────────────
   process.on('SIGINT', () => shutdown(sessionState, 'interrupted (Ctrl+C)'));
@@ -442,7 +502,7 @@ export async function runInferenceSession(
       await submitJob(
         remoteScriptPath,
         sessionState,
-        sessionState.startArgs!.preCache ? detachSession : monitorSession,
+        sessionState.startArgs.preCache ? detachSession : monitorSession,
       );
     }
   } finally {

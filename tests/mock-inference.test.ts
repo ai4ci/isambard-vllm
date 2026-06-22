@@ -2,11 +2,17 @@ import { describe, it, expect } from "bun:test";
 import { renderMockInferenceScript } from "../src/templates/mock-inference.ts";
 
 const base = {
-  jobName: "mock-job",
-  model: "Qwen/Qwen2.5-0.5B-Instruct",
-  workDir: "/home/user/mock-job",
-  serverPort: 8000,
-  timeLimit: "1:00:00",
+  startArgs: {
+    jobName: "mock-job",
+    serverPort: 8000,
+    timeLimit: "1:00:00",
+    configYaml: {
+      model: "Qwen/Qwen2.5-0.5B-Instruct",
+    },
+  },
+  paths: {
+    remoteJobDir: "/home/user/mock-job",
+  },
 };
 
 describe("renderMockInferenceScript", () => {
@@ -73,7 +79,10 @@ describe("renderMockInferenceScript", () => {
   });
 
   it("respects a custom startupDelaySecs", () => {
-    const script = renderMockInferenceScript({ ...base, startupDelaySecs: 30 });
+    const script = renderMockInferenceScript({ 
+      ...base, 
+      startArgs: { ...base.startArgs, startupDelaySecs: 30 } 
+    });
     expect(script).toMatch(/sleep\s+30/);
   });
 
@@ -90,7 +99,10 @@ describe("renderMockInferenceScript", () => {
   });
 
   it("respects a different server port", () => {
-    const script = renderMockInferenceScript({ ...base, serverPort: 9000 });
+    const script = renderMockInferenceScript({ 
+      ...base, 
+      startArgs: { ...base.startArgs, serverPort: 9000 } 
+    });
     expect(script).toContain("9000");
     expect(script).not.toContain("8000");
   });

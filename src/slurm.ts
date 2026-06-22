@@ -121,7 +121,8 @@ export async function runInteractive(
   // 3. Add --exclusive if we are claiming the entire node or multiple nodes
   const exclusiveFlag = isFullOrMultiNode ? '--exclusive ' : '';
 
-  const cmd = `srun --nodes=${nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-gpu=64 --cpu-bind=cores --ntasks-per-node=1 --partition=interactive --reservation=interactive --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
+  //TODO: consider interactive and --export=ALL?
+  const cmd = `srun --job-name=${options.jobName} --nodes=${nodeCount} --gpus-per-node=${gpusPerNode} --cpus-per-gpu=64 --cpu-bind=cores --ntasks-per-node=1 --partition=interactive --reservation=interactive --mem=${mem} ${exclusiveFlag}--time=${options.timeLimit} bash ${remoteScriptPath}`;
 
   console.log(`Executing: ${cmd}`);
 
@@ -130,7 +131,6 @@ export async function runInteractive(
     silent: false,
   });
   monitor.start(sessionState);
-
 }
 
 /**

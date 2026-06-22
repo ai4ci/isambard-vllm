@@ -89,7 +89,7 @@ export class ProcessState {
   shuttingDown?: boolean;
 
   constructor(init?: Partial<ProcessState>) {
-    Object.assign(this, init);
+    if (init) Object.assign(this, init);
   }
 }
 
@@ -99,8 +99,8 @@ export class SessionState extends ProcessState {
   startArgs!: InferenceJobOptions;
 
   constructor(init?: Partial<SessionState>) {
-    super(init);
-    Object.assign(this, init);
+    super();
+    if (init) Object.assign(this, init);
   }
 }
 
@@ -156,7 +156,7 @@ export interface RemoteOps {
   ): Promise<RunRemoteResult>;
   streamSrun(
     command: string,
-    sessionState: SessionState,
+    sessionState: ProcessState,
     options?: RunRemoteOptions,
   ): CloseableEventEmitter;
   copyFile(localPath: string, remotePath: string): Promise<void>;

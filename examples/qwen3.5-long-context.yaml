@@ -25,12 +25,14 @@
 
 model: Qwen/Qwen3.5-35B-A3B
 tensor-parallel-size: 4
-max-model-len: 262144
+pipeline-parallel-size: 2
 # Native context ceiling; the hybrid architecture keeps KV cache tiny (~2.5 GB)
 # even at full 262K. Reduce only if you encounter OOM on activations during
 # very large batch prefills.
 gpu-memory-utilization: 0.90
 dtype: bfloat16
+quantization: fp8
+safetensors-load-strategy: eager
 
 # MoE expert parallelism: routes MoE layers via all-to-all (more efficient than
 # tensor-parallel sharding of expert weights) when tp >= 2.
@@ -49,3 +51,13 @@ enable-prefix-caching: true
 min-vllm-version: "0.19.1"
 # min-vllm-version: Qwen3.5 support requires vLLM >= 0.19.1 with the qwen3_coder parser.
 # ivllm checks this before submitting; stripped before passing to vLLM.
+
+# Mixture of experts models need to be forced to use triton
+gdn-prefill-backend: "triton"
+moe-backend: triton             # Forces vLLM to use pre-compiled Triton MoE kernels
+attention-config: '{"backend":"TRITON_ATTN"}'
+enable-flashinfer-autotune: false  # Explicitly kills the profiling loop
+
+# Rope config from https://huggingface.co/Qwen/Qwen3.6-27B
+hf-overrides: '{"text_config": {"rope_parameters": {"mrope_interleaved": true, "mrope_section": [11, 11, 10], "rope_type": "yarn", "rope_theta": 10000000, "partial_rotary_factor": 0.25, "factor": 4.0, "original_max_position_embeddings": 262144}}}'
+max-model-len: 1010000

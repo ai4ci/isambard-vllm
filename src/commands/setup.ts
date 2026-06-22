@@ -10,7 +10,7 @@ import {
   getSlurmQueueState,
 } from '../slurm.ts';
 import { checkSSH, makeRemoteOps } from '../remote-ops.ts';
-import type { ProcessState } from '../types.ts';
+import { ProcessState } from '../types.ts';
 import { detachSession } from '../monitors.ts';
 import { makeSimplePaths } from '../job.ts';
 import { makeLocalOps } from '../local-ops.ts';
@@ -69,12 +69,12 @@ Examples:
 
   // ── 3. Build session state ────────────────────────────────────────────
 
-  const sessionState: ProcessState = {
+  const sessionState = new ProcessState({
     sessionName: 'vllm install',
     vllmVersion,
     ops,
     paths,
-  };
+  });
 
   // Pre-flight: check SSH connectivity
   ops.checkSSH();

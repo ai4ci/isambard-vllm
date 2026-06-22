@@ -1,8 +1,9 @@
-import { spawn } from 'child_process';
 import { loadCredentials, assertConfigured } from '../config.ts';
+import { SessionState } from '../types.ts';
+import { shutdown } from '../session-helper.ts';
 
-import { parseJobDetails } from '../job.ts';
-import { makeRemoteOps } from "../remote-ops.ts";
+import { makePaths, parseJobDetails } from '../job.ts';
+import { makeRemoteOps } from '../remote-ops.ts';
 
 export interface StopArgs {
   jobName: string;
@@ -57,65 +58,31 @@ Examples:
     process.exit(1);
   }
 
-  const { jobName } = stopArgs;
-  const remoteJobDetails = `~/${jobName}/job_details.json`;
-
-  console.log(`=== ivllm stop: ${jobName} ===`);
+  // construct a process state from the jobName:
+  let state = new SessionState({
+    sessionName: stopArgs.jobName,
+    ops: ops,
+    paths: makePaths(
+      config,
+      stopArgs.jobName,
+      'unknown', //model
+      'unknown', //cache
+      'unknown', //vllmVersion
+    ),
+  });
 
   // Read job_details.json to get SLURM job ID
+  // This isn't really needed as if missing the job will be killed by name
+
   const { stdout } = await ops.runRemote(
-    `cat ${remoteJobDetails} 2>/dev/null`
+    `cat ${state.paths.remoteJobLockFile} 2>/dev/null`,
   );
   const details = parseJobDetails(stdout);
+  if (details?.slurm_job_id) state.slurmJobId = details?.slurm_job_id;
 
-  if (!details) {
-    console.error(
-      `No job '${jobName}' found (no job_details.json). Nothing to clean up.`,
-    );
-    process.exit(1);
-  }
+  console.log(`=== ivllm stop: ${state.sessionName} ===`);
 
-  // Cancel SLURM job if we have an ID
-  if (details.slurm_job_id) {
-    process.stdout.write(`  Cancelling SLURM job ${details.slurm_job_id}...`);
-    const { exitCode } = await ops.runRemote(
-      `scancel ${details.slurm_job_id}`,
-    );
-    console.log(
-      exitCode === 0
-        ? ' done'
-        : ' (scancel returned non-zero, job may have already ended)',
-    );
-  } else {
-    console.log('  No SLURM job ID in job_details — skipping scancel');
-  }
+  shutdown(state, 'User requested shutdown', 0);
 
-  // Remove lockfile on HPC
-  process.stdout.write('  Removing lockfile on HPC...');
-  await ops.runRemote(`rm -f ${remoteJobDetails}`);
-  console.log(' done');
-
-  // Best-effort: terminate any local orphaned tunnel for the default port
-  const localPort = config.defaultLocalPort ?? 11434;
-  await cleanupLocalTunnel(localPort);
-
-  console.log(`✓ Job '${jobName}' stopped and cleaned up.`);
-}
-
-/**
- * Attempt to terminate any local SSH forward-tunnel processes for the given port.
- * @param localPort
- */
-function cleanupLocalTunnel(localPort: number): Promise<void> {
-  return new Promise((resolve) => {
-    const pattern = `ssh.*-L.*${localPort}:`;
-    const proc = spawn('pkill', ['-f', pattern], { stdio: 'ignore' });
-    proc.on('close', (code) => {
-      if (code === 0)
-        console.log(`  Terminated local SSH tunnel on port ${localPort}`);
-      // exit code 1 means no process matched — that's fine
-      resolve();
-    });
-    proc.on('error', () => resolve()); // pkill not available — ignore
-  });
+  console.log(`✓ Job '${stopArgs.jobName}' stopped and cleaned up.`);
 }

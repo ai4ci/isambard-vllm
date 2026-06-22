@@ -54,14 +54,36 @@ const paths = makePaths(
   vllmVersion,
 );
 
-const base: SessionState = {
+const base = new SessionState({
   startArgs: job,
   localOps: makeLocalOps(job.localPort, true),
   ops: makeRemoteOps(creds, true),
   vllmVersion: '0.10.10',
   paths: paths,
   sessionName: job.jobName,
-};
+});
+
+// function updateState(
+//   opts: Partial<InferenceJobOptions>,
+//   ss: SessionState = base,
+// ): SessionState {
+//   ss.startArgs = {
+//     ...ss.startArgs,
+//     ...opts,
+//   };
+//   return ss;
+// }
+//
+// function updateServe(
+//   opts: Partial<ServeOptions>,
+//   ss: SessionState = base,
+// ): SessionState {
+//   ss.startArgs.configYaml = {
+//     ...ss.startArgs.configYaml,
+//     ...opts,
+//   };
+//   return ss;
+// }
 
 function updateState(
   opts: Partial<InferenceJobOptions>,

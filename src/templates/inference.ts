@@ -1,5 +1,5 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
-import type { EnvVarEntry, SessionState, Paths } from '../../src/types.ts';
+import type { SessionState, Paths } from '../../src/types.ts';
 
 function renderNVHPCPreamble(ss: SessionState) {
   return `
@@ -81,6 +81,24 @@ if [ -d "${paths.remoteProjectVllmPluginsDir}" ]; then
   ln -sfn "${paths.remoteProjectVllmPluginsDir}" "${paths.remoteJobVllmPluginsDir}"
 fi
 
+# Detect and handle missing LOCALDIR in interactive srun allocations
+if [ -z "\${LOCALDIR:-}" ]; then
+  # Check if the native platform runtime directory exists for your UID
+  if [ -d "/run/user/$UID" ]; then
+    export LOCALDIR="/run/user/$UID"
+  elif [ -d "/local/user/$UID" ]; then
+    export LOCALDIR="/local/user/$UID"
+  else
+    # Ultimate cluster fallback to avoid crashing or breaking /tmp policies
+    export LOCALDIR="$PROJECTDIR/scratch/$USER/tmp/interactive_\${SLURM_JOB_ID:-direct}"
+    mkdir -p "$LOCALDIR"
+    chmod 700 "$LOCALDIR"
+  fi
+fi
+
+echo "=== Interactive Deployment Context Resolved ==="
+echo "LOCALDIR is bound to: $LOCALDIR"
+
 # 1. Identify possible compiler cache location
 TAR_FILE="${paths.remoteProjectJobCacheFile}"
 
@@ -91,9 +109,10 @@ mkdir -p "$HOME"
 # 3. Try to restore cached JIT compilations
 if [ -f "$TAR_FILE" ]; then
   echo "Restoring JIT cache from shared storage..."
-  tar xzf "$TAR_FILE" -C "$LOCALDIR" 2>/dev/null && echo "Cache restored" \
-  || echo "Cache corrupt — recompiling"
+  # --no-same-permissions (or -m) forces tar to map files to the current user's umask
+  tar xzf "$TAR_FILE" --no-same-permissions -C "$LOCALDIR" 2>/dev/null && echo "Cache restored" || echo "Cache corrupt — recompiling"
 fi
+
 
 export FLASHINFER_JIT_CACHE_DIR="$HOME/.cache/flashinfer"
 export DG_JIT_CACHE_DIR="$HOME/.deep_gemm"
@@ -256,6 +275,8 @@ jq '.status = "running"' "$JOB_DETAILS" > "$JOB_DETAILS.tmp" && mv "$JOB_DETAILS
 # Health check passed → all JIT compilations complete.
 # Archive the tmpfs $HOME to shared storage for next cold start.
 CACHE_FILE="${ss.paths.remoteProjectJobCacheFile}"
+mkdir -p "${ss.paths.remoteProjectJobCacheDir}"
+chmod g+w "${ss.paths.remoteProjectJobCacheDir}" 2>/dev/null || true
 
 (
   # Stop the RAM monitor first — avoids noisy output during tar
@@ -268,9 +289,17 @@ CACHE_FILE="${ss.paths.remoteProjectJobCacheFile}"
   # Kill any lingering compilation processes so the tar is clean
   sleep 2
 
-  tar czf "\${CACHE_FILE}.tmp" -C "$LOCALDIR" user_home 2>/dev/null && \\
-  mv "\${CACHE_FILE}.tmp" "\$CACHE_FILE" && \\
-  echo "[cache-save] Done: $(du -sh "\$CACHE_FILE" | cut -f1)" || \\
+  # 1. Force permissions inside the directory to be group-accessible before archiving
+  chmod -R g+rwX "$LOCALDIR/user_home" 2>/dev/null || true
+
+  # 2. Tar the cache while wiping out individual user metadata
+  tar czf "\${CACHE_FILE}.tmp" \\
+    --owner=0 --group=0 \\
+    --mode='g+rwX,o-rwx' \\
+  -C "$LOCALDIR" user_home 2>/dev/null && \
+  mv "\${CACHE_FILE}.tmp" "$CACHE_FILE" && \\
+  chmod 664 "$CACHE_FILE" && \\
+  echo "[cache-save] Done: $(du -sh "$CACHE_FILE" | cut -f1)" || \\
   echo "[cache-save] Failed"
 ) &
 disown
@@ -318,7 +347,6 @@ echo "Submitted interactive job $VLLM_PID"
 #SBATCH --mem=${memValue}
 #SBATCH --cpus-per-gpu=64
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpu-bind=cores
 #SBATCH --time=${opts.timeLimit}
 #SBATCH --output=${paths.remoteJobLogFile}
 ${exclusiveFlag}
@@ -388,7 +416,9 @@ ${renderLogEnvVars()}
 # vLLM is launched in the background — model, tensor-parallel-size, and all tuning
 # options come from the config file; host and port are infrastructure overrides.
 
-vllm serve \\
+srun --export=ALL ${ss.startArgs.isInteractive ? '--overlap ' : ''}\\
+  --cpu-bind=cores \\
+  vllm serve \\
   --config "$VLLM_CONFIG" \\
   --host 0.0.0.0 \\
   --port ${opts.serverPort} \\
@@ -430,7 +460,6 @@ echo "Submitted interactive job $VLLM_PID"
 #SBATCH --mem=0
 #SBATCH --cpus-per-gpu=64
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpu-bind=cores
 #SBATCH --time=${opts.timeLimit}
 #SBATCH --exclusive
 #SBATCH --output=${paths.remoteJobLogFile}
@@ -468,17 +497,9 @@ function renderMultiNodePayload(ss: SessionState): string {
 
   const rayObjectStoreMemoryGiB = 4;
 
-  const cpusPerTask = '256';
+  // const cpusPerTask = '256';
   const model = opts.configYaml.model;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
-
-  //TODO: Need to propagate env variables to multi-node setup
-  // these need to go to every ray process:
-  //   MAX_JOBS: "4"
-  //   FLASHINFER_NVCC_THREADS: "4"
-  //   TORCHINDUCTOR_PARALLEL_COMPILE_THREADS: "4"
-  // however the value 4 needs to be computed based on per gpu number of cores
-  // and per CPU memory availble. TBD.
 
   // Multi node compilation caching:
   // E.g. Node 1 and Node 2 write to independent, clean compilation caches
@@ -536,6 +557,7 @@ ${renderLogEnvVars()}
 srun --export=ALL ${ss.startArgs.isInteractive ? '--overlap ' : ''}\\
   --output=vllm_node_%N.log \\
   --error=vllm_node_%N.err \\
+  --cpu-bind=cores \\
   ray symmetric-run \\
   --address "$HEAD_NODE_IP:$RAY_PORT" \\
   --min-nodes $SLURM_NNODES \\

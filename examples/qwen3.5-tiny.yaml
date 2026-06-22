@@ -15,16 +15,13 @@
 # Startup diagnostics note: on Lustre/NFS-backed storage, forcing lazy safetensors loading
 # avoids extra host-RAM pressure from auto-prefetch during distributed startup.
 
-model: Qwen/Qwen3.5-397B-A17B-FP8
+model: Qwen/Qwen3.5-0.8B
 trust-remote-code: true
 min-vllm-version: "0.17.0"
-tensor-parallel-size: 4
-pipeline-parallel-size: 2
+tensor-parallel-size: 1
+pipeline-parallel-size: 1
 max-model-len: 262144
 gpu-memory-utilization: 0.90
-dtype: bfloat16
-quantization: fp8
-safetensors-load-strategy: eager
 
 # Reasoning (thinking mode enabled by default; use /no_think in prompt to disable)
 reasoning-parser: qwen3
@@ -33,25 +30,15 @@ reasoning-parser: qwen3
 enable-auto-tool-choice: true
 tool-call-parser: qwen3_coder
 
-# MoE efficiency (expert parallelism for MoE layers alongside tensor parallelism)
-enable-expert-parallel: true
-
 # Caching
 enable-prefix-caching: true
-
-# Environment variables per vLLM recipe (Hopper GPU overrides).
-# Stripped before passing to vLLM serve; rendered as export lines in SLURM.
-# env:
-#   VLLM_DEEP_GEMM_WARMUP: skip
-#   VLLM_USE_DEEP_GEMM: "0"
-#   VLLM_FLASHINFER_MOE_BACKEND: latency
-
-# Mixture of experts models need to be forced to use triton
-gdn-prefill-backend: "triton"
-moe-backend: triton             # Forces vLLM to use pre-compiled Triton MoE kernels
-attention-config: '{"backend":"TRITON_ATTN"}'
-enable-flashinfer-autotune: false  # Explicitly kills the profiling loop
 
 # Note: text-only mode - skips the vision encoder to free memory for extra KV cache.
 # Remove this line to enable image/video input.
 language-model-only: true
+
+# Mixture of experts models need to be forced to use triton
+gdn-prefill-backend: "triton"
+moe-backend: "triton"             # Forces vLLM to use pre-compiled Triton MoE kernels
+attention-config: '{"backend":"TRITON_ATTN"}'
+enable-flashinfer-autotune: false  # Explicitly kills the profiling loop

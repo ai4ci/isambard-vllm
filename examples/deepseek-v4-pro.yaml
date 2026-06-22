@@ -48,7 +48,7 @@ block-size: 256
 
 # High context capability up to 1,000,000 tokens (recipe recommends 800K max-model-len)
 # Reduced to 512K to reduce scheduler edge-case triggers for upstream bug #41530
-max-model-len: 512000
+max-model-len: 800000
 gpu-memory-utilization: 0.88
 
 # Compilation and decoding optimizations
@@ -75,7 +75,7 @@ tokenizer-mode: deepseek_v4
 # Prefix caching — disabled to avoid scheduler deadlock (upstream vLLM #41530)
 # enable-prefix-caching: true
 
-min-vllm-version: "0.22.1"
+min-vllm-version: "0.23.0"
 # min-vllm-version: DeepSeek-V4-Pro requires vLLM 0.20.0+ (per vLLM recipes).
 # ivllm checks this before submitting; stripped before passing to vLLM.
 

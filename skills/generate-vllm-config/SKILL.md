@@ -343,11 +343,17 @@ Valid `tensor-parallel-size` values must divide the model's number of attention 
 
 Only reduce `max-model-len` if an explicit calculation shows the KV cache at native context would exhaust remaining memory after weights are loaded. If reduction is needed, note the native context in a comment and reduce to the next power-of-two that fits. Never silently cap at 32K for a model that supports 128K+ unless forced by memory.
 
-### Multi-node warning
+### Multi-node parallelism
 
-## Multi-node
+Default to `tensor-parallel-size: 4` to match Isambard's 4xGH200 superchips per node. Then scale accross nodes using pipeline parallelism, until you have the total memory that the model and caches require.
 
-`ivllm start` supports multi-node SLURM jobs via Ray. When `pipeline-parallel-size > 1`, it automatically sets `--nodes=N` and bootstraps a Ray cluster across those nodes before starting vLLM with `--distributed-executor-backend ray`. No manual SLURM setup required.
+`ivllm start` supports multi-node SLURM jobs via Ray. When `pipeline-parallel-size` * `tensor-parallel-size` > 4, it automatically sets `--nodes=N` and bootstraps a Ray cluster across those nodes. No manual SLURM setup required.
+
+### Tool parser `tool-call-parser`
+
+Currently supported values must be one of the following:
+
+apertus,cohere_command3,cohere_command4,deepseek_v3,deepseek_v31,deepseek_v32,deepseek_v4,ernie45,functiongemma,gemma4,gigachat3,glm45,glm47,granite,granite-20b-fc,granite4,hermes,hunyuan_a13b,hy_v3,internlm,jamba,kimi_k2,lfm2,llama3_json,llama4_json,llama4_pythonic,longcat,mimo,minimax,minimax_m2,mistral,olmo3,openai,phi4_mini_json,poolside_v1,pythonic,qwen3_coder,qwen3_xml,seed_oss,step3,step3p5,xlam
 
 ## Validation
 

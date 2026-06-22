@@ -9,10 +9,10 @@ import type {
   CloseableEventEmitter,
   Credentials,
   RemoteOps,
-  InferenceJobOptions,
-  SessionState,
   RunRemoteOptions,
   RunRemoteResult,
+  EnvVarEntry,
+  ProcessState,
 } from './types.ts';
 import { tmpdir } from 'node:os';
 
@@ -42,7 +42,8 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
   // Mock all network actions for E2E testing.
   return {
     async runRemote(command: string, opts) {
-      console.log(`  [dry-run] Would run remotely:\n    ${command}`);
+      const fullCommand = makeFullCommand(command, opts?.env || []);
+      console.log(`  [dry-run] Would run remotely:\n    ${fullCommand}`);
       return {
         exitCode: 0,
         stdout: command.startsWith('sbatch')
@@ -68,7 +69,8 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
       console.log(`           (preview: ${dest})`);
     },
     streamSrun(command, sessionState, opts) {
-      console.log(`  [dry-run] Would stream remotely:\n    ${command}`);
+      const fullCommand = makeFullCommand(command, opts?.env || []);
+      console.log(`  [dry-run] Would stream remotely:\n    ${fullCommand}`);
       console.log(`srun: job 123456`);
       sessionState.slurmJobId = '123456';
       return createMockSSh('streaming srun', 2222);
@@ -88,7 +90,8 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
       return createMockSSh('tunnel', 1111);
     },
     async matchVllmVersion(minVllmVersion) {
-      return minVllmVersion;
+      const tmp = selectBestVersion(['0.22.0', minVllmVersion], minVllmVersion);
+      return Promise.resolve(tmp!);
     },
     async checkSSH() {
       console.log('  [dry-run] skipping SSH check');
@@ -135,6 +138,12 @@ const SSH_MUX_OPTS = [
   'ControlPath=/tmp/ivllm-ssh-%r@%h:%p',
 ] as const;
 
+function makeFullCommand(command: string, env: EnvVarEntry[]): string {
+  const envPrefix = env.map((v) => `${v.key}=${v.value}`).join(' ') + ' ';
+  const fullCommand = (envPrefix + command).trim();
+  return fullCommand;
+}
+
 /**
  * Run a command on the LOGIN node via SSH collecting stdout in a string.
  * Returns a promise that resolves with the exit code and the stdout.
@@ -151,9 +160,7 @@ function runRemote(
 ): Promise<RunRemoteResult> {
   return new Promise((resolve, reject) => {
     const target = `${config.username}@${config.loginHost}`;
-    const envPrefix =
-      options.env.map((v) => `${v.key}=${v.value}`).join(' ') + ' ';
-    const fullCommand = (envPrefix + command).trim();
+    const fullCommand = makeFullCommand(command, options.env);
 
     const proc = spawn(
       'ssh',
@@ -185,46 +192,59 @@ function streamSrun(
   config: Credentials,
   command: string,
   options: RunRemoteOptions = { env: [], silent: false },
-  sessionState: SessionState,
+  sessionState: ProcessState,
 ): CloseableEventEmitter {
   const target = `${config.username}@${config.loginHost}`;
-  const envPrefix =
-    options.env.map((v) => `${v.key}=${v.value}`).join(' ') + ' ';
-  const fullCommand = (envPrefix + command).trim();
+  const fullCommand = makeFullCommand(command, options.env);
 
   // Use -t for pseudo-tty streaming to bypass log buffering
+  // Do not use multiplexing as prevents the jobid from being found
   const proc = spawn(
     'ssh',
-    ['-t', ...SSH_MUX_OPTS, '-o', 'BatchMode=yes', target, fullCommand],
+    [
+      '-t',
+      '-o',
+      'ControlMaster=no',
+      '-o',
+      'BatchMode=yes',
+      target,
+      fullCommand,
+    ],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
 
+  proc.stdout.on('data', (data) => {
+    if (!options.silent) {
+      process.stdout.write(data.toString());
+    }
+  });
+
   // Use readline interface to parse logs cleanly line by line
   const rl = readline.createInterface({
-    input: proc.stdout!,
+    input: proc.stderr!,
     terminal: false,
   });
 
   // let idReceived = false;
   rl.on('line', (line) => {
-    // Print to local console unless silent
-    if (!options.silent) {
-      console.log(line);
-    }
-    // See if we can find the slurm job id in the output
-    const srunMatch = line.match(/srun: (?:job|Job) (\d+)/i);
-    if (srunMatch) {
-      const foundId = srunMatch[1];
-      // since this is passed by reference this should update everywhere
-      sessionState.slurmJobId = foundId as string;
-    }
-  });
+    // Always print errors to local console unless silent
+    console.error(line);
 
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    if (!options.silent) {
-      process.stderr.write(chunk.toString());
+    // See if we can find the slurm job id in the output
+    // const srunMatch = line.match(/srun: (?:job|Job) (\d+)/i);
+
+    if (sessionState.slurmJobId === undefined) {
+      const clean = line.replaceAll(/[^a-zA-Z0-9 ]/g, '');
+      // console.log(clean);
+      if (clean.startsWith('srun job ')) {
+        const foundId = line.split(' ')[2]!;
+        sessionState.slurmJobId = foundId;
+        console.log(
+          `\n[DEBUG] Bound Slurm Job ID to state: ${sessionState.slurmJobId}`,
+        );
+      }
     }
   });
 
@@ -322,11 +342,14 @@ function spawnTunnel(
   remotePort: number,
 ): CloseableEventEmitter {
   const target = `${config.username}@${config.loginHost}`;
+  // N.B. Mustn't use multiplexing otherwise it looks like the tunnel immediately exits
+  // Which triggers shutdown.
   const proc = spawn(
     'ssh',
     [
       '-N',
-      ...SSH_MUX_OPTS,
+      '-o',
+      'ControlMaster=no', // Force a dedicated connection
       '-o',
       'BatchMode=yes',
       '-o',
