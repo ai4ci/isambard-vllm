@@ -37,6 +37,7 @@ npm link
 ```
 
 > If `bun link` doesn't put the binary on your PATH, add `~/.bun/bin` to your shell's `PATH`.
+
 <details>
 <summary>
 Click to see how to do so
@@ -82,11 +83,28 @@ To maximize efficiency and conserve HPC storage, `isambard-vllm` uses a **shared
 * **vLLM Setup (`ivllm setup`):** Running `ivllm setup <version>` installs the virtual environment and GPU compilation toolchains into your shared allocation (`/projects/XXXX/ivllm/`). 
   * Once *any* teammate runs `ivllm setup`, **no other team members need to run it** for that version. Everyone instantly shares the same optimized installation!
 * **Model Downloads:** Model weights are stored in the shared Hugging Face cache at `/projects/XXXX/hf/`.
-  * When any member runs `ivllm start`, the tool checks this shared directory. If *any* teammate has already downloaded the model, it is **reused instantly by everyone**, avoiding duplicated disk space and preventing Hugging Face API rate-limiting (429) blocks.
+  * When any member runs `ivllm start` or `ivllm interactive`, the tool checks this shared directory. If *any* teammate has already downloaded the model, it is **reused instantly by everyone**, avoiding duplicated disk space and preventing Hugging Face API rate-limiting (429) blocks.
 
 ### 2. Done ONCE per Individual User (on your local machine)
 * **Tool Installation:** Each teammate runs the local installation (`bun install && bun link`) once to install the CLI tool locally.
 * **Local Configuration (`ivllm config`):** Each teammate runs `ivllm config` once on their own local machine to save their personal HPC username (e.g. `YYYY.XXXX`), host, and local port preferences.
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `interactive <job>` | **Primary method** — start an interactive inference session bound to your terminal (recommended) |
+| `start <job>` | Start a session and monitor it in the background (fallback when interactive partition unavailable) |
+| `list` | List all stored vLLM job configs |
+| `status [job]` | Show status of a job (or all jobs) |
+| `stop <job>` | Stop a job and clean up |
+| `config` | Show or set configuration |
+| `agent` | Launch AI assistant connected to local vLLM server |
+| `setup <version>` | Install vLLM `<version>` on the HPC (one-off, e.g. `ivllm setup 0.19.1`) |
+
+Run `ivllm <command> --help` for command-specific options.
 
 ---
 
@@ -130,17 +148,19 @@ Ready-to-use example configs for popular models are in the [`examples/`](example
 | [`nemotron-3-super-120B-A12B-BF16.yaml`](examples/nemotron-3-super-120B-A12B-BF16.yaml) | nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | Dense 120B reasoning/tool model, single node, requires shared parser plugin |
 | [`minimax-m2.5.yaml`](examples/minimax-m2.5.yaml) | MiniMaxAI/MiniMax-M2.5 | MoE 230B, multi-node |
 
-### 3. Start an inference session
+### 3. Start an interactive session (**recommended**)
+
+The `interactive` command is the **primary and recommended** way to run a vLLM session. It runs vLLM directly via `srun` on an **interactive SLURM partition**, binding your terminal to the session. You can watch output live, and simply type `exit` or press **Ctrl+C** to stop.
 
 ```bash
-ivllm start qwen2 --config examples/qwen2.5-instruct.yaml
+ivllm interactive qwen2 --config examples/qwen2.5-instruct.yaml
 ```
 
 This will:
 1. Check SSH connectivity and that the venv exists
 2. Read the model name from `vllm.yaml` and download it to the shared HF cache on the login node (if not already cached)
 3. Copy the SLURM script and vLLM config to the HPC
-4. Submit the SLURM job and monitor startup
+4. Start vLLM interactively via `srun` (no `sbatch`)
 5. Establish a forward SSH tunnel once vLLM is healthy
 6. Print the local endpoint and run a heartbeat monitor
 
@@ -158,10 +178,10 @@ The process stays in the foreground for the lifetime of the session. Press **Ctr
 The config file is cached so if you start the model again all you need is the name:
 
 ```bash
-ivllm start qwen2
+ivllm interactive qwen2
 ```
 
-#### `ivllm start` options
+#### `ivllm interactive` options
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -169,19 +189,45 @@ ivllm start qwen2
 | `--local-port <n>` | Local port to expose the API on | from `ivllm config` |
 | `--gpus <n>` | GPUs to request (overrides `tensor-parallel-size × pipeline-parallel-size` from YAML) | derived from YAML |
 | `--time <hh:mm:ss>` | SLURM time limit | `4:00:00` |
-| `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
 | `--dry-run` | Preview generated scripts and scp commands without running anything | off |
 | `--no-launch` | Skip assistant launch menu, show config snippet only | off |
 
-### 4. Launch an AI coding assistant
+### 4. Start a session in the background (fallback)
 
-After starting vLLM, `ivllm start` offers to launch your AI coding assistant with the endpoint pre-configured. When the menu appears:
+Use `ivllm start` when the **interactive partition is not available** (e.g. during peak hours when interactive queues are full, or when you need a longer-running job). This uses `sbatch` to submit a background SLURM job — you can detach immediately and monitor it separately.
+
+```bash
+ivllm start qwen2 --config examples/qwen2.5-instruct.yaml
+```
+
+The monitoring loop works identically to `interactive`: it polls the job, establishes a tunnel when healthy, and prints the endpoint. However, you cannot see the vLLM log output directly — you must check the log file manually or use `ivllm status`.
+
+#### `ivllm start` additional options
+
+In addition to the options listed above, `start` supports:
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--mock` | Use mock vLLM server (no GPU needed — for testing); requires `--model` | off |
+| `--create-cache` | Submit model to SLURM to build JIT compilation caches, then exit once vLLM is healthy | off |
+
+Use `--mock` for testing without GPU access. Use `--create-cache` to pre-build JIT caches for a model — the session exits automatically once the model is healthy, freeing the compute node while the compiled cache is reused by future sessions.
+
+### 5. Launch an AI coding assistant
+
+After starting vLLM, `ivllm start` and `ivllm interactive` offer to launch your AI coding assistant with the endpoint pre-configured. When the menu appears:
 
 - **Layer 1 — target**: choose **OpenCode**, **GitHub Copilot**, **Claude Code**, **Pi**, change directory, or shut down `ivllm`
 - **Layer 2 — wrapper**: choose **direct launch**, **scoder**, or **sbx** (only wrappers available on your machine are shown)
 - **Layer 3 — action**: choose **launch now** or **show copy-paste command**
 
 For every wrapper, `ivllm` prints the full shell-ready command before launching so you can copy, paste, and tweak it manually if needed.
+
+You can also launch the assistant separately from a running session:
+
+```bash
+ivllm agent --port 11434
+```
 
 #### sbx prerequisite
 
@@ -224,19 +270,26 @@ Start up opencode and select the Qwen model from the `Isambard vLLM Server provi
 
 When you have finished type "exit" at the terminal you started `ivllm` in and the isambard job will finish.
 
-### 5. Check job status
+### 6. List stored job configs
 
-Not generally necessary as the local session from `ivllm start` will display the current
-status.
+```bash
+ivllm list
+```
+
+Lists all locally cached vLLM config files with their job name, model, and parallelism settings. Useful for discovering which models you've already set up.
+
+### 7. Check job status
+
+Not generally necessary as the local session from `ivllm start` or `ivllm interactive` will display the current status.
 
 ```bash
 ivllm status           # all known jobs
 ivllm status qwen2    # specific job
 ```
 
-### 6. Stop a job (recovery)
+### 8. Stop a job (recovery)
 
-If `ivllm start` exits uncleanly (e.g. terminal closed), use:
+If `ivllm start` or `ivllm interactive` exits uncleanly (e.g. terminal closed), use:
 
 ```bash
 ivllm stop qwen2
@@ -273,10 +326,10 @@ The token is saved to `~/.config/ivllm/config.json`. It is forwarded to the logi
 ```
 LOCAL                          LOGIN node                    COMPUTE node
 ------                         ----------                    ------------
-ivllm start
+ivllm interactive / start
   │─── ssh: mkdir, lockfile ──▶│
   │─── scp: script + config ──▶│
-  │─── ssh: sbatch ───────────▶│──── SLURM job ────────────▶│
+  │─── ssh: srun (interactive)▶│──── SLURM job ────────────▶│
   │                            │                             │ vLLM starts
   │◀── ssh poll: job_details ──│◀── writes job_details.json─│
   │                            │
@@ -287,17 +340,17 @@ ivllm start
 ```
 
 - The SLURM script writes `job_details.json` into the job working directory (`$HOME/<job>/`) as it progresses through states: `pending → initialising → running → (failed|timeout)`
-- `ivllm start` polls this file via SSH to track status and extract the compute hostname for tunnelling
+- `ivllm start` and `ivllm interactive` poll this file via SSH to track status and extract the compute hostname for tunnelling
 - All tunnelling is initiated by LOCAL; compute nodes cannot initiate outbound SSH connections on Isambard AI
 
 ---
 
 ## Dry run
 
-Preview what `ivllm start` would do without connecting to the HPC:
+Preview what `ivllm start` or `ivllm interactive` would do without connecting to the HPC:
 
 ```bash
-ivllm start qwen2 --config vllm.yaml --dry-run
+ivllm interactive qwen2 --config vllm.yaml --dry-run
 ```
 
 The generated SLURM script and config file are saved to a local temp directory for inspection. All SSH and scp commands are printed but not executed.
