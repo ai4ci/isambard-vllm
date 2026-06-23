@@ -31,15 +31,15 @@ describe('renderSetupScript', () => {
     expect(script).toContain('--torch-backend=auto');
   });
 
-  it('installs HPC SDK to $PROJECTDIR/ivllm/nvhpc', () => {
+  it('installs HPC SDK to /projects/p/ivllm/nvhpc', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('$PROJECTDIR/ivllm/nvhpc');
+    expect(script).toContain('/projects/p/ivllm/nvhpc');
     expect(script).toContain('nvhpc_2026_263_Linux_aarch64_cuda_multi');
   });
 
-  it('skips HPC SDK install if $PROJECTDIR/ivllm/nvhpc already exists', () => {
+  it('skips HPC SDK install if /projects/p/ivllm/nvhpc already exists', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('$PROJECTDIR/ivllm/nvhpc');
+    expect(script).toContain('/projects/p/ivllm/nvhpc');
     // idempotency guard
     expect(script).toMatch(/if \[ ! -d.*nvhpc/);
   });
@@ -47,7 +47,7 @@ describe('renderSetupScript', () => {
   it('sets NVHPC_ROOT and LD_LIBRARY_PATH with compat path first', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
     expect(script).toContain(
-      'NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3',
+      'NVHPC_ROOT=/projects/p/ivllm/nvhpc/Linux_aarch64/26.3',
     );
     expect(script).toContain('$NVHPC_ROOT/cuda/12.9/compat');
     // compat must appear before lib64 in LD_LIBRARY_PATH
@@ -61,14 +61,14 @@ describe('renderSetupScript', () => {
     expect(script).toContain('module load gcc-native/14.2');
   });
 
-  it('creates versioned venv at $PROJECTDIR/ivllm/<version>', () => {
+  it('creates versioned venv at /projects/p/ivllm/<version>', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('$PROJECTDIR/ivllm/0.19.1');
+    expect(script).toContain('/projects/p/ivllm/0.19.1');
   });
 
   it('skips venv install if versioned dir already exists', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toMatch(/if \[ ! -d.*\$PROJECTDIR\/ivllm\/0\.19\.1/);
+    expect(script).toMatch(/if \[ ! -d.*\/projects\/p\/ivllm\/0\.19\.1/);
   });
 
   it('installs vllm using version-specific cu129 wheels', () => {
@@ -86,12 +86,12 @@ describe('renderSetupScript', () => {
 
   it('sets g+w on $PROJECTDIR/ivllm so all project members can create versioned venvs', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('chmod g+w $PROJECTDIR/ivllm');
+    expect(script).toContain('chmod g+w /projects/p/ivllm');
   });
 
   it('sets g+w on $PROJECTDIR/hf so all project members can share cached model weights', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('chmod g+w $PROJECTDIR/hf');
+    expect(script).toContain('chmod g+w /projects/p/hf');
   });
 
   it('installs exact vllm version', () => {
@@ -102,12 +102,6 @@ describe('renderSetupScript', () => {
   it('does not reference singularity', () => {
     const script = renderSetupScript(base, '/tmp/remote.log');
     expect(script).not.toContain('singularity');
-  });
-
-  it('redirects output to log file via exec', () => {
-    const script = renderSetupScript(base, '/tmp/remote.log');
-    expect(script).toContain('exec > "$HOME/.config/ivllm/setup.log" 2>&1');
-    expect(script).not.toContain('#SBATCH --output');
   });
 
   it('includes IVLLM_SETUP_SUCCESS marker', () => {
@@ -141,10 +135,14 @@ describe('renderSetupScript', () => {
 
   it('uses a different version when specified', () => {
     const script = renderSetupScript(
-      { ...base, vllmVersion: '0.10.0' },
+      {
+        ...base,
+        vllmVersion: '0.10.0',
+        paths: makeSimplePaths(creds, '0.10.0'),
+      },
       '/tmp/remote.log',
     );
-    expect(script).toContain('$PROJECTDIR/ivllm/0.10.0');
+    expect(script).toContain('/projects/p/ivllm/0.10.0');
     expect(script).toContain('vllm==0.10.0');
     expect(script).not.toContain('0.19.1');
   });

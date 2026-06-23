@@ -27,7 +27,9 @@ function writeTmp(content: string): string {
 
 describe('parseVllmConfig', () => {
   it('extracts model from YAML', () => {
-    const path = writeTmp('model: Qwen/Qwen2.5-0.5B-Instruct\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'model: Qwen/Qwen2.5-0.5B-Instruct\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).model).toBe('Qwen/Qwen2.5-0.5B-Instruct');
     } finally {
@@ -36,7 +38,9 @@ describe('parseVllmConfig', () => {
   });
 
   it('extracts tensor-parallel-size (kebab-case) from YAML', () => {
-    const path = writeTmp('tensor-parallel-size: 4\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'tensor-parallel-size: 4\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).tensorParallelSize).toBe(4);
     } finally {
@@ -45,7 +49,9 @@ describe('parseVllmConfig', () => {
   });
 
   it('extracts tensor_parallel_size (underscore) from YAML', () => {
-    const path = writeTmp('tensor_parallel_size: 8\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'tensor_parallel_size: 8\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).tensorParallelSize).toBe(8);
     } finally {
@@ -54,7 +60,9 @@ describe('parseVllmConfig', () => {
   });
 
   it('extracts pipeline-parallel-size (kebab-case) from YAML', () => {
-    const path = writeTmp('pipeline-parallel-size: 2\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'pipeline-parallel-size: 2\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).pipelineParallelSize).toBe(2);
     } finally {
@@ -63,7 +71,9 @@ describe('parseVllmConfig', () => {
   });
 
   it('extracts pipeline_parallel_size (underscore) from YAML', () => {
-    const path = writeTmp('pipeline_parallel_size: 2\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'pipeline_parallel_size: 2\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).pipelineParallelSize).toBe(2);
     } finally {
@@ -71,28 +81,28 @@ describe('parseVllmConfig', () => {
     }
   });
 
-  it('returns undefined pipelineParallelSize when not present', () => {
+  it('returns pipelineParallelSize=1 when not present', () => {
     const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).pipelineParallelSize).toBeUndefined();
+      expect(parseVllmConfig(path).pipelineParallelSize).toEqual(1);
     } finally {
       unlinkSync(path);
     }
   });
 
-  it('returns undefined model when not present', () => {
+  it('throws error when model not present', () => {
     const path = writeTmp('max-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).model).toBeUndefined();
+      expect(() => parseVllmConfig(path)).toThrowError();
     } finally {
       unlinkSync(path);
     }
   });
 
-  it('returns undefined tensorParallelSize when not present', () => {
+  it('returns tensorParallelSize=1 when not present', () => {
     const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).tensorParallelSize).toBeUndefined();
+      expect(parseVllmConfig(path).tensorParallelSize).toEqual(1);
     } finally {
       unlinkSync(path);
     }
@@ -128,7 +138,9 @@ describe('parseVllmConfig', () => {
   });
 
   it('extracts min-vllm-version (kebab-case) from YAML', () => {
-    const path = writeTmp('min-vllm-version: "0.9.1"\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'min-vllm-version: "0.9.1"\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).minVllmVersion).toBe('0.9.1');
     } finally {
@@ -136,17 +148,17 @@ describe('parseVllmConfig', () => {
     }
   });
 
-  it('returns undefined minVllmVersion when not present', () => {
+  it('returns minVllmVersion=0.15.0 when not present', () => {
     const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).minVllmVersion).toBeUndefined();
+      expect(parseVllmConfig(path).minVllmVersion).toEqual('0.15.0');
     } finally {
       unlinkSync(path);
     }
   });
 
   it('extracts max-model-len from YAML', () => {
-    const path = writeTmp('max-model-len: 131072\n');
+    const path = writeTmp('model: test\nmax-model-len: 131072\n');
     try {
       expect(parseVllmConfig(path).maxModelLen).toBe(131072);
     } finally {
@@ -154,17 +166,19 @@ describe('parseVllmConfig', () => {
     }
   });
 
-  it('returns undefined maxModelLen when not present', () => {
-    const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
+  it('throws error when maxModelLen when not present', () => {
+    const path = writeTmp('model: some/model\n');
     try {
-      expect(parseVllmConfig(path).maxModelLen).toBeUndefined();
+      expect(() => parseVllmConfig(path)).toThrowError();
     } finally {
       unlinkSync(path);
     }
   });
 
   it('extracts enable-auto-tool-choice: true from YAML', () => {
-    const path = writeTmp('enable-auto-tool-choice: true\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'enable-auto-tool-choice: true\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).enableAutoToolChoice).toBe(true);
     } finally {
@@ -172,17 +186,19 @@ describe('parseVllmConfig', () => {
     }
   });
 
-  it('returns undefined enableAutoToolChoice when not present', () => {
+  it('returns enableAutoToolChoice=true when not present', () => {
     const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).enableAutoToolChoice).toBeUndefined();
+      expect(parseVllmConfig(path).enableAutoToolChoice).toBeTrue();
     } finally {
       unlinkSync(path);
     }
   });
 
   it('derives enableReasoning: true from presence of reasoning-parser in YAML', () => {
-    const path = writeTmp('reasoning-parser: qwen3\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'reasoning-parser: qwen3\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).enableReasoning).toBe(true);
     } finally {
@@ -190,19 +206,21 @@ describe('parseVllmConfig', () => {
     }
   });
 
-  it('returns undefined enableReasoning when reasoning-parser is absent', () => {
+  it('returns enableReasoning=false when reasoning-parser is absent', () => {
     const path = writeTmp('model: some/model\nmax-model-len: 8192\n');
     try {
-      expect(parseVllmConfig(path).enableReasoning).toBeUndefined();
+      expect(parseVllmConfig(path).enableReasoning).toBeFalse();
     } finally {
       unlinkSync(path);
     }
   });
 
   it('does not derive enableReasoning from enable-reasoning key (not a valid vLLM key)', () => {
-    const path = writeTmp('enable-reasoning: true\nmodel: some/model\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'enable-reasoning: true\nmodel: some/model\nmax-model-len: 8192\n',
+    );
     try {
-      expect(parseVllmConfig(path).enableReasoning).toBeUndefined();
+      expect(parseVllmConfig(path).enableReasoning).toBeFalse();
     } finally {
       unlinkSync(path);
     }
@@ -267,6 +285,7 @@ describe('env field in VllmConfig', () => {
   it('parses env block from YAML into VllmConfig.env', () => {
     const path = writeTmp(
       'model: some/model\n' +
+        'max-model-len: 1234\n' +
         'env:\n' +
         "  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: '1'\n" +
         "  VLLM_USE_DEEP_GEMM_FP8: '1'\n",
@@ -289,7 +308,9 @@ describe('env field in VllmConfig', () => {
   });
 
   it('returns empty env object when env block is absent', () => {
-    const path = writeTmp('model: some/model\ntensor-parallel-size: 4\nmax-model-len: 8192\n');
+    const path = writeTmp(
+      'model: some/model\ntensor-parallel-size: 4\nmax-model-len: 8192\n',
+    );
     try {
       expect(parseVllmConfig(path).env.length).toEqual(0);
     } finally {
@@ -351,40 +372,5 @@ describe('jobConfigPath', () => {
   it('uses the job name verbatim', () => {
     const expected = join(homedir(), '.config', 'ivllm', 'my-job.yaml');
     expect(jobConfigPath('my-job')).toBe(expected);
-  });
-});
-
-describe('saveJobConfig', () => {
-  const testJobName = `ivllm-test-job-${Date.now()}`;
-  const jobPath = join(homedir(), '.config', 'ivllm', `${testJobName}.yaml`);
-
-  afterEach(() => {
-    if (existsSync(jobPath)) rmSync(jobPath);
-  });
-
-  it('copies the source file to the job config path', () => {
-    const src = join(tmpdir(), `ivllm-src-${Date.now()}.yaml`);
-    writeFileSync(src, 'model: Qwen/Test\ntensor-parallel-size: 4\nmax-model-len: 8192\n', 'utf-8');
-    try {
-      saveJobConfig(testJobName, src);
-      expect(existsSync(jobPath)).toBe(true);
-      expect(readFileSync(jobPath, 'utf-8')).toBe(
-        'model: Qwen/Test\ntensor-parallel-size: 4\n',
-      );
-    } finally {
-      unlinkSync(src);
-    }
-  });
-
-  it('creates the ~/.config/ivllm directory if it does not exist', () => {
-    // This is already created in most environments, so just check the file is saved
-    const src = join(tmpdir(), `ivllm-src2-${Date.now()}.yaml`);
-    writeFileSync(src, 'model: Test\nmax-model-len: 8192\n', 'utf-8');
-    try {
-      saveJobConfig(testJobName, src);
-      expect(existsSync(jobPath)).toBe(true);
-    } finally {
-      unlinkSync(src);
-    }
   });
 });

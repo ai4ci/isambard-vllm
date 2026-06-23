@@ -15,7 +15,7 @@ export function renderSetupScript(
 ): string {
   const paths = ss.paths;
   const vllmVersion = ss.vllmVersion;
-  const venvDir = paths.remoteProjectVllmDir;
+  const venvDir = paths.remoteProjectVllmVersionDir;
   const nvhpcDir = paths.nvhpcDir;
   const nvhpcRoot = paths.nvhpcRoot;
   const ldLibPath = [
@@ -46,11 +46,11 @@ if ! command -v uv &>/dev/null; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-mkdir -p $PROJECTDIR/ivllm $PROJECTDIR/hf
+mkdir -p ${paths.remoteProjectVllmDir} ${paths.remoteProjectDir}/hf
 # Ensure group-writable so other project members can install their own versioned venvs.
-chmod g+w $PROJECTDIR/ivllm
+chmod g+w ${paths.remoteProjectVllmDir}
 # Ensure HuggingFace cache directory is also group-writable for shared downloads.
-chmod g+w $PROJECTDIR/hf
+chmod g+w ${paths.remoteProjectDir}/hf
 
 # Phase A: Install NVIDIA HPC SDK 26.3 cuda_multi (provides CUDA 12.9 + 13.1)
 if [ ! -d ${nvhpcDir} ]; then
@@ -83,7 +83,7 @@ if [ ! -d ${venvDir} ]; then
   # $LOCALDIR is wiped at job end; the installed venv in $PROJECTDIR persists.
   export UV_CACHE_DIR=$LOCALDIR/uv_cache
   uv venv ${venvDir} --python 3.12
-  source ${venvDir}/bin/activate
+  source ${paths.remoteProjectVllmVenvActivate}
   echo "Downloading and installing vLLM ${vllmVersion} wheels (may be slow — large download)..."
   uv pip install vllm==${vllmVersion} ray[default] \\
     --torch-backend=auto \\

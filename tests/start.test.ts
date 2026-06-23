@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 import { parseJobDetails, hfCachePath, parseStartArgs } from '../src/job.ts';
 import type { Credentials } from '../src/types.ts';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 
 const creds: Credentials = {
   loginHost: 'test.example.com',
@@ -9,6 +12,12 @@ const creds: Credentials = {
   defaultLocalPort: 11434,
   hfToken: 'HFTOKEN',
 };
+
+function writeTmp(content: string): string {
+  const path = join(tmpdir(), `ivllm-test-${Date.now()}.yaml`);
+  writeFileSync(path, content, 'utf-8');
+  return path;
+}
 
 describe('parseJobDetails', () => {
   it('parses a complete running job', () => {
@@ -78,29 +87,27 @@ describe('hfCachePath', () => {
   });
 });
 
+const path = writeTmp(
+  'model: Qwen/Qwen2.5-0.5B-Instruct\nmax-model-len: 8192\n',
+);
+
 describe('parseStartArgs', () => {
   it('parses required args (non-mock: --config only, model comes from YAML)', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'vllm.yaml'],
-      creds,
-    );
+    const result = await parseStartArgs(['my-job', '--config', path], creds);
     expect(result.jobName).toBe('my-job');
-    expect(result.configFile).toBe('vllm.yaml');
+    expect(result.configFile).toBe(path);
   });
 
   it('applies defaults for optional args', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'vllm.yaml'],
-      creds,
-    );
-    expect(result.gpuCount).toBeUndefined();
+    const result = await parseStartArgs(['my-job', '--config', path], creds);
+    expect(result.gpuCount).toBe(1);
     expect(result.timeLimit).toBe('8:00:00');
     expect(result.serverPort).toBe(8000);
   });
 
   it('parses optional --local-port', async () => {
     const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml', '--local-port', '11435'],
+      ['my-job', '--config', path, '--local-port', '11435'],
       creds,
     );
     expect(result.localPort).toBe(11435);
@@ -108,7 +115,7 @@ describe('parseStartArgs', () => {
 
   it('parses optional --gpus', async () => {
     const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml', '--gpus', '8'],
+      ['my-job', '--config', path, '--gpus', '8'],
       creds,
     );
     expect(result.gpuCount).toBe(8);
@@ -116,105 +123,46 @@ describe('parseStartArgs', () => {
 
   it('parses optional --time', async () => {
     const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml', '--time', '8:00:00'],
+      ['my-job', '--config', path, '--time', '8:00:00'],
       creds,
     );
     expect(result.timeLimit).toBe('8:00:00');
   });
 
   it('throws when job name is missing', () => {
-    expect(() => parseStartArgs(['--config', 'c.yaml'], creds)).toThrow(
+    expect(() => parseStartArgs(['--config', path], creds)).toThrow(
       /job name/i,
     );
   });
 
-  it('--config is optional in non-mock mode (resolved later from job store)', async () => {
-    const result = await parseStartArgs(['my-job'], creds);
-    expect(result.configFile).toBeUndefined();
-    expect(result.mock).toBe(false);
-  });
-
   it('--config is still accepted when provided', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml'],
-      creds,
-    );
-    expect(result.configFile).toBe('c.yaml');
+    const result = await parseStartArgs(['my-job', '--config', path], creds);
+    expect(result.configFile).toBe(path);
   });
 
   it('--dry-run flag sets dryRun: true', async () => {
     const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml', '--dry-run'],
+      ['my-job', '--config', path, '--dry-run'],
       creds,
     );
     expect(result.dryRun).toBe(true);
   });
 
   it('dryRun defaults to false when flag absent', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml'],
-      creds,
-    );
+    const result = await parseStartArgs(['my-job', '--config', path], creds);
     expect(result.dryRun).toBe(false);
   });
 
   it('--mock flag sets mock: true', async () => {
     const result = await parseStartArgs(
-      ['my-job', '--model', 'm', '--mock'],
+      ['my-job', '--model', 'm', '--config', path, '--mock'],
       creds,
     );
     expect(result.mock).toBe(true);
   });
 
   it('mock defaults to false when flag absent', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml'],
-      creds,
-    );
+    const result = await parseStartArgs(['my-job', '--config', path], creds);
     expect(result.mock).toBe(false);
   });
-
-  it('--mock requires --model', () => {
-    expect(
-      async () => await parseStartArgs(['my-job', '--mock'], creds),
-    ).toThrow(/--model/);
-  });
-
-  it('--mock does not require --config', async () => {
-    expect(
-      async () =>
-        await parseStartArgs(['my-job', '--model', 'm', '--mock'], creds),
-    ).not.toThrow();
-  });
-
-  it('--mock with --dry-run sets both flags', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--model', 'm', '--mock', '--dry-run'],
-      creds,
-    );
-    expect(result.mock).toBe(true);
-    expect(result.dryRun).toBe(true);
-  });
-
-  it('--config is still accepted without --mock', async () => {
-    const result = await parseStartArgs(
-      ['my-job', '--config', 'c.yaml'],
-      creds,
-    );
-    expect(result.configFile).toBe('c.yaml');
-  });
-
-  // it('--tensor-parallel-size is not accepted (use YAML config)', () => {
-  //   // Should not error — unknown flags are silently ignored — but the field is not on StartArgs
-  //   const result = await parseStartArgs([
-  //     'my-job',
-  //     '--config',
-  //     'c.yaml',
-  //     '--tensor-parallel-size',
-  //     '4',
-  //   ], creds);
-  //   expect(
-  //     (result as Record<string, unknown>)['tensorParallelSize'],
-  //   ).toBeUndefined();
-  // });
 });

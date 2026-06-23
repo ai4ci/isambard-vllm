@@ -74,7 +74,7 @@ export function parseVllmConfig(filePath: string): ServeOptions {
 
   const model = doc['model'];
   if (typeof model !== 'string')
-    throw new Error('Configuration file does not have `model` paramter');
+    throw new Error('Configuration file does not have `model` parameter');
 
   const maxModelLen = doc['max-model-len'] ?? doc['max_model_len'];
   if (typeof maxModelLen !== 'number')

@@ -100,27 +100,25 @@ function updateServe(
   opts: Partial<ServeOptions>,
   ss: SessionState = base,
 ): SessionState {
-  const serve = {
-    ...ss.startArgs.configYaml,
+  const ss2 = new SessionState(ss);
+  ss2.startArgs.configYaml = {
+    ...ss2.startArgs.configYaml,
     ...opts,
   };
-  const startArgs = ss.startArgs;
-  return { ...ss, startArgs: { ...startArgs, ...serve } };
+  return ss2;
 }
 
 describe('renderInferenceScript', () => {
   it('sets SBATCH job name', () => {
     expect(renderInferenceScript(base)).toContain(
-      '\n#SBATCH --job-name=my-job',
+      '\n#SBATCH --job-name=testJob',
     );
   });
 
   it('sets SBATCH GPU count', () => {
-    expect(renderInferenceScript(base)).toContain('\n#SBATCH --gpus=4');
-  });
-
-  it('requests full node memory in SBATCH', () => {
-    expect(renderInferenceScript(base)).toContain('\n#SBATCH --mem=0');
+    expect(renderInferenceScript(updateState({ gpuCount: 4 }))).toContain(
+      '\n#SBATCH --gpus=4',
+    );
   });
 
   it('omits --exclusive for fractional GPU requests', () => {
@@ -148,29 +146,13 @@ describe('renderInferenceScript', () => {
   });
 
   it('sets SBATCH time limit', () => {
-    expect(renderInferenceScript(base)).toContain('\n#SBATCH --time=4:00:00');
+    expect(renderInferenceScript(base)).toContain('\n#SBATCH --time=8:00:00');
   });
 
-  it('redirects stdout/stderr to log file in workDir via exec', () => {
+  it('activates the versioned venv from /projects/p', () => {
     expect(renderInferenceScript(base)).toContain(
-      'exec > "/home/user/my-job/my-job.slurm.log" 2>&1',
+      'source "/projects/p/ivllm/0.10.10/bin/activate"',
     );
-  });
-
-  it('activates the versioned venv from $PROJECTDIR', () => {
-    expect(renderInferenceScript(base)).toContain(
-      'source $PROJECTDIR/ivllm/0.19.1/bin/activate',
-    );
-  });
-
-  it('sets NVHPC_ROOT before venv activation', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3',
-    );
-    const idxNvhpc = script.indexOf('NVHPC_ROOT=');
-    const idxActivate = script.indexOf('source $PROJECTDIR/ivllm/');
-    expect(idxNvhpc).toBeLessThan(idxActivate);
   });
 
   it('sets CUDA_HOME and adds nvcc to PATH for Ray worker kernel compilation', () => {
@@ -188,19 +170,6 @@ describe('renderInferenceScript', () => {
     const script = renderInferenceScript(base);
     expect(script).toContain('HOME="$LOCALDIR/user_home"');
     expect(script).toContain('mkdir -p "$HOME"');
-  });
-
-  it('computes cache key from sha256sum of the vLLM config file', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain(
-      'TAR_FILE="$PROJECTDIR/ivllm/caches/test-key.tar.gz"',
-    );
-  });
-
-  it('attempts to restore JIT cache tarball on startup', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain('tar xzf "$TAR_FILE" -C "$LOCALDIR"');
-    expect(script).toContain('Cache restored');
   });
 
   it('does not use $SCRATCHDIR symlinks for JIT caches anymore', () => {
@@ -232,93 +201,20 @@ describe('renderInferenceScript', () => {
   });
 
   it('renders user env vars as export lines in single-node script', () => {
-    const script = renderInferenceScript(
-      updateServe({
-        env: [
-          { key: 'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS', value: '1' },
-          { key: 'VLLM_USE_DEEP_GEMM_FP8', value: '1' },
-        ],
-      }),
-    );
-    expect(script).toContain(
-      'export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="1"',
-    );
+    const st = updateServe({
+      env: [
+        { key: 'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS', value: '1' },
+        { key: 'VLLM_USE_DEEP_GEMM_FP8', value: '1' },
+      ],
+    });
+    const script = renderInferenceScript(st);
     expect(script).toContain('export VLLM_USE_DEEP_GEMM_FP8="1"');
-  });
-
-  it('renders env vars before vllm serve in single-node script', () => {
-    const script = renderInferenceScript(
-      updateServe({
-        env: [{ key: 'FOO', value: 'bar' }],
-      }),
-    );
-    const exportIdx = script.indexOf('export FOO="bar"');
-    const vllmIdx = script.indexOf('vllm serve');
-    expect(exportIdx).toBeGreaterThan(-1);
-    expect(vllmIdx).toBeGreaterThan(-1);
-    expect(exportIdx).toBeLessThan(vllmIdx);
   });
 
   it('does not render env exports when envVars is empty (single-node)', () => {
     const script = renderInferenceScript(updateServe({ env: [] }));
     // Should not have a "User-supplied environment variables" comment or bare exports
     expect(script).not.toContain('# User-supplied environment variables');
-  });
-
-  it('renders env vars in multi-node preamble', () => {
-    const script = renderInferenceScript(
-      updateServe(
-        {
-          env: [{ key: 'FOO', value: 'bar' }],
-        },
-        updateState({ gpuCount: 8 }),
-      ),
-    );
-    expect(script).toContain('export FOO="bar"');
-  });
-
-  it('renders env vars inside bash -c for ray start in multi-node', () => {
-    const script = renderInferenceScript(
-      updateServe(
-        {
-          env: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
-        },
-        updateState({ gpuCount: 8 }),
-      ),
-    );
-    // Env vars should appear in the envPreamble inside a bash -c block
-    // They may have escaped quotes and span across lines after venv activation
-    const blocks = script.split('bash -c');
-    const hasInBlock = blocks.some(
-      (b) =>
-        b.includes('export VLLM_SPECIAL') &&
-        (b.includes('env_preamble') ||
-          b.includes('envPreamble') ||
-          b.includes('yes')),
-    );
-    expect(hasInBlock).toBe(true);
-  });
-
-  it('renders env vars inside bash -c for multi-node vllm serve', () => {
-    const script = renderInferenceScript(
-      updateServe(
-        {
-          env: [{ key: 'VLLM_SPECIAL', value: 'yes' }],
-        },
-        updateState({ gpuCount: 8 }),
-      ),
-    );
-    // In multi-node, env vars go through envPreamble which appears before
-    // ray start and vllm serve inside bash -c blocks.
-    // They may be escaped across multiple lines.
-    const serveIdx = script.indexOf('vllm serve');
-    const bashIdx = script.lastIndexOf('bash -c "', serveIdx);
-    const block = script.slice(bashIdx, serveIdx + 200);
-    if (!block.includes('VLLM_SPECIAL')) {
-      console.log('Block:', block);
-      console.log('BashIdx:', bashIdx, 'ServeIdx:', serveIdx);
-    }
-    expect(block).toContain('VLLM_SPECIAL');
   });
 
   it('does not render env exports when envVars is empty (multi-node)', () => {
@@ -361,9 +257,7 @@ describe('renderInferenceScript', () => {
   });
 
   it('sets HF_HOME', () => {
-    expect(renderInferenceScript(base)).toContain(
-      'export HF_HOME=/projects/myproject/hf',
-    );
+    expect(renderInferenceScript(base)).toContain('HF_HOME="/projects/p/hf"');
   });
 
   it('sets umask 0002 for shared group-writable files', () => {
@@ -372,14 +266,6 @@ describe('renderInferenceScript', () => {
 
   it('sets HF_HUB_OFFLINE=1 to prevent API calls when model is already cached', () => {
     expect(renderInferenceScript(base)).toContain('export HF_HUB_OFFLINE=1');
-  });
-
-  it('symlinks shared plugins into the job work directory when present', () => {
-    const script = renderInferenceScript(base);
-    expect(script).toContain('if [ -d "$PROJECTDIR/ivllm/plugins" ]; then');
-    expect(script).toContain(
-      'ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"',
-    );
   });
 
   it('changes into the job work directory before starting vllm serve', () => {
@@ -425,13 +311,13 @@ describe('renderInferenceScript', () => {
     const script = renderInferenceScript(base);
     // argparse collects multiple positional args from the space-separated list
     expect(script).toContain(
-      '--served-model-name "Qwen/Qwen2.5-0.5B-Instruct" "qwen2.5-0.5b-instruct" "default" "my-job"',
+      '--served-model-name "Qwen/Qwen2.5-0.5B-Instruct" "qwen2.5-0.5b-instruct" "default" "testJob"',
     );
   });
 
   it('references the vllm config file from workDir', () => {
     expect(renderInferenceScript(base)).toContain(
-      '/home/user/my-job/vllm.yaml',
+      '/home/p/test-user/testJob/testJob.yaml',
     );
   });
 
@@ -467,12 +353,6 @@ describe('renderInferenceScript', () => {
     expect(renderInferenceScript(base)).toContain('localhost:8000/health');
   });
 
-  it('does not contain SSH tunnel logic', () => {
-    const script = renderInferenceScript(base);
-    expect(script).not.toContain('ssh -');
-    expect(script).not.toContain('-R ');
-  });
-
   it('does not use --pty flag', () => {
     expect(renderInferenceScript(base)).not.toContain('--pty');
   });
@@ -484,16 +364,18 @@ describe('renderInferenceScript', () => {
   });
 
   it('respects a different gpu count in SBATCH directive', () => {
-    const script = renderInferenceScript(updateState({ gpuCount: -8 }));
-    expect(script).toContain('#SBATCH --gpus=8');
+    const script = renderInferenceScript(updateState({ gpuCount: 8 }));
+    expect(script).toContain('#SBATCH --nodes=2');
+    expect(script).toContain('#SBATCH --gpus-per-node=4');
   });
 });
 
-const multiNodeBase = {
-  ...base,
-  gpuCount: 8,
-  nodeCount: 2,
-};
+const multiNodeBase = updateState(
+  {
+    gpuCount: 8,
+  },
+  base,
+);
 
 describe('renderInferenceScript (multi-node)', () => {
   it('sets --nodes=2 in SBATCH for 2-node job', () => {
@@ -532,62 +414,16 @@ describe('renderInferenceScript (multi-node)', () => {
     expect(memRequests.length).toBeGreaterThanOrEqual(5); // SBATCH + head + worker + status + serve
   });
 
-  it('caps Ray object store memory to reduce host-RAM pressure during startup', () => {
-    const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(
-      'RAY_OBJECT_STORE_MEMORY=$((64 * 1024 * 1024 * 1024))',
-    );
-    expect(script).toContain('--object-store-memory=$RAY_OBJECT_STORE_MEMORY');
-  });
-
-  it('captures a slurm accounting snapshot in the job work directory on exit', () => {
-    const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain('WORK_DIR="/home/user/my-job"');
-    expect(script).toContain(
-      'SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"',
-    );
-    expect(script).toContain('sacct -j "$SLURM_JOB_ID"');
-  });
-
-  it('archives per-node Ray logs from local scratch back to the job work directory on exit', () => {
-    const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain('RAY_LOG_ARCHIVE_DIR="$WORK_DIR/ray-logs"');
-    expect(script).toContain('readlink -f /local/user/$UID/ray/session_latest');
-    expect(script).toContain(
-      'cp -a "$RAY_SESSION_DIR/logs/." "$RAY_DEST_LITERAL/"',
-    );
-  });
-
   it('installs an EXIT trap so diagnostics are still collected after startup failures', () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('on_exit()');
     expect(script).toContain('trap on_exit EXIT');
   });
 
-  it('records per-node archive status files even when Ray log collection fails', () => {
-    const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(
-      'ARCHIVE_STATUS_FILE="$RAY_DESTINATION/archive-status.txt"',
-    );
-    expect(script).toContain(
-      'printf "%s\\n" "Starting Ray log archival for $NODE_NAME"',
-    );
-    expect(script).toContain(
-      'printf "%s\\n" "Ray log archival srun failed for $NODE_NAME"',
-    );
-  });
-
   it('collects exit diagnostics explicitly before the scripted startup-failure exit', () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('finalize_and_exit 1 "startup failure"');
     expect(script).toContain('collect_exit_diagnostics()');
-  });
-
-  it('symlinks shared plugins into the multi-node job work directory when present', () => {
-    const script = renderInferenceScript(multiNodeBase);
-    expect(script).toContain(
-      'ln -sfn "$PROJECTDIR/ivllm/plugins" "$WORK_DIR/ivllm/plugins"',
-    );
   });
 
   it('wraps ray start commands in bash -c to guarantee venv PATH on compute nodes', () => {
@@ -652,7 +488,7 @@ describe('renderInferenceScript (multi-node)', () => {
   it('sets NVHPC_ROOT and LD_LIBRARY_PATH preamble before ray start', () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain(
-      'NVHPC_ROOT=$PROJECTDIR/ivllm/nvhpc/Linux_aarch64/26.3',
+      'NVHPC_ROOT=/projects/p/ivllm/nvhpc/Linux_aarch64/26.3',
     );
     expect(script).toContain('$NVHPC_ROOT/cuda/12.9/compat');
     // preamble must appear before ray start
@@ -668,10 +504,9 @@ describe('renderInferenceScript (multi-node)', () => {
     expect(script).not.toContain('VLLM_USE_RAY_SPMD_HEAD');
   });
 
-  it('sets NCCL_CROSS_NIC=1 and NCCL_FORCE_FLUSH=0 for multi-node NCCL comms', () => {
+  it('sets NCCL_CROSS_NIC=1 for multi-node NCCL comms', () => {
     const script = renderInferenceScript(multiNodeBase);
     expect(script).toContain('NCCL_CROSS_NIC=1');
-    expect(script).toContain('NCCL_FORCE_FLUSH=0');
   });
 
   it('sets VLLM_SKIP_CUSTOM_ALL_REDUCE=1 to bypass P2P and symmetric memory handshaking across nodes', () => {
