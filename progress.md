@@ -1,28 +1,35 @@
 # Progress
 
 ## Status
-In Progress — TypeDoc JSDoc documentation
+In Progress
 
-## Completed
+## Tasks
+
+### Completed
 - [x] `src/semver.ts` — 3 functions: `semverLt`, `semverGte`, `semverSort`
-- [x] `src/local-ops.ts` — 4 functions
-- [x] `src/remote-ops.ts` — 13 functions/variables
-- [x] `src/assistant.ts` — 24 functions
-- [x] `src/slurm.ts` — 10 functions
-- [x] `src/types.ts` — Full documentation (507 lines, +285 lines added):
-  - **Interfaces**: `Credentials`, `InferenceJobOptions`, `SimplePaths`, `Paths`, `ServeOptions`, `EnvVarEntry`, `JobConfigEntry`, `JobDetails`, `RunRemoteOptions`, `RunRemoteResult`, `RemoteOps`, `LocalOps`, `RemoteMonitor`, `CloseableEventEmitter`, `V1ModelsResponse`
-  - **Classes**: `ProcessState`, `SessionState`
-  - **Type**: `JobStatus`
-  - 11 block comments, 67 inline field comments, `{@link}` cross-refs throughout
-  - Commented-out legacy types (`InferenceScriptOptions`, `MonitorRuntimeOpts`) also documented
+- [x] `src/local-ops.ts` — 4 functions: `makeLocalOps`, `isLocalPortInUse`, `isHealthy`, `queryModels`
+- [x] `src/remote-ops.ts` — 13 functions/variables: `makeRemoteOps`, `createMockSSh`, `SSH_MUX_OPTS`, `makeFullCommand`, `runRemote`, `streamSrun`, `copyFile`, `tailRemoteLog`, `spawnTunnel`, `listInstalledVersions`, `matchVllmVersion`, `selectBestVersion`, `checkSSH`
+- [x] `src/assistant.ts` — 24 functions: all detection, config generation, sandbox management, and launch command functions
+- [x] `src/slurm.ts` — 10 functions: `buildSacctDiagnosticsCommand`, `sacctDiagnosticsSettled`, `parseJobId`, `parseJobState`, `submitJob`, `runInteractive`, `pollJobStatus`, `getJobLog`, `parseSlurmQueueState`, `getSlurmQueueState`
+- [x] `src/types.ts` — 19 types: 11 interfaces, 2 classes, 1 union type, 1 import statement, 2 commented-out legacy types
+- [x] `src/session-helper.ts` — 8 exported functions: `preFlight`, `ensureModelDownloaded`, `createJobLockfile`, `printSlurmLog`, `shutdown`, `timestamp`, `sleep`, `runInferenceSession` + 2 commented-out functions
+- [x] `src/job.ts` — 5 functions: `parseJobDetails`, `hfCachePath`, `parseStartArgs`, `makeSimplePaths`, `makePaths`
+- [x] `src/vllm-config.ts` — 12 exports: 8 functions + 2 constants (`IVLLM_ONLY_KEYS`, `JOB_CONFIG_DIR`)
+- [x] `src/config.ts` — 3 functions + 3 constants + 1 defaults object (see config-docs.md)
 
-## Remaining
-- [ ] `src/session-helper.ts` — `runInferenceSession`, `preFlight`, `ensureModelDownloaded`, `shutdown`, `createJobLockfile`
-- [ ] `src/job.ts` — `parseStartArgs`, `makeSimplePaths`, `makePaths`, `hfCachePath`, `parseJobDetails`
-- [ ] `src/vllm-config.ts` — `parseVllmConfig`, `parseEnvVars`, `writeStrippedConfig`, `saveJobConfig`
-- [ ] `src/config.ts` — Config management functions
+## Files Changed
+- `src/semver.ts` — Added TypeDoc JSDoc
+- `src/local-ops.ts` — Added TypeDoc JSDoc
+- `src/remote-ops.ts` — Added TypeDoc JSDoc
+- `src/assistant.ts` — Added TypeDoc JSDoc
+- `src/slurm.ts` — Added TypeDoc JSDoc
+- `src/types.ts` — Added TypeDoc JSDoc
+- `src/session-helper.ts` — Added TypeDoc JSDoc
+- `src/job.ts` — Added TypeDoc JSDoc
+- `src/vllm-config.ts` — Added TypeDoc JSDoc
+- `src/config.ts` — Added TypeDoc JSDoc
 
-## Validation
-- ✅ All 364 tests pass (zero regressions)
-- ✅ Zero lint errors/warnings on `src/types.ts`
-- ⚠️ Other files have pre-existing lint issues (config.ts, remote-ops.ts) — not in scope
+## Notes
+- Zero ESLint warnings on all documented files
+- All 364 tests pass after documentation updates
+- `bun lint --fix` resolves formatting issues automatically
