@@ -11,6 +11,45 @@ metadata:
 
 Generates a ready-to-use `vllm.yaml` config file for running a HuggingFace model on Isambard AI HPC using `ivllm start`. It fetches the model card to determine architecture and parameter count, calculates memory requirements against Isambard AI's GH200 120GB nodes (~96 GiB usable HBM3e per GPU), selects appropriate parallelism, and writes the YAML file.
 
+## ⚡ Quick Reference — Key Decisions
+
+> Read this first. These are the decisions that cause the most problems when done wrong.
+
+### Parallelism (the #1 most common mistake)
+
+| GPUs needed | Default `tensor-parallel-size` | Notes |
+|-------------|-------------------------------|-------|
+| 1 GPU | `tensor-parallel-size: 1` | Only if model fits and user wants minimal resources |
+| 1–2 GPUs | **`tensor-parallel-size: 2`** (default) | Good balance of queue time and capacity |
+| 3–4 GPUs | **`tensor-parallel-size: 4`** (full node) | Required to fit, or user explicitly wants max throughput |
+| >4 GPUs | **`tensor-parallel-size: 4`** + `pipeline-parallel-size: N` | Multi-node — warn the user first |
+
+**Rule of thumb**: `needed_gpus = ceil(params_B × 2 / 86.4)`. Then apply the table above.
+
+### Critical gotchas (config errors that cause real failures)
+
+| Issue | Impact | Fix |
+|-------|--------|-----|
+| **MoE + flashinfer** | 2+ hour JIT compilation hang | Must set `gdn-prefill-backend`, `moe-backend`, `attention-config`, `enable-flashinfer-autotune: false` (see Step 7) |
+| **`-cc.dotted.shorthand`** | vLLM startup crash | Expand to long form: `-cc.key=val` → `compilation-config: '{"key": val}'` (see Step 8) |
+| **`tensor-parallel-size` does not divide attention heads** | vLLM crash on weight loading | tp must be 1, 2, or 4 and must evenly divide `num_attention_heads` |
+| **`min-vllm-version` too low** | Unknown key / missing flag error | Set to earliest version that supports the model + features |
+
+### Defaults (don't change these unless you have a reason)
+
+| Setting | Default | When to change |
+|---------|---------|----------------|
+| `max-model-len` | Full native context length | Only if explicit KV cache OOM calculation shows it won't fit |
+| `gpu-memory-utilization` | `0.90` | Rarely |
+| `dtype` | `bfloat16` | Use `fp8` only if memory-constrained and FP8 variant exists |
+| `enable-auto-tool-choice` | `true` | Only for base/pretrain checkpoints or pure reasoning models |
+
+### CPU offload threshold
+
+If `params_B × 2 > 96 GB` and you want a single-node job, suggest `cpu-offload-gb`. Example: Llama-3-70B at 140 GB vs 96 GB GPU.
+
+---
+
 ## When to Use This Skill
 
 - User asks to generate or create a vLLM config or `vllm.yaml` for a named model
@@ -177,6 +216,9 @@ When reporting to the user, include:
 - "Minimum vLLM version: 0.6.0+"
 
 **Single node** (needed_gpus ≤ 4):
+
+⚠️ **Parallelism is the most common config error.** Using `tensor-parallel-size: 1` when the model needs 2 GPUs will cause an OOM crash that wastes the user's time debugging. Always apply these rules:
+
 - **Default to `tensor-parallel-size: 2`** for models needing 1–2 GPUs. Two GPUs are always available in the queue (users who grab part of a node typically use only 1), so tp=2 gives a good balance of capacity and fast queue times.
 - Use `tensor-parallel-size: 4` (full node) if:
   - The model needs 3–4 GPUs to fit, **or**
@@ -206,7 +248,20 @@ available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB  # sc
 ### 7. Check for special options
 
 - **Reasoning models** (Qwen3, DeepSeek-R1, QwQ, etc.): add the `reasoning-parser`. Use `qwen3` for Qwen3 series; `deepseek_r1` for DeepSeek-R1/V3 and most others. Check the model card vLLM quickstart snippet for the exact name.
-- **MoE models with `tensor-parallel-size >= 2`**: add `enable-expert-parallel: true`. The official vLLM recipes (DeepSeek-R1, Qwen3.5) consistently recommend this — it uses expert parallelism for the MoE layers (all-to-all comms, more efficient) while dense layers remain tensor-parallelized. No benefit when tp=1.
+
+🚨 **MoE models — flashinfer JIT hang (this causes 2+ hour startup delays)**:
+
+If the model is MoE **and** `tensor-parallel-size >= 2`, **you must** set these four keys to force Triton kernels and disable the autotune profiling loop:
+
+```yaml
+gdn-prefill-backend: "triton"
+moe-backend: triton
+attention-config: '{"backend":"TRITON_ATTN"}'
+enable-flashinfer-autotune: false
+```
+
+This applies to DeepSeek, Qwen3.5, Gemma, and all MoE models on Isambard AI. The autotune loop takes >2 hours on these models; the Triton kernels are pre-compiled and work immediately.
+
 - **FP8 quantization**: GH200/H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
 - **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
@@ -235,7 +290,11 @@ Then use as a YAML key:
 
 `compilation-config: '{"pass_config": {"fuse_allreduce_rms": false}}'`
 
-**GOTCHA — merging with existing compilation-config**: The recipe may already have a `--compilation-config` value that must be merged, not replaced. For example, the DeepSeek-V4-Pro recipe has:
+🚨 **Compilation-config shorthand gotcha — this causes vLLM startup crashes**:
+
+Any dotted shorthand (`-cc.key=val`) **must** be expanded to its long-form flag (`--cc '{"key": "val"}'`), then converted to a YAML key (`compilation-config: '{"key": "val"}'`).
+
+**GOTCHA — merging with existing values**: The recipe may already have a `--compilation-config` value that must be merged, not replaced. For example, the DeepSeek-V4-Pro recipe has:
 
 `--compilation-config '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY"}'`
 
@@ -243,7 +302,7 @@ When adding the pass config option above, merge the keys into a single JSON obje
 
 `compilation-config: '{"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY", "pass_config": {"fuse_allreduce_rms": false}}'`
 
-**General rule**: Any dotted shorthand (`-X.key=value`) must be expanded to its long-form flag (`--X '{"key": "value"}'`), then converted to a YAML key (`X: '...'`). So far we have only encountered this with `-cc`/`--compilation-config`, but the same pattern likely applies to any similar dotted shorthand.
+**General rule**: So far we have only encountered this with `-cc`/`--compilation-config`, but the same pattern likely applies to any similar dotted shorthand.
 
 ### 9. Write the YAML file
 
@@ -323,6 +382,11 @@ enable-flashinfer-autotune: false  # Explicitly kills the profiling loop
 | `--offload-num-in-group` | Layers to offload per group | 1 | Must be ≤ offload-group-size |
 
 **When to suggest CPU offload:**
+
+💡 If `params_B × 2 > 96 GB` and the user wants a **single-node job**, suggest `cpu-offload-gb`.
+
+Example: Llama-3-70B at 140 GB vs 96 GB GPU needs ~44 GB offload.
+
 - Model exceeds single-GPU memory (e.g., Llama-3-70B at 140 GB vs 96 GB GPU)
 - Single-node job desired but weights don't fit
 - User asks about optimization for large models
@@ -418,16 +482,37 @@ export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 
 ## Validation
 
-Before writing the file, verify:
+Before writing the file, verify every item:
+
+### Parallelism
+
 - [ ] `tensor-parallel-size × pipeline-parallel-size` = total GPUs needed
 - [ ] `tensor-parallel-size` is 1, 2, or 4
+- [ ] `tensor-parallel-size` evenly divides `num_attention_heads` (vLLM will crash on weight loading otherwise)
+- [ ] Parallelism follows the default rules: **tp=2** for 1–2 GPUs, **tp=4** for 3–4 GPUs
+- [ ] If multi-node: user has been warned about resource requirements (multi-node uses `#SBATCH --nodes=N` with `vllm serve --distributed-executor-backend ray`)
+
+### Memory & context length
+
 - [ ] `max-model-len` is a positive integer ≤ native context length
+- [ ] If native context is very large (e.g. 131072), confirm the user wants the full context or if a smaller value is acceptable
+- [ ] If model exceeds single-GPU memory and user wants single-node: `cpu-offload-gb` has been suggested
+- [ ] If model is memory-constrained and an FP8 variant exists: `quantization: fp8` has been considered
+
+### Special options
+
+- [ ] **MoE model + tp ≥ 2**: flashinfer settings present (`gdn-prefill-backend`, `moe-backend`, `attention-config`, `enable-flashinfer-autotune: false`)
+- [ ] **Reasoning model**: correct `reasoning-parser` name from the recipe
+- [ ] **Tool calling**: `enable-auto-tool-choice: true` + matching `tool-call-parser` (or explicitly omitted for base models)
+- [ ] **Prefix caching**: `enable-prefix-caching: true` recommended for agent/chatbot use cases
+
+### Config integrity
+
 - [ ] `model` field exactly matches the HuggingFace model ID (case-sensitive)
-- [ ] If multi-node: user has been warned about resource requirements (multi-node is supported by `ivllm`)
-- [ ] `min-vllm-version` is set to the earliest vLLM version that supports this model
+- [ ] `min-vllm-version` is set to the earliest vLLM version that supports this model + features
 - [ ] `env:` only contains variables explicitly recommended by the vLLM recipe or required for the model
 - [ ] All parameter options use the long name (two hyphens).
-- [ ] `-cc`/`--compilation-config` options are merged appropriately
+- [ ] `-cc`/`--compilation-config` shorthand expanded to long form and merged if already present
 
 ## Troubleshooting
 
