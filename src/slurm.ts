@@ -11,17 +11,26 @@ export const SACCT_DIAGNOSTICS_FORMAT =
   'JobID,JobName%24,NodeList%24,State,ExitCode,ReqMem,AllocTRES%40,MaxRSS,MaxRSSNode%18,MaxRSSTask,MaxVMSize';
 
 /**
+ * Build a sacct diagnostics command for post-mortem analysis.
  *
- * @param jobId
+ * Uses the {@link SACCT_DIAGNOSTICS_FORMAT} to request job details
+ * including exit code, resource usage, and memory peaks.
+ * @param jobId - The SLURM job ID (e.g. '123456')
+ * @returns The full sacct command string
  */
 export function buildSacctDiagnosticsCommand(jobId: string): string {
   return `sacct -j ${jobId} --format=${SACCT_DIAGNOSTICS_FORMAT}`;
 }
 
 /**
+ * Check whether a SLURM job has settled to a terminal state.
  *
- * @param sacctOutput
- * @param jobId
+ * Parses the sacct output looking for the given job ID. A job is
+ * considered settled when its state line does not contain any active
+ * state keywords (RUNNING, PENDING, CONFIGURING, COMPLETING).
+ * @param sacctOutput - Raw output from a sacct command
+ * @param jobId - The SLURM job ID to check for
+ * @returns true when the job is no longer active, false if still running
  */
 export function sacctDiagnosticsSettled(
   sacctOutput: string,
@@ -37,8 +46,12 @@ export function sacctDiagnosticsSettled(
 }
 
 /**
+ * Extract the SLURM batch job ID from `sbatch` output.
  *
- * @param sbatchOutput
+ * Parses the standard sbatch message `Submitted batch job <ID>` and
+ * returns the numeric job ID, or `null` if no match is found.
+ * @param sbatchOutput - Raw stdout from an sbatch command
+ * @returns The job ID string, or `null` if parsing fails
  */
 export function parseJobId(sbatchOutput: string): string | null {
   const match = sbatchOutput.match(/Submitted batch job (\d+)/);
@@ -46,8 +59,18 @@ export function parseJobId(sbatchOutput: string): string | null {
 }
 
 /**
+ * Parse a SLURM job state from `sacct` output and map it to a
+ * {@link JobState} enum value.
  *
- * @param sacctOutput
+ * Reads only the first whitespace-delimited token of the state column:
+ *
+ * | Token     | Mapped state  |
+ * |-----------|---------------|
+ * | `COMPLETED` | `completed` |
+ * | `RUNNING` / `PENDING` | `running` |
+ * | Anything else | `failed` |
+ * @param sacctOutput - Raw state string from `sacct --format=State`
+ * @returns A mapped job state, or `null` for empty input
  */
 export function parseJobState(sacctOutput: string): JobState | null {
   const state = sacctOutput.trim().split(/\s+/)[0]?.toUpperCase();
@@ -58,10 +81,15 @@ export function parseJobState(sacctOutput: string): JobState | null {
 }
 
 /**
- * Run a job using sbatch. This will place it in the queue. The script must include all the node requirements
- * In the #SBATCH directives at the beginning of the script
- * @param config
- * @param remoteScriptPath
+ * Submit a SLURM batch job via `sbatch` and start an optional monitor.
+ *
+ * Runs the specified script on the remote host, extracts the job ID
+ * from sbatch output, and stores it in the {@link ProcessState}. After
+ * submission the optional {@link monitor} is started to observe progress.
+ * @param remoteScriptPath - Path to the SLURM script on the remote host
+ * @param sessionState - Process state whose `slurmJobId` is updated on success
+ * @param monitor - Optional monitor to observe the job after submission
+ * @throws {Error} if sbatch fails or the job ID cannot be parsed
  */
 export async function submitJob(
   remoteScriptPath: string,
@@ -88,12 +116,25 @@ export async function submitJob(
 }
 
 /**
- * Run interactively using srun. This will stil be queued but can use the section reserved for interactive.
- * The command must include all the node requirements as CLI flags.
- * #SBATCH directives at the beginning of the script are ignored.
- * @param config
- * @param options
- * @param remoteScriptPath
+ * Submit a job script for interactive execution via `srun`.
+ *
+ * Calculates resource parameters (GPU count, CPUs per GPU, memory, node
+ * exclusivity) from the session's start arguments and executes the remote
+ * script through an {@link RemoteOps.streamSrun} stream. Unlike
+ * {@link submitJob}, this keeps the terminal coupled to job output.
+ *
+ * **Resource calculation**:
+ *
+ * - **Node count**: `ceil(gpuCount / 4)`
+ * - **Gpus per node**: `ceil(gpuCount / nodeCount)`
+ * - **Memory**: `'0'` (unlimited) for full/multi-node; otherwise
+ *   `gpuCount × 115 GB` (one Grace Hopper superchip per GPU)
+ * - **CPUs per GPU**: Fixed at 64 (8 physical cores reserved for IO)
+ * - **Exclusive flag**: Applied when `nodeCount > 1` or all 4 GPUs used
+ * @param ops - {@link RemoteOps} instance for SSH execution
+ * @param remoteScriptPath - Absolute path to the remote `.sh` script
+ * @param sessionState - Current session (provides `startArgs`, `process`)
+ * @param monitor - Monitor to start after the srun process begins
  */
 export async function runInteractive(
   ops: RemoteOps,
@@ -134,9 +175,14 @@ export async function runInteractive(
 }
 
 /**
+ * Poll a SLURM job's current state via `sacct`.
  *
- * @param config
- * @param jobId
+ * Queries the job state using `sacct --format=State --noheader -X` and
+ * delegates to {@link parseJobState} for mapping. Returns `'running'` as
+ * a fallback when the state cannot be parsed.
+ * @param ops - {@link RemoteOps} instance for SSH execution
+ * @param jobId - SLURM job ID to query
+ * @returns The job state, defaulting to `'running'` if unparseable
  */
 export async function pollJobStatus(
   ops: RemoteOps,
@@ -150,9 +196,12 @@ export async function pollJobStatus(
 }
 
 /**
+ * Fetch the contents of a remote log file via SSH.
  *
- * @param config
- * @param logPath
+ * A simple wrapper around `cat` executed over the login node connection.
+ * @param ops - {@link RemoteOps} instance for SSH execution
+ * @param logPath - Absolute path to the remote log file
+ * @returns The file contents as a string
  */
 export async function getJobLog(
   ops: RemoteOps,
@@ -166,8 +215,12 @@ export async function getJobLog(
 }
 
 /**
+ * Parse a `squeue` output line into a structured {@link SlurmQueueState}.
  *
- * @param squeueOutput
+ * Splits the trimmed output on whitespace — the first token becomes
+ * the state, and the rest is joined as the reason.
+ * @param squeueOutput - Raw output from `squeue -j <id> --format="%T %R"`
+ * @returns Parsed state and reason, or `null` for empty input
  */
 export function parseSlurmQueueState(
   squeueOutput: string,
@@ -181,9 +234,14 @@ export function parseSlurmQueueState(
 }
 
 /**
+ * Query the SLURM queue for a job's current state and reason.
  *
- * @param config
- * @param jobId
+ * Runs `squeue -j <jobId> --format="%T %R"` on the login node and
+ * delegates to {@link parseSlurmQueueState} for parsing. Returns
+ * null when the job is not found in the queue.
+ * @param ops - Remote operations interface for SSH execution
+ * @param jobId - The SLURM job ID to query
+ * @returns The parsed queue state and reason, or null if the job is not in the queue
  */
 export async function getSlurmQueueState(
   ops: RemoteOps,
