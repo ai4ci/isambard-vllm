@@ -1,7 +1,22 @@
 /**
- * Returns true if semver string `a` is strictly less than `b`.
- * @param a
- * @param b
+ * Compare two semantic version strings (MAJOR.MINOR.PATCH).
+ *
+ * Returns `true` if `a` is strictly less than `b` by lexicographic
+ * major → minor → patch ordering. Components that are missing or
+ * cannot be parsed as integers are treated as `0`.
+ *
+ * **Examples**
+ *
+ * ```ts
+ * semverLt('0.19.0', '0.19.1') // true
+ * semverLt('0.19.1', '0.19.1') // false
+ * semverLt('0.19.1', '0.20.0') // true
+ * semverLt('1.0.0', '0.99.0')  // false
+ * ```
+ *
+ * @param a - Left-hand version string (e.g. `'0.19.1'`)
+ * @param b - Right-hand version string (e.g. `'0.20.0'`)
+ * @returns `true` if `a < b`, otherwise `false`
  */
 export function semverLt(a: string, b: string): boolean {
   const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
@@ -13,17 +28,43 @@ export function semverLt(a: string, b: string): boolean {
 }
 
 /**
- * Returns true if semver string `a` is greater than or equal to `b`.
- * @param a
- * @param b
+ * Compare two semantic version strings (MAJOR.MINOR.PATCH).
+ *
+ * Returns `true` if `a` is greater than or equal to `b` by lexicographic
+ * major → minor → patch ordering. This is the logical inverse of
+ * {@link semverLt}.
+ *
+ * **Examples**
+ *
+ * ```ts
+ * semverGte('0.20.0', '0.19.1') // true
+ * semverGte('0.19.1', '0.19.1') // true
+ * semverGte('0.19.0', '0.19.1') // false
+ * ```
+ *
+ * @param a - Left-hand version string (e.g. `'0.20.0'`)
+ * @param b - Right-hand version string (e.g. `'0.19.1'`)
+ * @returns `true` if `a >= b`, otherwise `false`
  */
 export function semverGte(a: string, b: string): boolean {
   return !semverLt(a, b);
 }
 
 /**
- * Returns a new array sorted descending (highest version first).
- * @param versions
+ * Sort an array of semantic version strings in descending order
+ * (highest version first).
+ *
+ * Returns a **new** array; the input array is not mutated.
+ *
+ * **Examples**
+ *
+ * ```ts
+ * semverSort(['0.19.0', '0.22.0', '0.19.1'])
+ * // → ['0.22.0', '0.19.1', '0.19.0']
+ * ```
+ *
+ * @param versions - Array of version strings (e.g. `['0.19.0', '0.20.0']`)
+ * @returns A new array sorted descending by version
  */
 export function semverSort(versions: string[]): string[] {
   return [...versions].sort((a, b) =>
