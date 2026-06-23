@@ -39,6 +39,9 @@ export FI_MR_CACHE_MONITOR=userfaultfd
 export NCCL_CROSS_NIC=1
 export NCCL_MIN_NCHANNELS=4
 
+# prevents parallel GPU worker processes from overlapping data transfers and causing a race condition or kernel hang during deep pipeline/tensor synchronizations
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+
 # Prevents catastrophic virtual memory fragmentation inside the unified space
 export NCCL_CUMEM_ENABLE=0
 

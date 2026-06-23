@@ -62,16 +62,39 @@ When `ivllm start` reaches running state, offer to launch the user's AI coding a
 See implementation.md Phase F2.9 for full bug list. All known bugs (JIT cache races, umask permissions, and custom all-reduce) are successfully resolved, end-to-end multi-node execution validated.
 
 ### Phase F3 — Model routing server
-- Concept: Run a model router LOCAL.
-- Support multiple concurrently running `ivllm` instances on COMPUTE nodes.
-- Auto port assignment from configurable range (default 11435–11534) allowing multiple connections to COMPUTE from LOCAL
-- LOCAL model router is be a lightweight openai API compatible proxy server listening on e.g. port 11434.
-- Agent harness connects to LOCAL:11434.
-- LOCAL model router maintains registry of `vllm.json` configured models and port mapping to COMPUTE nodes if running.
-- LOCAL model router provides custom `/model/add`, `/model/delete`, `/model/status`, `/model/start`, `/model/stop`, `/model/log`  endpoints which provides details of configured models, current running status, options to add models with `vllm.json` configuration, or delete model configurations, and ability to start and stop a named model, and ability to inspect vllm logs.
-- LOCAL model router provides custom `/provider` endpoint which returns opencode compatible provider configuration based on name of models available
-- LOCAL model router provides pass through (routing) implementations of all other vllm supported openai API endpoints based on name of model.
-- LOCAL model router shutdown (Ctrl+C / `exit`) closes all COMPUTE nodes.
-- LOCAL model router automatically shuts down unused models after (e.g. 15 minute) timeout to free up COMPUTE nodes.
-- LOCAL model router automatically starts up models when requested (through model parameter of openai api calls) using cached `vllm.json` config.
-- requests to model router during model startup sequence returns a "Starting up <modelname>, please try again in a few minutes"
+
+**Status:** Design complete (see `design/phase-f3-router.md`), implementation pending.
+
+**Concept:** HTTP server that acts as an OpenAI API-compatible proxy, managing multiple vLLM instances on Isambard COMPUTE nodes. Designed for agent orchestration scenarios.
+
+**Architecture (MVP):**
+- Router runs on user's laptop at `http://localhost:11434`
+- Manages SLURM jobs via SSH to Isambard LOGIN
+- Agents connect to router, router proxies to vLLM backends on COMPUTE nodes
+- Future: router can run on LOGIN node (no SSH timeout)
+
+**Key features:**
+- `GET /v1/models` — OpenAI-compatible model discovery
+- `POST /v1/chat/completions` — Proxied to vLLM with lazy startup
+- Admin API: `/admin/models/*` for model lifecycle management
+- Model registry: `~/.config/ivllm/models.json`
+- Auto port assignment (11435–11534 pool)
+- Idle timeout per model (configurable, -1 = never shutdown)
+- Lazy startup: agent request triggers SLURM job submission
+- Hard cleanup: router shutdown cancels all managed SLURM jobs
+
+**Implementation phases:**
+- [ ] F3.1 — Project scaffold (HTTP server, config loader)
+- [ ] F3.2 — Model registry (CRUD, port pool, state tracking)
+- [ ] F3.3 — SLURM integration (reuse existing templates, SSH abstraction)
+- [ ] F3.4 — OpenAI API proxy (model listing, chat completions)
+- [ ] F3.5 — Admin API (add/remove/start/stop/logs/provider endpoints)
+- [ ] F3.6 — Lifecycle management (lazy startup, idle timeout, health checks)
+- [ ] F3.7 — CLI wrapper (`ivllm router` command)
+- [ ] F3.8 — Documentation (API reference, agent integration examples)
+- [ ] F3.9 — End-to-end testing (lazy startup, concurrent models, cleanup)
+
+**Known limitations (MVP):**
+- 12-hour SSH timeout (requires reconnection or login-node deployment)
+- No persistence (router restart loses model state)
+- Single-user (no authentication)

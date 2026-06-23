@@ -1,49 +1,16 @@
-import type {
-  ServeOptions,
-  RemoteOps,
-  EnvVarEntry,
-  Credentials,
-  RemoteMonitor,
-  CloseableEventEmitter,
-  LocalOps,
-} from './types.ts';
+import type { RemoteOps, EnvVarEntry, LocalOps } from './types.ts';
 import { SessionState, ProcessState } from './types.ts';
-import { hfCachePath, makePaths, parseJobDetails } from './job.ts';
+import { makePaths } from './job.ts';
 import type { InferenceJobOptions, JobDetails } from './types';
 import { monitorSession, detachSession } from './monitors.ts';
 
-import { checkSSH } from './remote-ops.ts';
-
-import {
-  parseVllmConfig,
-  parseEnvVars,
-  jobConfigPath,
-  writeStrippedConfig,
-} from './vllm-config.ts';
-import {
-  sacctDiagnosticsSettled,
-  buildSacctDiagnosticsCommand,
-  submitJob,
-  runInteractive,
-} from './slurm.ts';
+import { writeStrippedConfig } from './vllm-config.ts';
+import { submitJob, runInteractive } from './slurm.ts';
 import { renderInferenceScript } from './templates/inference.ts';
 import { renderMockInferenceScript } from './templates/mock-inference.ts';
-import { writeFileSync, existsSync, unlinkSync, mkdtempSync } from 'fs';
+import { writeFileSync, existsSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, basename } from 'path';
-// import { createHash } from 'crypto';
-
-// function getHash(obj: Record<string, unknown>): string {
-//   // Sort keys so identical configs produce identical hashes regardless of input order
-//   const str = JSON.stringify(obj, Object.keys(obj).sort());
-//   return createHash('sha256').update(str).digest('hex').slice(0, 16);
-// }
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-// ── Configuration resolution ──────────────────────────────────────────────
 
 // ── Shared utilities ──────────────────────────────────────────────────────
 
