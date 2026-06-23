@@ -13,7 +13,6 @@
  * semverLt('0.19.1', '0.20.0') // true
  * semverLt('1.0.0', '0.99.0')  // false
  * ```
- *
  * @param a - Left-hand version string (e.g. `'0.19.1'`)
  * @param b - Right-hand version string (e.g. `'0.20.0'`)
  * @returns `true` if `a < b`, otherwise `false`
@@ -41,7 +40,6 @@ export function semverLt(a: string, b: string): boolean {
  * semverGte('0.19.1', '0.19.1') // true
  * semverGte('0.19.0', '0.19.1') // false
  * ```
- *
  * @param a - Left-hand version string (e.g. `'0.20.0'`)
  * @param b - Right-hand version string (e.g. `'0.19.1'`)
  * @returns `true` if `a >= b`, otherwise `false`
@@ -62,7 +60,6 @@ export function semverGte(a: string, b: string): boolean {
  * semverSort(['0.19.0', '0.22.0', '0.19.1'])
  * // → ['0.22.0', '0.19.1', '0.19.0']
  * ```
- *
  * @param versions - Array of version strings (e.g. `['0.19.0', '0.20.0']`)
  * @returns A new array sorted descending by version
  */

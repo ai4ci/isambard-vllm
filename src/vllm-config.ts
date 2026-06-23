@@ -133,6 +133,10 @@ export function parseVllmConfig(filePath: string): ServeOptions {
   };
 }
 
+/**
+ *
+ * @param filePath
+ */
 export function readVllmYaml(filePath: string): Record<string, unknown> {
   const raw = readFileSync(filePath, 'utf-8');
   const doc = yaml.load(raw) as Record<string, unknown>;
@@ -143,6 +147,7 @@ export function readVllmYaml(filePath: string): Record<string, unknown> {
  * Returns a cleaned YAML string with all ivllm-specific keys removed.
  * vLLM errors on unknown config keys — always use this when uploading to the remote.
  * @param filePath
+ * @param doc
  */
 export function stripIvllmKeys(
   doc: Record<string, unknown>,

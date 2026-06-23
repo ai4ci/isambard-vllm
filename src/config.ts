@@ -60,7 +60,6 @@ const DEFAULTS: Credentials = {
  * When the file exists, merges stored values over the defaults so that only
  * explicitly configured fields override the base values.
  * @returns Parsed credentials (defaults if no config file exists)
- *
  * @see DEFAULTS
  * @see saveConfig
  */
@@ -77,10 +76,8 @@ export function loadCredentials(): Credentials {
  *
  * Creates {@link CONFIG_DIR} if it does not exist, then writes the
  * credentials as formatted JSON to {@link CONFIG_PATH}.
- *
  * @param config - Credentials object to persist (typically from
  *                 {@link loadCredentials} after interactive setup)
- *
  * @see loadCredentials
  * @see CONFIG_PATH
  * @see CONFIG_DIR
@@ -99,12 +96,9 @@ export function saveConfig(config: Credentials): void {
  * Checks `loginHost` and `username` — both must be non-empty strings.
  * Throws a descriptive `{@link Error}` with instructions to run the
  * `ivllm config` command if a field is missing.
- *
  * @param config - Credentials to validate (see {@link Credentials})
- *
  * @throws {Error} If `loginHost` is missing, suggests `ivllm config --login-host <host>`
  * @throws {Error} If `username` is missing, suggests `ivllm config --username <user>`
- *
  * @see loadCredentials
  * @see saveConfig
  */

@@ -37,7 +37,6 @@ import { tmpdir } from 'node:os';
  * | spawnTunnel | Logs tunnel details, returns mock emitter |
  * | matchVllmVersion | Returns best of ['0.22.0', minVllmVersion] |
  * | checkSSH | Returns true |
- *
  * @param config - SSH {@link Credentials} used to build remote commands
  * @param dryRun - When true return mock implementations for testing
  * @returns An object conforming to the {@link RemoteOps} interface
@@ -140,7 +139,6 @@ export function makeRemoteOps(config: Credentials, dryRun: boolean): RemoteOps {
  * | stdin | EventEmitter with a no-op write |
  * | stdout.pipe / stderr.pipe | Identity functions (return destination) |
  * | kill() | Emits 'close', 0 and returns true |
- *
  * @param name - Label for console messages during kill()
  * @param pid - Simulated process ID
  * @returns A mock CloseableEventEmitter usable in place of a ChildProcess
@@ -202,7 +200,6 @@ const SSH_MUX_OPTS = [
  *
  * makeFullCommand('ls -la', [{ key: 'HF_HOME', value: '/tmp/hf' }]);
  * // → 'HF_HOME=/tmp/hf ls -la'
- *
  * @param command - The shell command to execute
  * @param env - Environment variables to prepend
  * @returns The command string with env vars as prefix
@@ -227,8 +224,6 @@ function makeFullCommand(command: string, env: EnvVarEntry[]): string {
  * | Option | Purpose |
  * |--------|---------|\n * | ControlMaster=auto + ControlPersist=600 | Multiplexed connection (see {@link SSH_MUX_OPTS}) |
  * | BatchMode=yes | Fail immediately on auth issues (no interactive prompts) |
- *
- *
  * @param config - SSH {@link Credentials}
  * @param command - Shell command to execute on the login node
  * @param options - Execution options
@@ -286,7 +281,6 @@ function runRemote(
  *   in sessionState.slurmJobId
  *
  * // Interactive srun — output streams to terminal
- *
  * @param config - SSH {@link Credentials}
  * @param command - srun command to execute on the login node
  * @param options - Execution options (default silent: false)
@@ -361,8 +355,6 @@ function streamSrun(
  *
  * Spawns scp with batch mode and SSH multiplexing via {@link SSH_MUX_OPTS}
  * for efficient bulk transfers.
- *
- *
  * @param config - SSH {@link Credentials}
  * @param localPath - Path to the local source file
  * @param remotePath - Destination path on the login node
@@ -400,7 +392,6 @@ function copyFile(
  *
  * // Stream setup logs in real time
  * tailer.stop(); // close the SSH connection
- *
  * @param config - SSH {@link Credentials}
  * @param remotePath - Absolute path to the remote log file
  * @param prefix - Optional string prepended to every output line
@@ -463,7 +454,6 @@ function tailRemoteLog(
  * | ExitOnForwardFailure=yes | Fail fast if port forwarding cannot be established |
  *
  * // Forward local:11434 → gh200-1:8000 through the login node
- *
  * @param config - SSH {@link Credentials}
  * @param localPort - Port to listen on locally
  * @param remoteHost - Remote host (typically a compute node, e.g. 'gh200-1')
@@ -508,8 +498,6 @@ function spawnTunnel(
  *
  * Discovers installed vLLM versions on the login node and parses them
  * output to extract version strings matching '\\d+.\\d+'.
- *
- *
  * @param config - SSH {@link Credentials}
  * @returns An array of installed version strings (e.g. ['0.19.1', '0.22.0'])
  */
@@ -539,8 +527,6 @@ async function listInstalledVersions(config: Credentials): Promise<string[]> {
  * | minVllmVersion provided + no candidates | throw with error listing installed versions |
  * | minVllmVersion falsy + versions exist | Highest installed version |
  * | No versions installed | throw suggesting ivllm setup |
- *
- *
  * @param config - SSH {@link Credentials}
  * @param minVllmVersion - Minimum acceptable version string (e.g. '0.20.0'); falsy means "any version"
  * @returns The selected installed version string
@@ -585,7 +571,6 @@ export async function matchVllmVersion(
  *
  * selectBestVersion(['0.18.0', '0.19.1'], '0.22.0');
  * // → null (no candidate meets minimum)
- *
  * @param installed - Array of installed version strings
  * @param minVersion - Minimum acceptable version (e.g. '0.20.0')
  * @returns The best matching version, or null if no candidate qualifies
@@ -610,8 +595,7 @@ export function selectBestVersion(
  * - On failure: logs Error: Cannot connect to login node. and calls
  *   process.exit(1) (this function does not throw on its own)
  * - On success: logs ✓ SSH connectivity OK
- *
- *
+ * @param credentials
  * @returns true when connectivity is confirmed
  */
 export async function checkSSH(credentials: Credentials): Promise<boolean> {

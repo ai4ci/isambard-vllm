@@ -19,6 +19,7 @@ import { join, basename } from 'path';
  * @param startArgs
  * @param ops
  * @param config
+ * @param localOps
  */
 export async function preFlight(
   startArgs: InferenceJobOptions,
@@ -47,6 +48,7 @@ export async function preFlight(
  * @param hfHome
  * @param model
  * @param vllmVersion
+ * @param ss
  */
 export async function ensureModelDownloaded(ss: SessionState): Promise<void> {
   const hfHome = ss.paths.remoteProjectHfDir;
@@ -122,6 +124,7 @@ hf download "${model}"
  * @param remoteWorkDir
  * @param remoteJobDetails
  * @param dryRun
+ * @param sessionState
  */
 export async function createJobLockfile(
   sessionState: SessionState,
@@ -235,6 +238,7 @@ export async function shutdown(
 /**
  *
  * @param processState
+ * @param state
  * @param reason
  * @param exitCode
  */
@@ -338,6 +342,7 @@ export function sleep(ms: number): Promise<void> {
  * @param startArgs
  * @param isInteractive
  * @param ops
+ * @param localOps
  */
 export async function runInferenceSession(
   startArgs: InferenceJobOptions,

@@ -24,11 +24,9 @@ import type {
  * **Dry-run behaviour**
  *
  * All methods return success/fake data and log `[dry-run]` prefixes.
- *
  * @param localPort - Port the vLLM server listens on locally (default `11434`)
  * @param dryRun - When `true` return mock implementations for testing
  * @returns An object conforming to the {@link LocalOps} interface
- *
  * @example
  * ```ts
  * // Real-mode: check if a vLLM server is healthy
@@ -83,7 +81,6 @@ export function makeLocalOps(localPort: number, dryRun: boolean): LocalOps {
  *
  * **Platform requirement:** Linux or macOS (relies on `lsof`). Not
  * available on Windows.
- *
  * @param port — TCP port number to check.
  * @returns `{ pid, process }` when a listener exists, or `null`.
  */
@@ -113,7 +110,6 @@ async function isLocalPortInUse(
  *
  * Uses a `Promise.race` between an HTTP `fetch` and a `setTimeout`
  * so the call never blocks longer than `timeoutMs`.
- *
  * @param localPort — Port forwarded by the SSH tunnel.
  * @param timeoutMs — Maximum milliseconds to wait before returning `false`.
  * @returns `true` when the health endpoint is reachable within the timeout;
@@ -143,7 +139,6 @@ async function isHealthy(
  *
  * Throws an `Error` containing the HTTP status and reason phrase if the
  * response is non-2xx or if the request times out.
- *
  * @param localPort — Port forwarded by the SSH tunnel.
  * @param timeoutMs — Maximum milliseconds before throwing.
  * @returns The parsed {@link V1ModelsResponse} body.

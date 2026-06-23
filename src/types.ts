@@ -364,7 +364,6 @@ export interface JobConfigEntry {
  * | `model` | HuggingFace model ID |
  * | `server_port` | Port where vLLM listens |
  * | `error` | Error message if the job failed |
- *
  * @see parseJobDetails
  */
 export interface JobDetails {
@@ -597,7 +596,6 @@ export interface CloseableEventEmitter extends EventEmitter {
  * | `data` | Array of loaded model objects |
  * | `data[].id` | Model identifier (e.g. `'Qwen/Qwen2.5-7B-Instruct'`) |
  * | `data[].max_model_len` | Maximum context length, if reported |
- *
  * @see https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html
  */
 export interface V1ModelsResponse {
@@ -681,7 +679,7 @@ export interface V1ModelsResponse {
  * | `enableAutoToolChoice` | Auto-tool-choice flag |
  * | `enableReasoning` | Reasoning-mode flag |
  * | `isInteractive` | Interactive-session flag |
-*/
+ */
 // export interface MonitorRuntimeOpts {
 //     localPort: number;
 //     serverPort: number;
