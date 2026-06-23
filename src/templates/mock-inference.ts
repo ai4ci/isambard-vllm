@@ -1,8 +1,32 @@
 import type { SessionState } from '../types';
 
 /**
+ * Generates a mock SLURM script for testing vLLM inference without a GPU.
  *
- * @param opts
+ * Produces a bash script that starts a lightweight Python HTTP server
+ * mimicking the vLLM `/health` and `/v1/models` endpoints. Used for
+ * dry-run testing, CI validation, and local debugging.
+ *
+ * Script behavior:
+ * 1. Writes `job_details.json` with `initialising` status
+ * 2. Starts a Python mock HTTP server on the configured port
+ * 3. Simulates `${startupDelaySecs}s` startup delay
+ * 4. Verifies the mock server is still running
+ * 5. Updates `job_details.json` to `running` status
+ * 6. Waits for the server process to exit
+ *
+ * | SBATCH Directive | Value |
+ * |------------------|-------|
+ * | `--job-name` | User-provided job name |
+ * | `--nodes` | `1` (single node only) |
+ * | `--ntasks` | `1` |
+ * | `--time` | From `{@link InferenceJobOptions.timeLimit}` |
+ * @param ss - Session state containing job config, paths, and credentials
+ * @returns A bash script string that can be written to a `.slurm.sh` file
+ * @throws {Error} If `SessionState.startArgs` is undefined
+ * @see SessionState
+ * @see InferenceJobOptions
+ * @see renderInferenceScript
  */
 export function renderMockInferenceScript(ss: SessionState): string {
   if (ss.startArgs === undefined)

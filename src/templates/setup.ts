@@ -1,13 +1,50 @@
 import type { ProcessState } from '../types';
 
+/**
+ * Parameters for generating the `{@link renderSetupScript}` SLURM script.
+ *
+ * Passed via `{@link ProcessState}` and consumed by the setup template
+ * to install NVIDIA HPC SDK and vLLM into a versioned virtualenv.
+ *
+ * | Field | Description |
+ * |-------|-------------|
+ * | `vllmVersion` | vLLM version to install (e.g. `'0.22.0'`) |
+ * | `hfToken` | Optional HuggingFace token for gated models |
+ * @see ProcessState
+ * @see renderSetupScript
+ */
 export interface SetupScriptOptions {
+  /** vLLM version string to install (e.g. `'0.22.0'`) */
   vllmVersion: string;
+  /** Optional HuggingFace access token for gated models */
   hfToken?: string;
 }
 
 /**
+ * Generates the `ivllm setup` SLURM batch script for installing
+ * NVIDIA HPC SDK and vLLM into a versioned virtualenv on the Isambard HPC.
  *
- * @param opts
+ * The script executes in two phases:
+ *
+ * 1. **Phase A** — Downloads and installs NVIDIA HPC SDK 26.3
+ *    (`cuda_multi` package with CUDA 12.9 + 13.1) into the
+ *    `{@link SimplePaths.nvhpcDir}` directory.
+ * 2. **Phase B** — Creates a Python 3.12 virtualenv and installs
+ *    vLLM and Ray via `uv pip`, using the vLLM CUDA 12.9 wheel index.
+ *
+ * If the NVHPC SDK or vLLM version is already installed, the
+ * corresponding phase is skipped.
+ *
+ * | Field | Description |
+ * |-------|-------------|
+ * | `vllmVersion` | vLLM version to install (e.g. `'0.22.0'`) |
+ * | `hfToken` | Optional HuggingFace token for gated models |
+ * @param ss - Process state containing paths, version, and NVHPC settings
+ * @param remoteSetupLog - Remote path for the SLURM stdout/stderr log file
+ * @returns Complete bash script string ready for `sbatch` submission
+ * @see ProcessState
+ * @see SetupScriptOptions
+ * @see renderInferenceScript
  */
 export function renderSetupScript(
   ss: ProcessState,

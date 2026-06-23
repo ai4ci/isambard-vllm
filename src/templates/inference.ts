@@ -1,6 +1,29 @@
 import { SACCT_DIAGNOSTICS_FORMAT } from '../slurm.ts';
 import type { SessionState, Paths } from '../../src/types.ts';
 
+/**
+ * Generates the NVHPC environment setup preamble for SLURM scripts.
+ *
+ * Produces module loads, CUDA paths, compiler settings, NCCL tuning,
+ * memory hooks, and multi-NIC configuration. This is the foundation
+ * for all vLLM GPU workloads on Isambard.
+ *
+ * | Section | Purpose |
+ * |---------|--------|
+ * | Module loads | `brics/nccl` + `gcc-native` for JIT compilation |
+ * | CUDA paths | `NVHPC_ROOT`, `CUDA_HOME`, `PATH`, `CPATH`, `LD_LIBRARY_PATH` |
+ * | Compiler | `CC=gcc`, `CXX=g++` for flashinfer/torch.compile |
+ * | CPU threads | `OMP_NUM_THREADS=16` (72-core GH200, 4 GPUs) |
+ * | NCCL tuning | `NCCL_NET_GDR_LEVEL=5`, `FI_PROVIDER=cxi`, multi-NIC striping |
+ * | Memory hooks | `FI_MR_CACHE_MONITOR=userfaultfd` (prevents Slingshot deadlocks) |
+ * | CUDA limits | `CUDA_DEVICE_MAX_CONNECTIONS=1`, `NCCL_CUMEM_ENABLE=0` |
+ * | PCIe tuning | `NCCL_IB_PCI_RELAXED_ORDERING=1` |
+ * | vLLM overrides | `VLLM_SKIP_CUSTOM_ALL_REDUCE=1`, `VLLM_ENGINE_ITERATION_TIMEOUT_S=300` |
+ * @param ss - Session state containing `{@link Paths}` for `{@link SimplePaths.nvhpcRoot}`
+ * @returns Shell script preamble string
+ * @see Paths
+ * @see SimplePaths
+ */
 function renderNVHPCPreamble(ss: SessionState) {
   return `
 module purge
@@ -58,7 +81,14 @@ export VLLM_ALLREDUCE_USE_SYMM_MEM=0        # Disable broken experimental symmet
 }
 
 /**
+ * Generates the exit trap handler that prints diagnostic information when the script exits.
  *
+ * Produces a bash trap that outputs model details, vLLM version, and cache directory
+ * on script termination (normal or error). Used by `{@link renderSingleNodeScript}` and
+ * `{@link renderMultiNodeScript}` to attach to the SLURM job.
+ * @returns Exit trap bash code string
+ * @see renderSingleNodeScript
+ * @see renderMultiNodeScript
  */
 function renderExitDiagnostics(): string {
   return `SLURM_ACCOUNTING_FILE="$WORK_DIR/slurm-accounting.txt"
@@ -71,9 +101,16 @@ persist_slurm_accounting() {
 }
 
 /**
+ * Generates the work directory setup code for SLURM scripts.
  *
- * @param workDir
- * @param model
+ * Creates the job working directory, sets up plugin symlinks, detects and handles
+ * missing LOCALDIR in interactive allocations, and configures JIT cache directories
+ * for flashinfer, deep_gemm, triton, and torchinductor.
+ * @param paths - Session paths containing `{@link SimplePaths.remoteJobDir}`,
+ *        `{@link SimplePaths.remoteProjectVllmPluginsDir}`, and `{@link Paths.remoteProjectJobCacheFile}`
+ * @returns Work directory setup bash code string
+ * @see Paths
+ * @see SimplePaths
  */
 function renderWorkDirSetup(paths: Paths): string {
   return `
@@ -119,6 +156,16 @@ export VLLM_CACHE_ROOT="$HOME/.cache/vllm"
 }
 
 // Called after renderWorkDirSetup so OK to use variables from that.
+/**
+ * Generates the monitoring/watchdog code for the SLURM script.
+ *
+ * Produces a background loop that tracks memory usage and JIT cache growth.
+ * In debug mode (`IVLLM_DEBUG=true`), it produces verbose logs including NCCL
+ * initialization traces, Ray IPC messages, and process memory snapshots.
+ * @returns Background monitor bash code string
+ * @see renderSingleNodeScript
+ * @see renderMultiNodeScript
+ */
 function renderMonitor(): string {
   const debug = !!process.env.IVLLM_DEBUG;
   if (debug) {
@@ -190,8 +237,12 @@ MONITOR_PID=$!
 }
 
 /**
+ * Generates the exit trap handler for the SLURM script.
  *
- * @param includeRayLogs
+ * Produces bash functions `collect_exit_diagnostics`, `finalize_and_exit`, and `on_exit`,
+ * then registers the trap. Handles graceful shutdown including SLURM accounting capture.
+ * @returns Exit trap bash code string
+ * @see renderExitDiagnostics
  */
 function renderExitTrap(): string {
   return `
@@ -220,6 +271,16 @@ on_exit() {
 trap on_exit EXIT`;
 }
 
+/**
+ * Generates the wait/health-check block for the SLURM script.
+ *
+ * In pre-cache mode (`preCache === true`), the script exits immediately after
+ * vLLM becomes healthy. Otherwise, it waits for the vLLM process to exit
+ * and writes failure diagnostics to the lockfile.
+ * @param preCache - Whether to exit after vLLM health check passes
+ * @returns Wait/health-check bash code string
+ * @see renderHealthCheckAndWait
+ */
 function renderWaitBlock(preCache: boolean) {
   return !preCache
     ? `
@@ -240,9 +301,15 @@ echo "vLLM cache compilation completed and cache saved. Closing down."
 }
 
 /**
+ * Generates the health check and wait logic for the SLURM script.
  *
- * @param workDir
- * @param serverPort
+ * Polls the `/health` endpoint at 15-second intervals, writes `running` to the
+ * lockfile, archives JIT compilation caches to shared storage (tar.gz with
+ * group permissions), and calls `{@link renderWaitBlock}` to complete the lifecycle.
+ * @param ss - Session state containing `{@link Paths.remoteJobCacheFile}`,\n *        `{@link Paths.remoteProjectHfDir}`, and `{@link InferenceJobOptions.serverPort}`
+ * @returns Health check and wait bash code string
+ * @see SessionState
+ * @see renderWaitBlock
  */
 function renderHealthCheckAndWait(ss: SessionState): string {
   const serverPort = ss.startArgs.serverPort;
@@ -305,8 +372,21 @@ finalize_and_exit $EXIT_CODE "vLLM exit"`;
 }
 
 /**
+ * Generates a complete SLURM batch script for single-node vLLM deployment.
  *
- * @param opts
+ * Dispatches between interactive (`isInteractive === true`) and batch modes.
+ * In interactive mode, pipes output via `tee` and invokes the payload directly.
+ * In batch mode, emits `#SBATCH` directives with GPU count, memory (115G/GPU
+ * or exclusive for full nodes), and time limit.
+ *
+ * | Mode | GPU Limit | Memory |
+ * |------|-----------|--------|
+ * | Full node (4 GPUs) | Exclusive | 0 (unlimited) |
+ * | Fractional | ≤3 GPUs | 115G per GPU |
+ * @param ss - Session state containing `{@link InferenceJobOptions}` and `{@link Paths}`
+ * @returns Complete SLURM bash script string
+ * @see SessionState
+ * @see renderSingleNodePayload
  */
 function renderSingleNodeScript(ss: SessionState): string {
   const opts = ss.startArgs!;
@@ -353,8 +433,25 @@ ${runtimePayload}
 }
 
 /**
+ * Generates the payload portion of a single-node SLURM script.
  *
- * @param opts
+ * Assembles the complete runtime environment: NVHPC preamble,
+ * `{@link renderWorkDirSetup}` workdir setup, venv activation, HF cache config,
+ * exit diagnostics, `{@link renderMonitor}` watchdog, custom env injection,
+ * log env vars, vLLM launch via `srun`, and `{@link renderHealthCheckAndWait}`.
+ *
+ * | Component | Function |
+ * |-----------|--------|
+ * | NCCL/GPU setup | `{@link renderNVHPCPreamble}` |
+ * | Workdir + caches | `{@link renderWorkDirSetup}` |
+ * | Monitoring | `{@link renderMonitor}` |
+ * | Env injection | `{@link renderCustomEnv}` |
+ * | Env logging | `{@link renderLogEnvVars}` |
+ * | Health check | `{@link renderHealthCheckAndWait}` |
+ * @param ss - Session state containing `{@link InferenceJobOptions}`, `{@link Paths}`,\n *        and `{@link ServeOptions.model}` for the launch command
+ * @returns Single-node payload bash code string
+ * @see renderSingleNodeScript
+ * @see renderMultiNodePayload
  */
 function renderSingleNodePayload(ss: SessionState): string {
   const opts = ss.startArgs;
@@ -427,8 +524,23 @@ ${renderHealthCheckAndWait(ss)}`;
 }
 
 /**
+ * Generates a complete SLURM batch script for multi-node vLLM deployment via Ray.
  *
- * @param opts
+ * Dispatches between interactive and batch modes. Computes `{@link nodeCount}`
+ * and `{@link gpusPerNode}` from the total GPU count (max 4 GPUs per node).
+ * Always uses `#SBATCH --exclusive` in batch mode.
+ *
+ * The payload delegates to `{@link renderInteractiveMultiNodePayload}` or
+ * `{@link renderMultiNodePayload}` depending on the mode.
+ *
+ * | Parameter | Formula |
+ * |-----------|--------|
+ * | `nodeCount` | `Math.ceil(opts.gpuCount / 4)` |
+ * | `gpusPerNode` | `Math.ceil(opts.gpuCount / nodeCount)` |
+ * @param ss - Session state containing `{@link InferenceJobOptions}` and `{@link Paths}`
+ * @returns Complete multi-node SLURM bash script string
+ * @see renderSingleNodeScript
+ * @see renderMultiNodePayload
  */
 function renderMultiNodeScript(ss: SessionState): string {
   const opts = ss.startArgs!;
@@ -464,6 +576,18 @@ ${renderMultiNodePayload(ss)}
   }
 }
 
+/**
+ * Generates custom environment variable injection from the YAML config.
+ *
+ * Produces `export KEY=VALUE` statements for all entries in
+ * `{@link ServeOptions.env}`. These variables are passed to the vLLM process
+ * and are specific to each job configuration.
+ * @param ss - Session state containing `{@link InferenceJobOptions}` and
+ *        `{@link ServeOptions.env}` for custom env var injection
+ * @returns Environment variable export statements
+ * @see ServeOptions
+ * @see renderSingleNodePayload
+ */
 function renderCustomEnv(ss: SessionState) {
   const envVars = ss.startArgs.configYaml.env;
   return envVars.length > 0
@@ -471,6 +595,15 @@ function renderCustomEnv(ss: SessionState) {
     : '';
 }
 
+/**
+ * Generates environment variable logging for the SLURM script.
+ *
+ * Produces an `echo` block that outputs all `VLLM_`, `RAY_`, `NCCL_`, and
+ * `FI_` prefixed environment variables to the job log file. Used for
+ * diagnostics and debugging vLLM deployment configuration.
+ * @returns Environment logging bash code string
+ * @see renderSingleNodePayload
+ */
 function renderLogEnvVars() {
   return `
 echo "=== Final Environment Variables for vLLM ==="
@@ -482,6 +615,7 @@ echo "============================================"
 /**
  *
  * @param opts
+ * @param cmd
  */
 // function renderMultiNodePayload(ss: SessionState): string {
 //   const opts = ss.startArgs;
@@ -575,6 +709,20 @@ function escapeQuote(cmd: string): string {
   return cmd.replaceAll('"', '\\"');
 }
 
+/**
+ * Generates the interactive multi-node payload for SLURM execution.
+ *
+ * Similar to `{@link renderMultiNodePayload}` but designed for interactive
+ * `srun` allocations: pipes vLLM output via `tee`, runs vLLM in the foreground,
+ * and delegates to `{@link renderHealthCheckAndWait}` for health tracking.
+ *
+ * Unlike batch mode, no `#SBATCH` directives are emitted — the caller
+ * (`{@link renderMultiNodeScript}`) handles those.
+ * @param ss - Session state containing `{@link InferenceJobOptions}`, `{@link Paths}`,\n *        and `{@link ServeOptions.model}` for Ray + vLLM interactive launch
+ * @returns Interactive multi-node payload bash code string
+ * @see renderMultiNodeScript
+ * @see renderMultiNodePayload
+ */
 function renderInteractiveMultiNodePayload(ss: SessionState): string {
   const opts = ss.startArgs;
   const paths = ss.paths;
@@ -692,8 +840,24 @@ fi
 }
 
 /**
+ * Generates the standard multi-node payload for batch SLURM execution.
  *
- * @param opts
+ * Coordinates Ray cluster startup across multiple compute nodes: launches the
+ * Ray head node on the first node, worker nodes on the remainder (via `for` loop
+ * over `scontrol show hostnames`), verifies cluster readiness, then starts vLLM
+ * with `--distributed-executor-backend ray`.
+ *
+ * | Phase | Nodes | Command |
+ * |-------|-------|--------|
+ * | Head node | Node 0 (1 node) | `ray start --head` via `srun` |
+ * | Workers | Nodes 1–N | `ray start --address=$HEAD_NODE_IP:$RAY_PORT` via `srun` |
+ * | vLLM serve | Head node | `vllm serve --distributed-executor-backend ray` |
+ *
+ * Uses `{@link escapeQuote}` to safely escape custom env vars inside `bash -c` strings.
+ * @param ss - Session state containing `{@link InferenceJobOptions}`, `{@link Paths}`,\n *        and `{@link ServeOptions.model}` for Ray + vLLM launch
+ * @returns Multi-node payload bash code string
+ * @see renderMultiNodeScript
+ * @see escapeQuote
  */
 function renderMultiNodePayload(ss: SessionState): string {
   const opts = ss.startArgs;
@@ -893,8 +1057,19 @@ ${renderHealthCheckAndWait(ss)}`;
 //     fi
 
 /**
+ * Top-level entry point — generates a complete SLURM script for vLLM deployment.
  *
- * @param opts
+ * Dispatches based on GPU count: `{@link renderSingleNodeScript}` for ≤4 GPUs
+ * (single-node), `{@link renderMultiNodeScript}` for >4 GPUs (multi-node via Ray).
+ *
+ * | GPU Count | Mode | Backend |
+ * |-----------|------|--------|
+ * | ≤4 | Single-node | `srun vllm serve` |
+ * | >4 | Multi-node | `ray symmetric-run vllm serve` |
+ * @param opts - Session state containing `{@link InferenceJobOptions}` and `{@link Paths}`
+ * @returns Complete SLURM bash script string
+ * @see renderSingleNodeScript
+ * @see renderMultiNodeScript
  */
 export function renderInferenceScript(opts: SessionState): string {
   if (opts.startArgs === undefined)
