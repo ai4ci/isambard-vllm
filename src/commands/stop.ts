@@ -59,7 +59,7 @@ Examples:
   }
 
   // construct a process state from the jobName:
-  let state = new SessionState({
+  const state = new SessionState({
     sessionName: stopArgs.jobName,
     ops: ops,
     paths: makePaths(

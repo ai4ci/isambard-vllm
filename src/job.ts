@@ -29,6 +29,7 @@ export function parseJobDetails(raw: string): JobDetails | null {
 /**
  *
  * @param projectDir
+ * @param projectHfDir
  * @param model
  */
 export function hfCachePath(projectHfDir: string, model: string): string {
@@ -41,6 +42,7 @@ export function hfCachePath(projectHfDir: string, model: string): string {
 /**
  * The main options parsing, yaml config loading and defaults.
  * @param args
+ * @param config
  */
 export async function parseStartArgs(
   args: string[],
@@ -70,7 +72,7 @@ export async function parseStartArgs(
   const dryRun = boolFlags.has('dry-run');
   const noLaunch = boolFlags.has('no-launch');
   const preCache = boolFlags.has('create-cache');
-  let configPath = flags['config'] ?? jobConfigPath(jobName);
+  const configPath = flags['config'] ?? jobConfigPath(jobName);
 
   if (!existsSync(configPath)) {
     throw new Error(
@@ -78,7 +80,7 @@ export async function parseStartArgs(
     );
   }
 
-  let yaml = parseVllmConfig(configPath);
+  const yaml = parseVllmConfig(configPath);
   if (flags['config']) saveJobConfig(jobName, flags['config']);
 
   const gpuCount = flags['gpus']
@@ -111,6 +113,11 @@ export async function parseStartArgs(
   };
 }
 
+/**
+ *
+ * @param config
+ * @param vllmVersion
+ */
 export function makeSimplePaths(
   config: Credentials,
   vllmVersion: string,
@@ -136,6 +143,14 @@ export function makeSimplePaths(
   };
 }
 
+/**
+ *
+ * @param config
+ * @param jobName
+ * @param model
+ * @param cacheKey
+ * @param vllmVersion
+ */
 export function makePaths(
   config: Credentials,
   jobName: string,

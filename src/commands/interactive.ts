@@ -43,7 +43,7 @@ until you type 'exit' or press Ctrl+C. Use 'ivllm start' for background job subm
   }
 
   try {
-    let startArgs = await parseStartArgs(args, credentials);
+    const startArgs = await parseStartArgs(args, credentials);
     startArgs.isInteractive = true;
     const ops = makeRemoteOps(credentials, startArgs.dryRun);
     const localOps = makeLocalOps(startArgs.localPort, startArgs.dryRun);
