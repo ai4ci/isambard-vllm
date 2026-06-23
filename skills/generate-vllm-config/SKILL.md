@@ -193,11 +193,13 @@ When reporting to the user, include:
 
 - **Default to the model's full native context length.** KV cache headroom depends on `tensor-parallel-size` and whether weights fit with room to spare. Do not reduce the context pre-emptively.
 - Only reduce `max-model-len` if an explicit OOM analysis shows the KV cache at native context would exhaust available memory after weights are loaded. Calculate:
-  ```
-  kv_per_token ≈ num_kv_heads × head_dim × 2 bytes × num_layers  (standard dense attention)
-  total_kv_GB  = kv_per_token × max_tokens / 1e9
-  available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB  # scales with tp  # scales with tp
-  ```
+
+```
+kv_per_token ≈ num_kv_heads × head_dim × 2 bytes × num_layers  (standard dense attention)
+total_kv_GB  = kv_per_token × max_tokens / 1e9
+available_for_kv = (usable_per_gpu × tensor_parallel_size) − weights_GB  # scales with tp  # scales with tp
+```
+
 - If the native context does exceed available KV budget, reduce to the largest power-of-two that fits, and note the native context in a YAML comment.
 - Exception: hybrid architectures (e.g. Qwen3.5-35B-A3B with Gated DeltaNet layers) have a tiny KV footprint — keep the full context.
 
@@ -210,12 +212,12 @@ When reporting to the user, include:
 - **Prefix caching**: Recommend `enable-prefix-caching: true` for agent/chatbot use cases with repeated system prompts. Low cost, high benefit.
 - **Environment variables (`env:`)**: Some models require environment variables to be set before `vllm serve` starts. These are specified in the `env:` block of the config. The `env:` key is **ivllm-specific** — it is stripped from the YAML before passing to `vllm serve` (vLLM errors on unknown keys) and rendered as `export` lines in the SLURM script. For multi-node jobs, env vars are automatically propagated into every Ray worker `bash -c` invocation.
 
-  Check the vLLM recipe for recommended env vars. Common examples:
-  ```yaml
-  env:
-    VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
-    VLLM_USE_DEEP_GEMM_FP8: "1"
-  ```
+Check the vLLM recipe for recommended env vars. Common examples:
+```yaml
+env:
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+  VLLM_USE_DEEP_GEMM_FP8: "1"
+```
 
   Always check the model's vLLM recipe page for any `extra_env` recommendations. Values should be quoted strings. Only include env vars that are explicitly recommended by the recipe or required for the model to run correctly.
 
@@ -290,6 +292,18 @@ The rule of thumb `params_B × 2 GB` for bfloat16 is conservative (it's exact fo
 
 For MoE models, all expert weights must reside in GPU memory simultaneously even though only a few activate per forward pass — use total parameter count, not active parameter count, for the memory calculation.
 
+### Flashinfer on Isambard
+
+Flash infer compilation seems to have particular problems on isambard with start up times exceeding 2 hours if it is enabled. This is mainly due a mixture of experts models. The following set of options must be applied to all MOE models.
+
+```
+# Mixture of experts models need to be forced to use triton
+gdn-prefill-backend: "triton"
+moe-backend: triton             # Forces vLLM to use pre-compiled Triton MoE kernels
+attention-config: '{"backend":"TRITON_ATTN"}'
+enable-flashinfer-autotune: false  # Explicitly kills the profiling loop
+```
+
 ### CPU offload (`--cpu-offload-gb`)
 
 **Key facts from NVIDIA's GH200 unified memory research:**
@@ -321,7 +335,7 @@ For MoE models, all expert weights must reside in GPU memory simultaneously even
 
 ### Parallelism choices
 
-**The default is tp=4.** The allocation on isambard is for a 4 GPU node. Smaller requests are only worth it if you can run mulitple models on a single node (not yet supported):
+**The default is tp=4.** The allocation on isambard is for a 4 GPU node. Smaller requests are worth considering if the KV cache is under-utilised and we want to be good citizens on Isambard:
 
 4 nodes gives us
 - 4× more aggregate KV cache memory, enabling longer contexts and larger batches
@@ -355,6 +369,53 @@ Currently supported values must be one of the following:
 
 apertus,cohere_command3,cohere_command4,deepseek_v3,deepseek_v31,deepseek_v32,deepseek_v4,ernie45,functiongemma,gemma4,gigachat3,glm45,glm47,granite,granite-20b-fc,granite4,hermes,hunyuan_a13b,hy_v3,internlm,jamba,kimi_k2,lfm2,llama3_json,llama4_json,llama4_pythonic,longcat,mimo,minimax,minimax_m2,mistral,olmo3,openai,phi4_mini_json,poolside_v1,pythonic,qwen3_coder,qwen3_xml,seed_oss,step3,step3p5,xlam
 
+### Default Environment variables
+
+The scripts that start up vllm will define a set of defaults. These can be overridden by `env:` entries but these are tested on isambard for stability.
+
+```
+# Prevent torch from over-subscribing CPU cores across parallel workers.
+# GH200 has 72 cores; 16 threads/worker is safe for the 4-GPU-per-node case.
+export OMP_NUM_THREADS=16
+
+# Force NCCL to map over the Libfabric Cassini driver (Slingshot 11)
+export NCCL_NET_GDR_LEVEL=5          # Enforce full GPUDirect RDMA across nodes
+export FI_PROVIDER="cxi"             # Enforce Cray Cassini fabric provider
+export FI_CXI_DEFAULT_CQ_SIZE=131072 # Expand Completion Queue size to prevent dropped frames
+
+# Prevent Slingshot Memory Hooks Deadlocks
+# HPE Slingshot uses 'memhooks' by default, which clashes with vLLM's memory allocation and hangs.
+# Switching to userfaultfd guarantees stable collective communications.
+export FI_MR_CACHE_MONITOR=userfaultfd
+
+# Handle multi-NIC striping
+# Each Isambard node has 4 separate Cassini NICs (one per GH200) operating at 200Gbps.
+# These ensure NCCL spreads parallel communication across all 4 rails.
+export NCCL_CROSS_NIC=1
+export NCCL_MIN_NCHANNELS=4
+
+# prevents parallel GPU worker processes from overlapping data transfers and causing a race condition or kernel hang during deep pipeline/tensor synchronizations
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+
+# Prevents catastrophic virtual memory fragmentation inside the unified space
+export NCCL_CUMEM_ENABLE=0
+
+# Relaxed ordering tells the PCIe root complex that memory pages migrating
+# between the LPDDR5 CPU memory and the HBM3 GPU memory don't need strict serial locks.
+export NCCL_IB_PCI_RELAXED_ORDERING=1
+
+# VLLM networking and compilation overrides:
+export VLLM_SKIP_CUSTOM_ALL_REDUCE=1        # Force standard NCCL for stability across Slingshot 11
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=300  # Prevent timeouts during multi-node graph setups
+export VLLM_ALLREDUCE_USE_SYMM_MEM=0        # Disable broken experimental symmetric memory allocator
+
+# Prevent torch compile from starting up all 256 cores of a node at once
+export MAX_JOBS=${maxJobs}                                  # usually 4
+export TORCHINDUCTOR_PARALLEL_COMPILE_THREADS=${maxTorch}   # usually 4-16
+export FLASHINFER_NVCC_THREADS=${maxFlash}                  # usually 32
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
+```
+
 ## Validation
 
 Before writing the file, verify:
@@ -385,6 +446,8 @@ Before writing the file, verify:
 
 - [Isambard AI hardware specs](references/isambard-specs.md)
 - [vLLM config options and memory guide](references/vllm-config-guide.md)
+- [vLLM serve cli options](references/vllm-serve-cli-0.23.0.md)
+- [vLLM config environment variables](references/vllm-env-vars-0.23.0.md)
 - [vLLM model-specific recipes](https://docs.vllm.ai/projects/recipes/en/latest/)
 - [Isambard AI specs online](https://docs.isambard.ac.uk/specs/#system-specifications-isambard-ai-phase-2)
 

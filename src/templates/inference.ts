@@ -734,6 +734,9 @@ function renderInteractiveMultiNodePayload(ss: SessionState): string {
   // const cpusPerTask = '256';
   const model = opts.configYaml.model;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
+  const maxFlash = 4; // Safe, scalable compiler throttle
+  const maxJobs = 16; // Safe, scalable compiler throttle
+  const maxTorch = 32; // Safe, scalable compiler throttle
 
   // Slightly confusingly this will be executed for each node in parallel
   return `
@@ -751,6 +754,11 @@ export RAY_PORT=6378
 
 ${renderWorkDirSetup(paths)}
 ${renderCustomEnv(ss)}
+
+export MAX_JOBS=${maxJobs}
+export TORCHINDUCTOR_PARALLEL_COMPILE_THREADS=${maxTorch}
+export FLASHINFER_NVCC_THREADS=${maxFlash}
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 
 source "${paths.remoteProjectVllmVenvActivate}"
 export HF_HOME=${paths.remoteProjectHfDir}
@@ -870,6 +878,9 @@ function renderMultiNodePayload(ss: SessionState): string {
   // const cpusPerTask = '256';
   const model = opts.configYaml.model;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
+  const maxFlash = 4; // Safe, scalable compiler throttle
+  const maxJobs = 16; // Safe, scalable compiler throttle
+  const maxTorch = 32; // Safe, scalable compiler throttle
 
   // Multi node compilation caching:
   // E.g. Node 1 and Node 2 write to independent, clean compilation caches
@@ -879,6 +890,12 @@ function renderMultiNodePayload(ss: SessionState): string {
   return `
 umask 0002
 ${renderNVHPCPreamble(ss)}
+
+
+export MAX_JOBS=${maxJobs}
+export TORCHINDUCTOR_PARALLEL_COMPILE_THREADS=${maxTorch}
+export FLASHINFER_NVCC_THREADS=${maxFlash}
+export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 
 export JOB_DETAILS="${paths.remoteJobLockFile}"
 export VLLM_CONFIG="${paths.remoteJobVllmConfigFile}"
