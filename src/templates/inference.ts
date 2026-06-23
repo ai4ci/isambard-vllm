@@ -83,17 +83,9 @@ fi
 
 # Detect and handle missing LOCALDIR in interactive srun allocations
 if [ -z "\${LOCALDIR:-}" ]; then
-  # Check if the native platform runtime directory exists for your UID
-  if [ -d "/run/user/$UID" ]; then
-    export LOCALDIR="/run/user/$UID"
-  elif [ -d "/local/user/$UID" ]; then
-    export LOCALDIR="/local/user/$UID"
-  else
-    # Ultimate cluster fallback to avoid crashing or breaking /tmp policies
-    export LOCALDIR="$PROJECTDIR/scratch/$USER/tmp/interactive_\${SLURM_JOB_ID:-direct}"
-    mkdir -p "$LOCALDIR"
-    chmod 700 "$LOCALDIR"
-  fi
+  export LOCALDIR="/local/user/$UID"
+  mkdir -p "$LOCALDIR"
+  chmod 700 "$LOCALDIR"
 fi
 
 echo "=== Interactive Deployment Context Resolved ==="
@@ -438,7 +430,6 @@ ${renderHealthCheckAndWait(ss)}`;
 function renderMultiNodeScript(ss: SessionState): string {
   const opts = ss.startArgs!;
   const paths = ss.paths;
-  const runtimePayload = renderMultiNodePayload(ss);
   const nodeCount = Math.ceil(opts.gpuCount / 4);
   const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
 
@@ -448,7 +439,7 @@ function renderMultiNodeScript(ss: SessionState): string {
     return `#!/bin/bash
 exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
 echo "=== IVLLM version ${__VERSION__} ==="
-${runtimePayload}
+${renderInteractiveMultiNodePayload(ss)}
 echo "Submitted interactive job $VLLM_PID"
 `;
   } else {
@@ -465,7 +456,7 @@ echo "Submitted interactive job $VLLM_PID"
 #SBATCH --output=${paths.remoteJobLogFile}
 
 echo "=== IVLLM version ${__VERSION__} ==="
-${runtimePayload}
+${renderMultiNodePayload(ss)}
 `;
   }
 }
@@ -482,6 +473,218 @@ function renderLogEnvVars() {
 echo "=== Final Environment Variables for vLLM ==="
 env | grep -E "VLLM_|RAY_|NCCL_|FI_"
 echo "============================================"
+`;
+}
+
+/**
+ *
+ * @param opts
+ */
+// function renderMultiNodePayload(ss: SessionState): string {
+//   const opts = ss.startArgs;
+//   const paths = ss.paths;
+//   const nodeCount = Math.ceil(opts.gpuCount / 4);
+//   const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
+//
+//   const rayObjectStoreMemoryGiB = 4;
+//
+//   // const cpusPerTask = '256';
+//   const model = opts.configYaml.model;
+//   const lcaseModel = model.split('/').pop()!.toLowerCase();
+//
+//   // Multi node compilation caching:
+//   // E.g. Node 1 and Node 2 write to independent, clean compilation caches
+//   // This is achieved by rewriting $HOME for each worker to $LOCALDIR which is node local
+//   // Each node restores caches from $PROJECTDIR/ivllm/caches
+//
+//   return `
+// umask 0002
+// ${renderNVHPCPreamble(ss)}
+//
+// export JOB_DETAILS="${paths.remoteJobLockFile}"
+// export VLLM_CONFIG="${paths.remoteJobVllmConfigFile}"
+// export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+// export GPUS_PER_NODE=${gpusPerNode}
+// export HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
+// export COMPUTE_HOSTNAME=$HEAD_NODE
+// export HEAD_NODE_IP=$(getent hosts "$HEAD_NODE" | awk '{ print $1 }')
+// export RAY_PORT=6378
+//
+// # Write initialising status — LOCAL already created the file with "pending";
+// # we overwrite with full details now that we have the SLURM context.
+// jq -n \\
+//   --arg status "initialising" \\
+//   --arg job_name "${opts.jobName}" \\
+//   --arg slurm_job_id "$SLURM_JOB_ID" \\
+//   --arg compute_hostname "$COMPUTE_HOSTNAME" \\
+//   --arg model "${model}" \\
+//   --argjson server_port ${opts.serverPort} \\
+//   '{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
+//     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
+//   > "$JOB_DETAILS"
+//
+// ${renderWorkDirSetup(paths)}
+//
+// source "${paths.remoteProjectVllmVenvActivate}"
+// export HF_HOME=${paths.remoteProjectHfDir}
+// export HF_HUB_OFFLINE=1
+//
+// ${renderExitDiagnostics()}
+// ${renderExitTrap()}
+//
+// export RAY_OBJECT_STORE_MEMORY=${rayObjectStoreMemoryGiB * 1024 * 1024 * 1024}
+// export RAY_LOG_TO_DRIVER=1    # Forces worker logs to stream to the head node stdout
+// export RAY_RUNTIME_ENV_LOG_TO_DRIVER=1
+// # Change the default temp storage location to a persistent cluster directory
+// export RAY_TMPDIR="${ss.paths.remoteJobDir}/ray-logs"
+//
+// cd "$WORK_DIR"
+// ${renderMonitor()}
+//
+// ${renderCustomEnv(ss)}
+//
+// ${renderLogEnvVars()}
+//
+// srun --export=ALL ${ss.startArgs.isInteractive ? '--overlap ' : ''}\\
+//   --output=vllm_node_%N.log \\
+//   --error=vllm_node_%N.err \\
+//   --cpu-bind=cores \\
+//   ray symmetric-run \\
+//   --address "$HEAD_NODE_IP:$RAY_PORT" \\
+//   --min-nodes $SLURM_NNODES \\
+//   --num-gpus $GPUS_PER_NODE \
+//   -- \\
+//   vllm serve \\
+//   --config $VLLM_CONFIG \\
+//   --distributed-executor-backend ray \\
+//   --host 0.0.0.0 \\
+//   --port ${opts.serverPort} \\
+//   --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${opts.jobName}\" \\
+// &
+// VLLM_PID=$!
+//
+// echo "APP_PID_MATCH:$VLLM_PID"
+//
+// ${renderHealthCheckAndWait(ss)}`;
+// }
+
+function escapeQuote(cmd: string): string {
+  return cmd.replaceAll('"', '\\"');
+}
+
+function renderInteractiveMultiNodePayload(ss: SessionState): string {
+  const opts = ss.startArgs;
+  const paths = ss.paths;
+  const nodeCount = Math.ceil(opts.gpuCount / 4);
+  const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
+
+  const rayObjectStoreMemoryGiB = 4;
+
+  // const cpusPerTask = '256';
+  const model = opts.configYaml.model;
+  const lcaseModel = model.split('/').pop()!.toLowerCase();
+
+  // Slightly confusingly this will be executed for each node in parallel
+  return `
+umask 0002
+${renderNVHPCPreamble(ss)}
+
+export JOB_DETAILS="${paths.remoteJobLockFile}"
+export VLLM_CONFIG="${paths.remoteJobVllmConfigFile}"
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export GPUS_PER_NODE=${gpusPerNode}
+export HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
+export COMPUTE_HOSTNAME=$HEAD_NODE
+export HEAD_NODE_IP=$(getent hosts "$HEAD_NODE" | awk '{ print $1 }')
+export RAY_PORT=6378
+
+${renderWorkDirSetup(paths)}
+${renderCustomEnv(ss)}
+
+source "${paths.remoteProjectVllmVenvActivate}"
+export HF_HOME=${paths.remoteProjectHfDir}
+export HF_HUB_OFFLINE=1
+
+export RAY_OBJECT_STORE_MEMORY=${rayObjectStoreMemoryGiB * 1024 * 1024 * 1024}
+export RAY_LOG_TO_DRIVER=1    # Forces worker logs to stream to the head node stdout
+export RAY_RUNTIME_ENV_LOG_TO_DRIVER=1
+# Change the default temp storage location to a persistent cluster directory
+export RAY_TMPDIR="${ss.paths.remoteJobDir}/ray-logs"
+
+cd "$WORK_DIR"
+
+if [ "$SLURM_NODEID" -eq 0 ]; then
+
+  echo "This is the master node."
+
+  # Write initialising status — LOCAL already created the file with "pending";
+  # we overwrite with full details now that we have the SLURM context.
+  jq -n \\
+  --arg status "initialising" \\
+  --arg job_name "${opts.jobName}" \\
+  --arg slurm_job_id "$SLURM_JOB_ID" \\
+  --arg compute_hostname "$COMPUTE_HOSTNAME" \\
+  --arg model "${model}" \\
+  --argjson server_port ${opts.serverPort} \\
+  '{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
+    compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
+    > "$JOB_DETAILS"
+
+  ${renderExitDiagnostics()}
+  ${renderExitTrap()}
+  ${renderMonitor()}
+  ${renderLogEnvVars()}
+
+  echo "Starting Ray head node ($HEAD_NODE) - $HEAD_NODE_IP:$RAY_PORT ..."
+  source ${paths.remoteProjectVllmVenvActivate}
+
+  VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
+  --block \\
+  --head \\
+  --num-gpus=4 \\
+  --disable-usage-stats \\
+  --include-dashboard=False \\
+  --node-ip-address=$HEAD_NODE_IP \\
+  --port=$RAY_PORT \\
+  --object-store-memory=$RAY_OBJECT_STORE_MEMORY &
+
+  sleep 20
+
+  cd ${paths.remoteJobDir}
+
+  ray status
+
+  VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
+  --config $VLLM_CONFIG \\
+  --distributed-executor-backend ray \\
+  --host 0.0.0.0 \\
+  --port ${opts.serverPort} \\
+  --served-model-name "${model}" "${lcaseModel}" "default" "${opts.jobName}" \\
+  &
+  VLLM_PID=$!
+
+  ${renderHealthCheckAndWait(ss)}
+
+else
+
+  sleep 5
+
+  # Get the current hostname assigned to this specific node ID
+  WORKER=$(scontrol show hostnames "$SLURM_NODELIST" | sed -n "$((SLURM_NODEID + 1))p")
+
+  # Resolve it to an IP address
+  WORKER_IP=$(dig +short $WORKER)
+  echo "Starting Ray worker node: $WORKER ($WORKER_IP) attached to $HEAD_NODE_IP:$RAY_PORT"
+
+  VLLM_HOST_IP=$WORKER_IP ray start \\
+  --block \\
+  --num-gpus=4 \\
+  --address=$HEAD_NODE_IP:$RAY_PORT \\
+  --node-ip-address=$WORKER_IP \\
+  --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+
+
+fi
 `;
 }
 
@@ -522,15 +725,15 @@ export RAY_PORT=6378
 # Write initialising status — LOCAL already created the file with "pending";
 # we overwrite with full details now that we have the SLURM context.
 jq -n \\
-  --arg status "initialising" \\
-  --arg job_name "${opts.jobName}" \\
-  --arg slurm_job_id "$SLURM_JOB_ID" \\
-  --arg compute_hostname "$COMPUTE_HOSTNAME" \\
-  --arg model "${model}" \\
-  --argjson server_port ${opts.serverPort} \\
-  '{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
-    compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
-  > "$JOB_DETAILS"
+--arg status "initialising" \\
+--arg job_name "${opts.jobName}" \\
+--arg slurm_job_id "$SLURM_JOB_ID" \\
+--arg compute_hostname "$COMPUTE_HOSTNAME" \\
+--arg model "${model}" \\
+--argjson server_port ${opts.serverPort} \\
+'{status: $status, job_name: $job_name, slurm_job_id: $slurm_job_id,
+compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
+> "$JOB_DETAILS"
 
 ${renderWorkDirSetup(paths)}
 
@@ -554,113 +757,89 @@ ${renderCustomEnv(ss)}
 
 ${renderLogEnvVars()}
 
-srun --export=ALL ${ss.startArgs.isInteractive ? '--overlap ' : ''}\\
-  --output=vllm_node_%N.log \\
-  --error=vllm_node_%N.err \\
-  --cpu-bind=cores \\
-  ray symmetric-run \\
-  --address "$HEAD_NODE_IP:$RAY_PORT" \\
-  --min-nodes $SLURM_NNODES \\
-  --num-gpus $GPUS_PER_NODE \
-  -- \\
-  vllm serve \\
-  --config $VLLM_CONFIG \\
-  --distributed-executor-backend ray \\
-  --host 0.0.0.0 \\
-  --port ${opts.serverPort} \\
-  --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${opts.jobName}\" \\
-&
+# Start Ray head node
+# bash -c is used to guarantee venv PATH is active on the compute node,
+# and to avoid any .local/bin/env shadowing /usr/bin/env on login nodes.
+echo "Starting Ray head node ($HEAD_NODE)..."
+srun --overlap \\
+  --nodelist "$HEAD_NODE" \\
+  --nodes=1 \\
+  --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
+  --cpus-per-gpu=64 \\
+  --ntasks-per-node=1 \\
+  bash -c "
+    source ${paths.remoteProjectVllmVenvActivate}
+    ${escapeQuote(renderCustomEnv(ss))} \\
+    VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
+      --block \\
+      --head \\
+      --node-ip-address=$HEAD_NODE_IP \\
+      --port=$RAY_PORT \\
+      --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+    " &
+sleep 20
+
+# Start Ray worker nodes
+WORKER_NODES=$(scontrol show hostnames $SLURM_NODELIST | tail -n+2)
+for WORKER in $WORKER_NODES; do
+  WORKER_IP=$(dig +short $WORKER)
+  echo "Starting Ray worker node: $WORKER ($WORKER_IP)"
+  srun --overlap \\
+    --nodelist "$WORKER" \\
+    --nodes=1 \\
+    --gpus=$GPUS_PER_NODE \\
+    --mem=0 \\
+    --cpus-per-gpu=64 \\
+    --ntasks-per-node=1 \\
+    bash -c "
+      source ${paths.remoteProjectVllmVenvActivate}
+      ${escapeQuote(renderCustomEnv(ss))}
+      ${escapeQuote(renderWorkDirSetup(paths))}
+      VLLM_HOST_IP=$WORKER_IP ray start \\
+        --block \\
+        --address=$HEAD_NODE_IP:$RAY_PORT \\
+        --node-ip-address=$WORKER_IP \\
+        --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+      " &
+done
+sleep 20
+
+# Verify Ray cluster is ready
+srun --overlap \\
+  --nodelist "$HEAD_NODE" \\
+  --nodes=1 \\
+  --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
+  --ntasks-per-node=1 \\
+  bash -c "source ${paths.remoteProjectVllmVenvActivate} && ray status"
+
+# Start vLLM on the head node via srun --overlap (runs within existing job allocation)
+srun --overlap \\
+  --nodelist "$HEAD_NODE" \\
+  --nodes=1 \\
+  --gpus=$GPUS_PER_NODE \\
+  --mem=0 \\
+  --ntasks-per-node=1 \\
+  bash -c "
+    cd ${paths.remoteJobDir}
+
+    source ${paths.remoteProjectVllmVenvActivate}
+    ${escapeQuote(renderCustomEnv(ss))}
+    VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
+      --config $VLLM_CONFIG \\
+      --distributed-executor-backend ray \\
+      --host 0.0.0.0 \\
+      --port ${opts.serverPort} \\
+      --served-model-name \\"${model}\\" \\"${lcaseModel}\\" \\"default\\" \\"${opts.jobName}\\"
+  " \\
+  &
 VLLM_PID=$!
 
 echo "APP_PID_MATCH:$VLLM_PID"
 
 ${renderHealthCheckAndWait(ss)}`;
 }
-
-// OLD mulitnode distributed approach...
-// # Start Ray head node
-// # bash -c is used to guarantee venv PATH is active on the compute node,
-// # and to avoid any .local/bin/env shadowing /usr/bin/env on login nodes.
-// echo "Starting Ray head node ($HEAD_NODE)..."
-// srun --overlap \\
-//   --nodelist "$HEAD_NODE" \\
-//   --nodes=1 \\
-//   --gpus=$GPUS_PER_NODE \\
-//   --mem=0 \\
-//   --cpus-per-task=${cpusPerTask} \\
-//   --ntasks-per-node=1 \\
-//   bash -c "
-//     source ${paths.remoteProjectVllmVenvActivate}
-//     ${envPreamble}
-//     VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
-//       --block \\
-//       --head \\
-//       --node-ip-address=$HEAD_NODE_IP \\
-//       --port=$RAY_PORT \\
-//       --object-store-memory=$RAY_OBJECT_STORE_MEMORY
-//     " &
-// sleep 20
-//
-// # Start Ray worker nodes
-// WORKER_NODES=$(scontrol show hostnames $SLURM_NODELIST | tail -n+2)
-// for WORKER in $WORKER_NODES; do
-//   WORKER_IP=$(dig +short $WORKER)
-//   echo "Starting Ray worker node: $WORKER ($WORKER_IP)"
-//   srun --overlap \\
-//     --nodelist "$WORKER" \\
-//     --nodes=1 \\
-//     --gpus=$GPUS_PER_NODE \\
-//     --mem=0 \\
-//     --cpus-per-task=${cpusPerTask} \\
-//     --ntasks-per-node=1 \\
-//     bash -c "
-//       source ${paths.remoteProjectVllmVenvActivate}
-//       ${envPreamble}
-//       ${renderWorkDirSetup(paths)}
-//       VLLM_HOST_IP=$WORKER_IP ray start \\
-//         --block \\
-//         --address=$HEAD_NODE_IP:$RAY_PORT \\
-//         --node-ip-address=$WORKER_IP \\
-//         --object-store-memory=$RAY_OBJECT_STORE_MEMORY
-//       " &
-// done
-// sleep 20
-//
-// # Verify Ray cluster is ready
-// srun --overlap \\
-//   --nodelist "$HEAD_NODE" \\
-//   --nodes=1 \\
-//   --gpus=$GPUS_PER_NODE \\
-//   --mem=0 \\
-//   --ntasks-per-node=1 \\
-//   bash -c "source ${paths.remoteProjectVllmVenvActivate} && ray status"
-//
-// # Start vLLM on the head node via srun --overlap (runs within existing job allocation)
-// srun --overlap \\
-//   --nodelist "$HEAD_NODE" \\
-//   --nodes=1 \\
-//   --gpus=$GPUS_PER_NODE \\
-//   --mem=0 \\
-//   --ntasks-per-node=1 \\
-//   bash -c "
-//     cd ${paths.remoteJobDir}
-//
-//     source ${paths.remoteProjectVllmVenvActivate}
-//     ${envPreamble}
-//     VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
-//       --config $VLLM_CONFIG \\
-//       --distributed-executor-backend ray \\
-//       --host 0.0.0.0 \\
-//       --port ${opts.serverPort} \\
-//       --served-model-name \"${model}\" \"${lcaseModel}\" \"default\" \"${opts.jobName}\"
-//   " \\
-//   &
-// VLLM_PID=$!
-//
-// echo "APP_PID_MATCH:$VLLM_PID"
-//
-// ${renderHealthCheckAndWait(ss)}`;
-// }
 
 // function renderMultiNodeExitDiagnostics(): string {
 //   return `${renderExitDiagnostics()}
