@@ -1,0 +1,12 @@
+{
+    "name": "My TypeScript Project",
+    "lspclient": {
+        "servers": {
+            "typescript": {
+                "setting": {
+                    "typescript.tsserver.experimental.enableProjectDiagnostics": true
+                }
+            }
+        }
+    }
+}
