@@ -7,11 +7,38 @@ import type {
 } from './types.ts';
 
 /**
- * Returns real RemoteOps that execute SSH/SCP, or dry-run ops that print
- * what would happen and copy files to a local preview directory.
- * @param config
- * @param dryRun
- * @param dryRunDir
+ * Factory that returns a {@link LocalOps} implementation.
+ *
+ * Produces real HTTP / `lsof`-based ops when `dryRun` is `false`, or mock
+ * implementations that return synthetic responses when `dryRun` is `true`
+ * (used for E2E testing without a live vLLM server).
+ *
+ * **Real-mode behaviour**
+ *
+ * | Method | Implementation |
+ * |--------|----------------|
+ * | `checkLocalHealth` | HTTP `GET /health` with 200 ms timeout |
+ * | `queryModels`      | HTTP `GET /v1/models` with 2 s timeout |
+ * | `isLocalPortInUse` | `lsof -ti` + `ps -p` to report PID and process name |
+ *
+ * **Dry-run behaviour**
+ *
+ * All methods return success/fake data and log `[dry-run]` prefixes.
+ *
+ * @param localPort - Port the vLLM server listens on locally (default `11434`)
+ * @param dryRun - When `true` return mock implementations for testing
+ * @returns An object conforming to the {@link LocalOps} interface
+ *
+ * @example
+ * ```ts
+ * // Real-mode: check if a vLLM server is healthy
+ * const ops = makeLocalOps(11434, false);
+ * const healthy = await ops.checkLocalHealth(11434);
+ *
+ * // Dry-run mode: E2E tests without a live server
+ * const mock = makeLocalOps(8000, true);
+ * const models = await mock.queryModels(8000);
+ * ```
  */
 export function makeLocalOps(localPort: number, dryRun: boolean): LocalOps {
   if (!dryRun) {
@@ -48,8 +75,17 @@ export function makeLocalOps(localPort: number, dryRun: boolean): LocalOps {
 }
 
 /**
+ * Detect whether a TCP listener is bound on `localhost` at the given
+ * `port` by querying the OS through `lsof` and `ps`.
  *
- * @param port
+ * Returns an object containing the PID and process name of the listener,
+ * or `null` if nothing is listening.
+ *
+ * **Platform requirement:** Linux or macOS (relies on `lsof`). Not
+ * available on Windows.
+ *
+ * @param port — TCP port number to check.
+ * @returns `{ pid, process }` when a listener exists, or `null`.
  */
 async function isLocalPortInUse(
   port: number,
@@ -70,7 +106,19 @@ async function isLocalPortInUse(
   });
 }
 
-// Check whether localhost is up.
+/**
+ * Probe the `/health` endpoint on `localhost:<localPort>` and return
+ * `true` if the HTTP server responds with a 2xx status before the
+ * timeout elapses.
+ *
+ * Uses a `Promise.race` between an HTTP `fetch` and a `setTimeout`
+ * so the call never blocks longer than `timeoutMs`.
+ *
+ * @param localPort — Port forwarded by the SSH tunnel.
+ * @param timeoutMs — Maximum milliseconds to wait before returning `false`.
+ * @returns `true` when the health endpoint is reachable within the timeout;
+ *   `false` on timeout or network error.
+ */
 async function isHealthy(
   localPort: number,
   timeoutMs: number,
@@ -89,7 +137,18 @@ async function isHealthy(
   return Promise.race([networkRequest, timeout]);
 }
 
-// Grab the model json from localhost
+/**
+ * Fetch the model catalog from the OpenAI-compatible `/v1/models`
+ * endpoint on `localhost:<localPort>`.
+ *
+ * Throws an `Error` containing the HTTP status and reason phrase if the
+ * response is non-2xx or if the request times out.
+ *
+ * @param localPort — Port forwarded by the SSH tunnel.
+ * @param timeoutMs — Maximum milliseconds before throwing.
+ * @returns The parsed {@link V1ModelsResponse} body.
+ * @throws Error on non-2xx HTTP status or timeout.
+ */
 async function queryModels(
   localPort: number,
   timeoutMs: number,
