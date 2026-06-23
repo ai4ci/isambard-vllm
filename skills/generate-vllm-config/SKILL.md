@@ -9,7 +9,7 @@ metadata:
 
 # Generate vLLM Config for Isambard AI
 
-Generates a ready-to-use `vllm.yaml` config file for running a HuggingFace model on Isambard AI HPC using `ivllm start`. It fetches the model card to determine architecture and parameter count, calculates memory requirements against Isambard AI's GH200 120GB nodes (~96 GiB usable HBM3e per GPU), selects appropriate parallelism, and writes the YAML file.
+Generates a ready-to-use `vllm.yaml` config file for running a HuggingFace model on Isambard AI HPC using `ivllm`. It fetches the model card to determine architecture and parameter count, calculates memory requirements against Isambard AI's GH200 120GB nodes (~96 GiB usable HBM3e per GPU), selects appropriate parallelism, and writes the YAML file.
 
 ## ⚡ Quick Reference — Key Decisions
 
@@ -54,7 +54,7 @@ If `params_B × 2 > 96 GB` and you want a single-node job, suggest `cpu-offload-
 
 - User asks to generate or create a vLLM config or `vllm.yaml` for a named model
 - User asks "what config do I need to run \<model\> on Isambard?"
-- User is about to run `ivllm start` and needs a config file
+- User is about to run `ivllm` and needs a config file
 - User provides a HuggingFace model ID and wants to know how many GPUs are needed
 
 Do NOT use for general vLLM help, `ivllm` troubleshooting, or non-config questions.
@@ -91,7 +91,7 @@ If the model card is not accessible or the parameter count cannot be determined,
 
 ### 3. Look up the official vLLM recipe (if available)
 
-Go to [recipes.vllm.ai](https://recipes.vllm.ai) — this is the authoritative source for vLLM deployment recipes. It supersedes checking HuggingFace model cards for configuration advice.
+Go to [recipes.vllm.ai](https://recipes.vllm.ai) — this is the authoritative source for vLLM deployment recipes. It supersedes checking HuggingFace model cards for configuration advice, but both sources may be required.
 
 The site has a four-level structure:
 
@@ -164,7 +164,7 @@ Same base as hardware-specific, with **head/worker split for multi-node**:
 - **Env vars and CLI args for your config**: **hardware-specific** (`/hw/h100.json` or `/hw/h200.json`) — overrides are already resolved, so you don't need to manually merge `hardware_overrides.hopper.extra_env` with the base `env`.
 - **Multi-node strategies**: **strategy-specific** files — they include `head_argv`/`worker_argv` and multi-node env vars.
 
-**Adapting to Isambard AI:** Isambard AI's GH200 (Grace CPU + H100 GPU) is not listed as a separate hardware target. It falls between H100 and H200 in specs (closer to H100), so use the H100 recipe as a starting point and adapt.
+**Adapting to Isambard AI:** Isambard AI's GH200 (Grace CPU + H100 GPU) is not listed as a separate hardware target. It falls between H100 and H200 in specs (closer to H100), so use the H100 recipe as a starting point and adapt, but vllm recipes usually assume 8 independent H100 GPUs whereas Isambard has trays of 4 GH200 closely wired together. Their tensor parallelisation choices may not be correct for Isammbard.
 
 Each node has 4 NVIDIA GH200 Grace Hopper Superchips with NVLink-C2C interconnect. Each node has 460 GB of usable CPU memory (115 GB per CPU) and 384 GB of GPU memory (96 GiB usable per GPU). In total, there is 844 GB of CPU + GPU memory per node.
 
@@ -219,7 +219,7 @@ When reporting to the user, include:
 
 ⚠️ **Parallelism is the most common config error.** Using `tensor-parallel-size: 1` when the model needs 2 GPUs will cause an OOM crash that wastes the user's time debugging. Always apply these rules:
 
-- **Default to `tensor-parallel-size: 2`** for models needing 1–2 GPUs. Two GPUs are always available in the queue (users who grab part of a node typically use only 1), so tp=2 gives a good balance of capacity and fast queue times.
+- **Default to `tensor-parallel-size: 2`** for models needing 1–2 GPUs. This gives a good balance of capacity and good citizenship.
 - Use `tensor-parallel-size: 4` (full node) if:
   - The model needs 3–4 GPUs to fit, **or**
   - The model needs 1–2 GPUs but the user explicitly wants maximum throughput or longest possible context, **or**
@@ -261,6 +261,8 @@ enable-flashinfer-autotune: false
 ```
 
 This applies to DeepSeek, Qwen3.5, Gemma, and all MoE models on Isambard AI. The autotune loop takes >2 hours on these models; the Triton kernels are pre-compiled and work immediately.
+
+If you do end up having to use them they will be cached and re-used in theory but if the user is complaining about long start up times this is where to start.
 
 - **FP8 quantization**: GH200/H100 (Hopper) has native FP8 tensor cores. If the model is memory-constrained or throughput is important, suggest `quantization: fp8`. This halves weight memory (`params_B × 1 GB` vs `× 2 GB`). Check if a pre-quantized `-FP8` variant exists on HuggingFace — prefer it over runtime quantization.
 - **Tool calling**: Always include `enable-auto-tool-choice: true` and the matching `tool-call-parser` unless the model is known not to support function calling (e.g. base/pretrain checkpoints, pure reasoning models without tool support). The parser is required — without it, tool call responses come back as raw text rather than structured `tool_calls` objects. See the tool-call parser table in `references/vllm-config-guide.md`.
