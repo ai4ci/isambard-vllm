@@ -36,7 +36,7 @@ interface AssistantDefinition {
   label: string;
 }
 
-export interface AssistantEnvOptions extends OpencodeConfigOptions {}
+export type AssistantEnvOptions = OpencodeConfigOptions;
 
 export interface LaunchCommandOptions extends AssistantEnvOptions {
   assistant: AssistantName;
@@ -64,7 +64,6 @@ const ASSISTANTS: AssistantDefinition[] = [
  *
  * Uses `which <name>` under the hood and returns `true` when the
  * command exits successfully with non-empty output.
- *
  * @param name - Name of the binary to look for (e.g. `'opencode'`)
  * @returns `true` if the binary is found on PATH, `false` otherwise
  */
@@ -85,7 +84,6 @@ export function binaryExists(name: string): boolean {
  *
  * Checks for `'opencode'`, `'claude'`, and `'copilot'` in order and
  * filters out any that are not found via {@link binaryExists}.
- *
  * @returns Array of assistant names that are installed and discoverable
  */
 export function getAvailableAssistants(): string[] {
@@ -97,7 +95,6 @@ export function getAvailableAssistants(): string[] {
  * Check whether the `scoder` binary is available on PATH.
  *
  * Convenience wrapper around {@link binaryExists}.
- *
  * @returns `true` if `scoder` is found on PATH
  */
 export function getScoderAvailable(): boolean {
@@ -108,7 +105,6 @@ export function getScoderAvailable(): boolean {
  * Check whether the `sbx` binary is available on PATH.
  *
  * Convenience wrapper around {@link binaryExists}.
- *
  * @returns `true` if `sbx` is found on PATH
  */
 export function getSbxAvailable(): boolean {
@@ -120,7 +116,6 @@ export function getSbxAvailable(): boolean {
  *
  * Looks up the label from the internal {@link ASSISTANTS} registry.
  * Falls back to the raw name when no label is defined.
- *
  * @param assistant - The assistant identifier (e.g. `'opencode'`, `'claude'`)
  * @returns The display label (e.g. `'OpenCode'`) or the raw name as fallback
  */
@@ -135,7 +130,6 @@ export function getAssistantLabel(assistant: AssistantName): string {
  * or inside an `sbx` sandbox. For `'pi'` (or when the local assistant
  * binary exists), `'none'` and optionally `'scoder'` are included. If
  * `sbx` is available on PATH, `'sbx'` is always added.
- *
  * @param assistant - The assistant to check wrappers for
  * @param availableAssistants - Installed assistant binary names from PATH
  * @param hasScoder - Whether the `scoder` binary is available
@@ -173,7 +167,6 @@ export function getAvailableWrappers(
  * Produces a config object with `$schema`, model name, and a provider block
  * using the `@ai-sdk/openai-compatible` adapter. Context length defaults to
  * 4096 tokens. Supports optional `toolCall` and `reasoning` model flags.
- *
  * @param opts - Configuration options including model name, port, and flags
  * @returns OpenCode config record ready for JSON serialization
  */
@@ -215,7 +208,6 @@ export function generateOpencodeConfig(
  * Serialises the {@link generateOpencodeConfig} output into the
  * `OPENCODE_CONFIG_CONTENT` environment variable so OpenCode can be
  * started without a config file on disk.
- *
  * @param opts - Configuration options for the vLLM endpoint
  * @returns Record with `OPENCODE_CONFIG_CONTENT` set to the JSON config
  */
@@ -235,11 +227,10 @@ export function generateOpencodeEnv(
  * Pi to disable thinking tokens (off/minimal/low/medium → null, high → 'high',
  * xhigh → 'max'). The `compat.supportsDeveloperRole` is set to `false` since
  * vLLM does not understand the "developer" role used for reasoning models.
- *
  * @param opts - Configuration options including model name and reasoning flag
  * @returns Pi models.json configuration record
  */
-export function generatePiModelsConfig(opts: OpencodeConfigOptions): Record<string, any> {
+export function generatePiModelsConfig(opts: OpencodeConfigOptions): Record<string, unknown> {
   const context = opts.maxModelLen ?? 4096;
 
   const modelEntry: Record<string, unknown> = {
@@ -285,7 +276,6 @@ export function generatePiModelsConfig(opts: OpencodeConfigOptions): Record<stri
  *
  * Sets `COPILOT_PROVIDER_BASE_URL` to point at the local vLLM tunnel
  * and `COPILOT_MODEL` to the requested model name.
- *
  * @param localPort - Local port of the SSH tunnel to the vLLM server
  * @param model - Model name to use for Copilot completions
  * @returns Copilot environment variable record
@@ -317,7 +307,6 @@ export function generateCopilotEnv(
  * | `ANTHROPIC_DEFAULT_OPUS_MODEL` | {model} |
  * | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | {model} |
  * | `CLAUDE_CODE_SUBAGENT_MODEL` | {model} |
- *
  * @param localPort - Local port of the SSH tunnel to the vLLM server
  * @param model - Model name to use for all Claude model tiers
  * @returns Claude Code environment variable record
@@ -337,9 +326,14 @@ export function generateClaudeEnv(
 }
 
 /**
+ * Generate the environment variables required to launch the given assistant
+ * against the vLLM inference endpoint.
  *
- * @param assistant
- * @param opts
+ * Selects the appropriate env-var schema (`OPENAI_*`, `ANTHROPIC_*`,
+ * `COPILOT_*`, or `PI_*`) based on the assistant name.
+ * @param assistant - Target assistant binary name
+ * @param opts - Endpoint and model configuration
+ * @returns Environment variable map ready for `spawn`/`spawnSync` (not `env`)
  */
 export function generateAssistantEnv(
   assistant: AssistantName,
@@ -388,7 +382,6 @@ export function generateAssistantEnv(
  * buildSandboxName(undefined, '/home/user/docs');
  * // → 'opencode-docs' (uses default 'opencode')
  * ```
- *
  * @param assistant - Target assistant name, or `undefined` for the `'opencode'` default
  * @param cwd - Working directory whose basename is used in the sandbox name
  * @returns A lowercase sandbox name with hyphens and alphanumeric characters only
@@ -425,7 +418,6 @@ export function buildSandboxName(
  * buildSandboxCreateCommand('opencode', '/home/user/my-project', 'opencode-my-project');
  * // → "sbx create --name 'opencode-my-project' opencode '/home/user/my-project'"
  * ```
- *
  * @param assistant - Target assistant name (e.g. `'opencode'`, `'claude'`)
  * @param cwd - Working directory (quoted for shell safety)
  * @param sandboxName - Optional explicit sandbox name; defaults to {@link buildSandboxName}
@@ -446,7 +438,6 @@ export function buildSandboxCreateCommand(
  * Handles embedded single quotes by ending the current quote, inserting
  * an escaped single quote ('\'''), and restarting the quote — the
  * standard POSIX sh technique for quoting literals with apostrophes.
- *
  * @param value - String to shell-escape
  * @returns The value wrapped in single quotes with internal quotes escaped
  */
@@ -457,7 +448,6 @@ function shellQuote(value: string): string {
 /**
  * Format an environment variable record as a space-separated string of
  * KEY=VALUE pairs, with each value shell-escaped via {@link shellQuote}.
- *
  * @param env - Environment variable record
  * @returns Space-separated KEY='value' string
  */
@@ -472,7 +462,6 @@ function formatInlineEnv(env: Record<string, string>): string {
  *
  * Currently only GitHub Copilot requires extra arguments ('--continue');
  * all other assistants use an empty array.
- *
  * @param assistant - Target assistant name
  * @returns Array of CLI arguments (empty for all except Copilot)
  */
@@ -489,7 +478,6 @@ function getAssistantArgs(assistant: AssistantName): string[] {
  * - **`direct`**: cd WORKDIR && ENV ASSISTANT [args]
  * - **`scoder`**: cd WORKDIR && ENV scoder --llm-port PORT ASSISTANT [args]
  * - **`sbx`**: sbx exec -it -w WORKDIR -e ENV SANDBOX ASSISTANT [args]
- *
  * @param opts - Launch options
  * @param opts.assistant - Target assistant (e.g. 'opencode', 'claude')
  * @param opts.wrapper - Execution wrapper ('direct', 'scoder', or 'sbx')
@@ -534,7 +522,6 @@ export function buildLaunchCommand(opts: LaunchCommandOptions): string {
  *
  * Validates that each entry has the required name, agent, state, and cwd
  * properties. Entries missing any of these fields are silently excluded.
- *
  * @param raw - Raw JSON string from sbx ls --json, or empty string
  * @returns Array of validated SbxSandbox records (empty array on parse failure)
  */
@@ -593,7 +580,6 @@ export function parseSbxSandboxes(raw: string): SbxSandbox[] {
  *
  * This is a convenience wrapper around {@link parseSbxSandboxes} that
  * executes the sbx CLI and handles the JSON parsing in one step.
- *
  * @returns Array of parsed SbxSandbox records
  */
 function listSbxSandboxes(): SbxSandbox[] {
@@ -612,7 +598,6 @@ function listSbxSandboxes(): SbxSandbox[] {
  *
  * A sandbox is considered a match if it has the same agent, cwd, and
  * is in either the 'running' or 'paused' state.
- *
  * @param sandboxes - Array of sandbox records
  * @param assistant - Target assistant name to match
  * @param cwd - Working directory to match
@@ -671,7 +656,6 @@ export function findMatchingSandbox(
  * 1. List existing sandboxes via {@link listSbxSandboxes}
  * 2. Search for a match via {@link findMatchingSandbox}
  * 3. If no match, create a new sandbox using `sbx create --name` command
- *
  * @param assistant - Target assistant name (e.g. 'opencode', 'claude')
  * @param cwd - Working directory to match
  * @returns An object with the sandbox name and a `created` flag indicating
@@ -704,8 +688,12 @@ export function ensureSbxSandbox(
 
 /**
  * Build the list of menu options based on available assistants and scoder.
- * @param assistants
- * @param hasScoder
+ *
+ * For each assistant produces a direct launch option and, when scoder
+ * is available, a scoder-wrapped option.
+ * @param assistants - Assistant names to include in the menu
+ * @param hasScoder - Whether the scoder launcher is available
+ * @returns Ordered array of {@link AssistantOption} entries with incrementing IDs
  */
 export function buildAssistantMenuOptions(
   assistants: string[],
@@ -736,8 +724,13 @@ export function buildAssistantMenuOptions(
 
 /**
  * Get the binary name and args for launching an assistant.
- * @param assistant
- * @param useScoder
+ *
+ * Returns `{ binary: 'scoder', args: [...] }` when `useScoder` is `true`
+ * so the assistant runs inside the scoder sandbox; otherwise returns
+ * the assistant binary name directly.
+ * @param assistant - Target assistant name
+ * @param useScoder - Whether to wrap the command in the scoder launcher
+ * @returns Object containing the binary path and its arguments
  */
 export function getLaunchCommand(
   assistant: AssistantName,
@@ -766,7 +759,6 @@ export interface OpencodeSnippetOptions {
  *
  * Creates a JSON configuration object that defines an isambard-vllm
  * provider with the configured model, base URL, and model display name.
- *
  * @param opts - Configuration options
  * @param opts.model - HuggingFace model name (e.g. 'Qwen/Qwen2.5-7B-Instruct')
  * @param opts.localPort - Local port of the vLLM server (default 11434)
