@@ -89,7 +89,7 @@ export async function parseStartArgs(
       (yaml.pipelineParallelSize ?? 1) *
       (yaml.dataParallelSize ?? 1);
 
-  const cacheKey = `${yaml.model}/${yaml.tensorParallelSize}/${yaml.pipelineParallelSize}/${yaml.maxModelLen}`;
+  const cacheKey = `${yaml.model}/${yaml.tensorParallelSize}/${yaml.pipelineParallelSize}`;
 
   return {
     jobName,

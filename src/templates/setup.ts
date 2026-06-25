@@ -1,3 +1,4 @@
+import { semverGte } from '../semver';
 import type { ProcessState } from '../types';
 
 /**
@@ -48,7 +49,7 @@ export interface SetupScriptOptions {
  */
 export function renderSetupScript(
   ss: ProcessState,
-  remoteSetupLog: string,
+  remoteLogFile: string,
 ): string {
   const paths = ss.paths;
   const vllmVersion = ss.vllmVersion;
@@ -66,16 +67,11 @@ export function renderSetupScript(
   ].join(':');
 
   return `#!/bin/bash
-# ivllm setup version ${__VERSION__}
-#SBATCH --job-name=ivllm-setup
-#SBATCH --nodes=1
-#SBATCH --gpus=1
-#SBATCH --time=02:00:00
-#SBATCH --output=${remoteSetupLog}
-
+exec > >(tee -a "${remoteLogFile}") 2>&1
 set -euo pipefail
 
 echo "=== ivllm-setup version ${__VERSION__} ==="
+echo "Installing: ${vllmVersion}"
 
 # Install uv if not already present
 if ! command -v uv &>/dev/null; then
@@ -104,17 +100,23 @@ else
   echo "=== HPC SDK already installed at ${nvhpcDir} — skipping ==="
 fi
 
+module load gcc-native/14.2
+
+# 2. Find the exact paths to the newly loaded compilers
+export CC=$(which gcc)
+export CXX=$(which g++)
+
+export NVHPC_ROOT=${nvhpcRoot}
+export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
+export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
+export MAX_JOBS=16
+export FLASHINFER_NVCC_THREADS=4
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=${ldLibPath}
+
 # Phase B: Install vLLM ${vllmVersion} into versioned venv
 if [ ! -d ${venvDir} ]; then
   echo "=== Installing vLLM ${vllmVersion} ==="
-  module load gcc-native/14.2
-  export NVHPC_ROOT=${nvhpcRoot}
-  export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
-  export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
-  export MAX_JOBS=16
-  export FLASHINFER_NVCC_THREADS=4
-  export PATH=$CUDA_HOME/bin:$PATH
-  export LD_LIBRARY_PATH=${ldLibPath}
   # UV_CACHE_DIR: use $LOCALDIR (per-user in-job scratch) so multiple project
   # members don't share a single cache directory with conflicting permissions.
   # $LOCALDIR is wiped at job end; the installed venv in $PROJECTDIR persists.
@@ -134,5 +136,59 @@ else
   echo "=== vLLM ${vllmVersion} already installed at ${venvDir} — skipping ==="
   echo "IVLLM_SETUP_SUCCESS"
 fi
+
+${renderInstallDeepGEMM(ss)}
+
 `.trimStart();
+}
+
+function renderInstallDeepGEMM(ss: ProcessState): string {
+  const deepGEMMDir = `${ss.paths.remoteProjectVllmDir}/deepGEMM`;
+
+  // if (semverGte(vllmVersion, '0.23.0')) return '';
+  return `
+source ${ss.paths.remoteProjectVllmVenvActivate}
+
+if [ ! -d ${deepGEMMDir} ]; then
+
+  echo "=== compiling DeepGEMM from source ==="
+
+  INSTALL_DIR=$(mktemp -d)
+  DEEPGEMM_GIT_REPO="https://github.com/deepseek-ai/DeepGEMM.git"
+  # DEEPGEMM_GIT_REF="891d57b4db1071624b5c8fa0d1e51cb317fa709f"
+  DEEPGEMM_GIT_REF="950d31ab03d5d4753f10a6c7e463856f5037bff2"
+
+  export CUDA_VERSION="12.9"
+
+  mkdir -p "$INSTALL_DIR/deepgemm"
+
+  trap 'rm -rf "$INSTALL_DIR"' EXIT
+  rm -rf -- build dist *.egg-info 2>/dev/null || true
+
+  # Checkout the specific reference
+  git clone --recursive --shallow-submodules "$DEEPGEMM_GIT_REPO" "$INSTALL_DIR/deepgemm"
+  pushd "$INSTALL_DIR/deepgemm"
+
+  # Checkout the specific reference
+  git checkout "$DEEPGEMM_GIT_REF"
+
+  # Clean previous build artifacts
+  # (Based on https://github.com/deepseek-ai/DeepGEMM/blob/main/install.sh)
+  rm -rf -- build dist *.egg-info 2>/dev/null || true
+
+  echo "🏗️  Building DeepGEMM wheel..."
+  python3 setup.py bdist_wheel
+
+  mkdir -p ${deepGEMMDir}
+  cp dist/*.whl ${deepGEMMDir}
+  echo "DeepGEMM Wheel built and copied to ${deepGEMMDir}"
+  popd
+
+fi
+
+echo "=== Installing precomplied DeepGEMM ==="
+uv pip install ${deepGEMMDir}/*.whl
+echo "DEEPGEMM_SETUP_SUCCESS"
+
+`;
 }

@@ -1,7 +1,7 @@
 import type { RemoteOps, EnvVarEntry, LocalOps } from './types.ts';
 import { SessionState, ProcessState } from './types.ts';
 import { makePaths } from './job.ts';
-import type { InferenceJobOptions, JobDetails } from './types';
+import type { InferenceJobOptions } from './types';
 import { monitorSession, detachSession } from './monitors.ts';
 
 import { writeStrippedConfig } from './vllm-config.ts';
@@ -23,7 +23,6 @@ import { join, basename } from 'path';
  */
 export async function preFlight(
   startArgs: InferenceJobOptions,
-  ops: RemoteOps,
   localOps: LocalOps,
 ): Promise<void> {
   const localPort = startArgs.localPort;
@@ -358,7 +357,7 @@ export async function runInferenceSession(
 
   // ── 1. Pre-flight ──────────────────────────────────────────────────────
   ops.checkSSH();
-  await preFlight(startArgs, ops, localOps);
+  await preFlight(startArgs, localOps);
 
   const yaml = startArgs.configYaml;
 

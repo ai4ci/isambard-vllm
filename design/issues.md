@@ -385,3 +385,134 @@ This reduces ~937 files per node → ~15 files per node, making the diagnostics 
 
 - [ ] Update `persist_ray_logs` in SLURM templates to selectively copy only useful files
 - [ ] Update `collect_exit_diagnostics` documentation
+
+---
+
+## ISSUE-007: Triton JIT compiler fails with KeyError: 'float8_e8m0fnu' during initialization
+
+**Status**: Workaround proposed — awaiting user test on HPC
+
+**Severity**: Critical — completely blocks model initialization and startup
+
+**Affected config**: `examples/deepseek-v4-pro.yaml` (using `moe-backend: triton_unfused` and `linear-backend: triton`)
+
+### Symptom
+
+Even with `VLLM_BYPASS_MEM_PROFILING=1` set, the vLLM server crashes during model initialization with:
+
+```
+KeyError: 'float8_e8m0fnu'
+```
+
+Full traceback originates in `EngineCoreProc` → `_initialize_kv_caches` → `determine_available_memory` → `profile_run` → `_dummy_run` → `self.model` forward pass → `BlockScaledMMLinearKernel` → `w8a8_triton_block_scaled_mm` → Triton JIT compiler's `canonicalize_dtype` in:
+```
+triton/_utils.py:105
+```
+
+### Root Cause
+
+1. **Why bypassing memory profiling failed:** `VLLM_BYPASS_MEM_PROFILING=1` successfully skips the benchmark profiling step but **does not** bypass the mandatory initialization dummy forward pass (`_dummy_run`). This dummy run is required to initialize weights, verify dimensions, and pre-warm the caching pipelines.
+2. **The KeyError:** During the dummy run, Triton-based FP8 matrix multiplier kernels are invoked. One of the pointers passed has the PyTorch dtype `torch.float8_e8m0fnu` (used for OCP microscaled scaling factors). The installed Triton version's `triton._utils.type_canonicalisation_dict` does not contain a mapping for `'float8_e8m0fnu'`, causing the JIT compiler to crash immediately.
+
+### Workaround
+
+We can dynamically monkey-patch Triton's `type_canonicalisation_dict` at startup. Since this is a multi-node Ray cluster run, the monkey-patch must run on **all** nodes and worker processes.
+
+This can be done non-intrusively without modifying read-only system files by creating a `sitecustomize.py` file in the job's working directory and exporting it in the `PYTHONPATH` inside `slurm.sh`:
+
+1. **Create `sitecustomize.py`** in the model's directory:
+   ```python
+   try:
+       import triton
+       import triton._utils as tu
+       if hasattr(tu, 'type_canonicalisation_dict'):
+           if 'float8_e8m0fnu' not in tu.type_canonicalisation_dict:
+               tu.type_canonicalisation_dict['float8_e8m0fnu'] = 'fp8e8m0'
+               tu.type_canonicalisation_dict['torch.float8_e8m0fnu'] = 'fp8e8m0'
+   except Exception:
+       pass
+   ```
+
+2. **Update `slurm.sh`** to export the directory to `PYTHONPATH` before starting Ray:
+   ```bash
+   export PYTHONPATH="$WORK_DIR:$PYTHONPATH"
+   ```
+
+If the Triton compiler backend does not recognize the `'fp8e8m0'` type string internally, fallback to `'i8'` (signed 8-bit integer) is recommended, as the pointers are only loaded from memory and treating them as 8-bit integers is mathematically equivalent.
+
+### Action items
+
+- [x] Provide user with the `sitecustomize.py` monkey-patch script and `slurm.sh` modification.
+- [ ] Confirm if mapping both `'float8_e8m0fnu'` and `'fp8e8m0'` to `'fp8e8m0'` works, or if the `'i8'` fallback is required.
+- [ ] Document the successful solution in this issue once confirmed by the user.
+
+### Update from Run 2
+
+The first patch mapped `'float8_e8m0fnu'` to `'fp8e8m0'`. The run logs show the patch successfully applied across all nodes:
+`Successfully patched Triton type_canonicalisation_dict for float8_e8m0fnu!`
+
+However, Triton's JIT compiler processes types recursively or also looks up the canonical type `'fp8e8m0'` directly in the same dictionary. This led to a new error:
+```
+KeyError: 'fp8e8m0'
+```
+
+This confirms that `'fp8e8m0'` itself is also missing from `type_canonicalisation_dict`.
+
+**Action:** Map **both** strings to `'fp8e8m0'` in the dictionary. If Triton's C++ compiler supports this type string internally, JIT will succeed. Otherwise, if it crashes inside the C++ backend, use the `'i8'` integer fallback mapping for both.
+
+### Update from Run 3 & 4
+
+The `'fp8e8m0'` mapping in Option A failed in Triton's language parser (`triton.language.tys`) with `KeyError: 'fp8e8m0'`. This confirmed that the Triton compiler backend in use lacks any definition of `fp8e8m0` as a language type.
+
+**Option B (the `'i8'` mapping)** was successfully implemented in Run 4, and the log confirmed that the patch loaded and worked across all nodes:
+`Successfully patched Triton type_canonicalisation_dict for float8_e8m0fnu and fp8e8m0 to i8!`
+
+This **fully resolved ISSUE-007**!
+
+---
+
+## ISSUE-008: DeepGEMM JIT layout assertion crash during FlashMLA output projection
+
+**Status**: Workaround proposed — awaiting user test on HPC
+
+**Severity**: Critical — blocks dummy run model execution
+
+**Affected config**: `examples/deepseek-v4-pro.yaml` (when using FlashMLA attention paths)
+
+### Symptom
+
+During the model runner's initialization dummy forward pass (`_dummy_run`), vLLM's FlashMLA attention output projection (`_o_proj` in `flashmla.py` / `o_proj.py`) calls DeepGEMM's FP8 einsum (`deep_gemm_fp8_o_proj` -> `fp8_einsum`).
+
+DeepGEMM's JIT compiling backend crashes with:
+```
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../heuristics/../../utils/layout.hpp:39): t.dim() == N
+```
+
+### Cause
+
+During the dummy profile run, the input `hidden_states` tensor has 3 dimensions (e.g. `(1, seq_len, hidden_size)`), whereas DeepGEMM's contiguous/strided layout expects exactly a 2-dimensional tensor (`token_num, hidden_size`). Because `t.dim()` is 3 and `N` is 2, the dimension-matching check fails in the C++ layout header.
+
+### Workarounds
+
+1. **Option A (Highly Recommended): Disable FlashMLA.**
+   Since FlashMLA is heavily optimized for H100 SXM NVLink layouts and is not critical for correct execution on GH200, it can be disabled by exporting the environment variable:
+   `export VLLM_DISABLE_FLASHMLA=1`
+   This falls back to standard Triton-based Multi-Head Latent Attention (MLA), which uses standard Triton FP8 linear projection layers (which we already successfully configured and patched).
+
+2. **Option B: Monkey-patch `fp8_einsum` to flatten 3D tensors.**
+   In `sitecustomize.py`, we can intercept calls to `vllm.utils.deep_gemm.fp8_einsum` and reshape any 3D input tensor to 2D before passing it to DeepGEMM:
+   ```python
+   try:
+       import vllm.utils.deep_gemm as dg
+       original_fp8_einsum = dg.fp8_einsum
+       def patched_fp8_einsum(*args, **kwargs):
+           new_args = list(args)
+           if len(new_args) > 0 and hasattr(new_args[0], 'dim') and new_args[0].dim() == 3:
+               new_args[0] = new_args[0].view(-1, new_args[0].shape[-1])
+           if 'x' in kwargs and hasattr(kwargs['x'], 'dim') and kwargs['x'].dim() == 3:
+               kwargs['x'] = kwargs['x'].view(-1, kwargs['x'].shape[-1])
+           return original_fp8_einsum(*new_args, **kwargs)
+       dg.fp8_einsum = patched_fp8_einsum
+   except Exception:
+       pass
+   ```

@@ -37,6 +37,7 @@ export PATH=$CUDA_HOME/bin:$PATH
 # flashinfer JIT kernels include cublasLt.h which is in math_libs, not cuda/include.
 export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
+export CUDA_VERSION=12.9
 
 # Use gcc from gcc-native module for JIT compilation (flashinfer, torch.compile).
 export CC=gcc
@@ -76,6 +77,13 @@ export NCCL_IB_PCI_RELAXED_ORDERING=1
 export VLLM_SKIP_CUSTOM_ALL_REDUCE=1        # Force standard NCCL for stability across Slingshot 11
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=300  # Prevent timeouts during multi-node graph setups
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0        # Disable broken experimental symmetric memory allocator
+
+# This forces the DeepGEMM compiler to bypass dynamic device detection and compile directly for the GH200's native SM90 architecture (in theory):
+export TORCH_CUDA_ARCH_LIST="9.0"
+export TRITON_CUDA_ARCH=90
+export NVCC_PREPEND_FLAGS="-arch=sm_90"
+export TRITON_PTXAS_PATH="$NVHPC_ROOT/cuda/12.9/bin/ptxas"
+export DEEPGEMM_TARGET_ARCH="sm_90"
 
 `;
 }
@@ -128,21 +136,33 @@ if [ -z "\${LOCALDIR:-}" ]; then
   chmod 700 "$LOCALDIR"
 fi
 
+# Isolate node workspaces by true kernel hostname to prevent cross-node collisions on shared interactive loopbacks
+if [ -z "\${LOCALDIR:-}" ]; then
+  export LOCALDIR="/local/user/$UID"
+fi
+export NODE_LOCALDIR="$LOCALDIR/$(hostname -s)"
+mkdir -p "$NODE_LOCALDIR"
+
 echo "=== Interactive Deployment Context Resolved ==="
-echo "LOCALDIR is bound to: $LOCALDIR"
+echo "Node only LOCALDIR is bound to: $NODE_LOCALDIR"
+
+# Clean up ONLY this specific node's unique subfolder
+echo "Pristine cleanup of isolated workspace for $(hostname -s)..."
+rm -rf "\${NODE_LOCALDIR:?}"/* 2>/dev/null || true
+
 
 # 1. Identify possible compiler cache location
 TAR_FILE="${paths.remoteProjectJobCacheFile}"
 
-# 2. Move $HOME to fast local tmpfs
-export HOME="$LOCALDIR/user_home"
+# Direct all application caches to this isolated node location
+export HOME="$NODE_LOCALDIR/user_home"
 mkdir -p "$HOME"
 
 # 3. Try to restore cached JIT compilations
 if [ -f "$TAR_FILE" ]; then
   echo "Restoring JIT cache from shared storage..."
   # --no-same-permissions (or -m) forces tar to map files to the current user's umask
-  tar xzf "$TAR_FILE" --no-same-permissions -C "$LOCALDIR" 2>/dev/null && echo "Cache restored" || echo "Cache corrupt — recompiling"
+  tar xzf "$TAR_FILE" --no-same-permissions -C "$NODE_LOCALDIR" 2>/dev/null && echo "Cache restored" || echo "Cache corrupt — recompiling"
 fi
 
 
@@ -191,7 +211,7 @@ export TORCH_SHOW_CPP_STACKTRACES=1
 # 3. Force Ray to log every internal actor IPC execution message
 export RAY_LOG_TO_DRIVER=1
 
-echo "=== Shared Memory Allocation ==="
+echo "=== Shared Memory Allocation (Node $SLURM_NODEID) ==="
 df -h /dev/shm
 # Start a background resource monitor
 (
@@ -207,7 +227,7 @@ END {
 }' | sort -k8 -nr | head -n 5
 
 # JIT Cache Growth Monitor
-echo "--- JIT Cache Sizes at $(date) ---"
+echo "--- JIT Cache Sizes at $(date) (Node $SLURM_NODEID) ---"
 du -sh $FLASHINFER_JIT_CACHE_DIR $DG_JIT_CACHE_DIR $TRITON_CACHE_DIR $VLLM_CACHE_ROOT 2>/dev/null
 
 sleep 5
@@ -221,8 +241,9 @@ MONITOR_PID=$!
 # Compact progress monitor
 (
   while true; do
-    printf "[%s] RAM: %s | Cache: fi=%sK dg=%sK ti=%sK vc=%sK\\n" \\
+    printf "[%s-node %s] RAM: %s | Cache: fi=%sK dg=%sK ti=%sK vc=%sK\\n" \\
       "$(date +%H:%M:%S)" \\
+      "$SLURM_NODEID" \\
       "$(ps -u $USER -o rss=,comm= | awk '{m[$2]+=$1} END{for(c in m) if(m[c]>1024) printf "%s=%dM ",c,m[c]/1024; else printf "%s=%dK ",c,m[c]}')" \\
       "$(du -sk $FLASHINFER_JIT_CACHE_DIR 2>/dev/null | cut -f1)" \\
       "$(du -sk $DG_JIT_CACHE_DIR 2>/dev/null | cut -f1)" \\
@@ -263,6 +284,9 @@ finalize_and_exit() {
 
 on_exit() {
   EXIT_CODE=$?
+  if [ -n "\${MONITOR_PID:-}" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
+    kill "$MONITOR_PID" 2>/dev/null; wait "$MONITOR_PID" 2>/dev/null
+  fi
   trap - EXIT
   collect_exit_diagnostics "EXIT trap"
   exit $EXIT_CODE
@@ -352,13 +376,13 @@ chmod g+w "${ss.paths.remoteProjectJobCacheDir}" 2>/dev/null || true
   sleep 2
 
   # 1. Force permissions inside the directory to be group-accessible before archiving
-  chmod -R g+rwX "$LOCALDIR/user_home" 2>/dev/null || true
+  chmod -R g+rwX "$NODE_LOCALDIR/user_home" 2>/dev/null || true
 
   # 2. Tar the cache while wiping out individual user metadata
   tar czf "\${CACHE_FILE}.tmp" \\
     --owner=0 --group=0 \\
     --mode='g+rwX,o-rwx' \\
-  -C "$LOCALDIR" user_home 2>/dev/null && \
+  -C "$NODE_LOCALDIR" user_home 2>/dev/null && \
   mv "\${CACHE_FILE}.tmp" "$CACHE_FILE" && \\
   chmod 664 "$CACHE_FILE" && \\
   echo "[cache-save] Done: $(du -sh "$CACHE_FILE" | cut -f1)" || \\
@@ -406,7 +430,7 @@ function renderSingleNodeScript(ss: SessionState): string {
     // will invoke this string via an active 'srun' command over SSH.
     return `#!/bin/bash
 # Redirect stdout and stderr to both the console and the log file simultaneously
-exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
+exec > >(tee "${paths.remoteJobLogFile}") 2>&1
 echo "=== IVLLM version ${__VERSION__} ==="
 ${runtimePayload}
 echo "Submitted interactive job $VLLM_PID"
@@ -552,7 +576,7 @@ function renderMultiNodeScript(ss: SessionState): string {
     // Interactive direct access relies on your local JS script executing the parent allocation:
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
-exec > >(tee -a "${paths.remoteJobLogFile}") 2>&1
+exec > >(tee "${paths.remoteJobLogFile}") 2>&1
 echo "=== IVLLM version ${__VERSION__} ==="
 ${renderInteractiveMultiNodePayload(ss)}
 echo "Submitted interactive job $VLLM_PID"
@@ -607,7 +631,7 @@ function renderCustomEnv(ss: SessionState) {
 function renderLogEnvVars() {
   return `
 echo "=== Final Environment Variables for vLLM ==="
-env | grep -E "VLLM_|RAY_|NCCL_|FI_"
+env | grep -E "VLLM_|RAY_|NCCL_|FI_|NVHPC|CUDA_|LD_CONFIG|CPATH|PATH|SLURM_|TRITON"
 echo "============================================"
 `;
 }
@@ -631,7 +655,7 @@ echo "============================================"
 //
 //   // Multi node compilation caching:
 //   // E.g. Node 1 and Node 2 write to independent, clean compilation caches
-//   // This is achieved by rewriting $HOME for each worker to $LOCALDIR which is node local
+//   // This is achieved by rewriting $HOME for each worker to $NODE_LOCALDIR which is node local
 //   // Each node restores caches from $PROJECTDIR/ivllm/caches
 //
 //   return `
@@ -727,7 +751,7 @@ function renderInteractiveMultiNodePayload(ss: SessionState): string {
   const opts = ss.startArgs;
   const paths = ss.paths;
   const nodeCount = Math.ceil(opts.gpuCount / 4);
-  const gpusPerNode = Math.ceil(opts.gpuCount / nodeCount);
+  const gpusPerNode = 4;
 
   const rayObjectStoreMemoryGiB = 4;
 
@@ -749,7 +773,8 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 export GPUS_PER_NODE=${gpusPerNode}
 export HEAD_NODE=$(scontrol show hostnames $SLURM_NODELIST | head -n1)
 export COMPUTE_HOSTNAME=$HEAD_NODE
-export HEAD_NODE_IP=$(getent hosts "$HEAD_NODE" | awk '{ print $1 }')
+
+export HEAD_NODE_IP=$(dig +short $HEAD_NODE)
 export RAY_PORT=6378
 
 ${renderWorkDirSetup(paths)}
@@ -760,21 +785,35 @@ export TORCHINDUCTOR_PARALLEL_COMPILE_THREADS=${maxTorch}
 export FLASHINFER_NVCC_THREADS=${maxFlash}
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=300
 
+# Export the workspace directory so all spawned Python/Ray processes load sitecustomize.py
+export PYTHONPATH="${paths.remoteProjectVllmPluginsDir}:$PYTHONPATH"
+
 source "${paths.remoteProjectVllmVenvActivate}"
 export HF_HOME=${paths.remoteProjectHfDir}
 export HF_HUB_OFFLINE=1
 
 export RAY_OBJECT_STORE_MEMORY=${rayObjectStoreMemoryGiB * 1024 * 1024 * 1024}
 export RAY_LOG_TO_DRIVER=1    # Forces worker logs to stream to the head node stdout
-export RAY_RUNTIME_ENV_LOG_TO_DRIVER=1
-# Change the default temp storage location to a persistent cluster directory
-export RAY_TMPDIR="${ss.paths.remoteJobDir}/ray-logs"
-
 cd "$WORK_DIR"
+
+${renderMonitor()}
+${renderExitDiagnostics()}
+${renderExitTrap()}
+
 
 if [ "$SLURM_NODEID" -eq 0 ]; then
 
   echo "This is the master node."
+  python -c "
+import torch, deep_gemm, os
+print('PyTorch CUDA:', torch.version.cuda)
+print('CUDA_HOME:', os.environ.get('CUDA_HOME'))
+print('DeepGEMM Version:', deep_gemm.__version__)
+print('Device Compute Capability:', torch.cuda.get_device_capability())
+"
+
+  echo "=== Node environment: $SLURM_NODEID ===="
+  ${renderLogEnvVars()}
 
   # Write initialising status — LOCAL already created the file with "pending";
   # we overwrite with full details now that we have the SLURM context.
@@ -789,25 +828,19 @@ if [ "$SLURM_NODEID" -eq 0 ]; then
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
     > "$JOB_DETAILS"
 
-  ${renderExitDiagnostics()}
-  ${renderExitTrap()}
-  ${renderMonitor()}
-  ${renderLogEnvVars()}
-
   echo "Starting Ray head node ($HEAD_NODE) - $HEAD_NODE_IP:$RAY_PORT ..."
-  source ${paths.remoteProjectVllmVenvActivate}
 
   VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
   --block \\
   --head \\
-  --num-gpus=4 \\
+  --temp-dir="$LOCALDIR/ray" \\ # ray tempdir is once per cluster
   --disable-usage-stats \\
-  --include-dashboard=False \\
+  --include-dashboard=false \\
   --node-ip-address=$HEAD_NODE_IP \\
   --port=$RAY_PORT \\
   --object-store-memory=$RAY_OBJECT_STORE_MEMORY &
 
-  sleep 20
+  sleep 60
 
   cd ${paths.remoteJobDir}
 
@@ -826,8 +859,6 @@ if [ "$SLURM_NODEID" -eq 0 ]; then
 
 else
 
-  sleep 5
-
   # Get the current hostname assigned to this specific node ID
   WORKER=$(scontrol show hostnames "$SLURM_NODELIST" | sed -n "$((SLURM_NODEID + 1))p")
 
@@ -837,7 +868,6 @@ else
 
   VLLM_HOST_IP=$WORKER_IP ray start \\
   --block \\
-  --num-gpus=4 \\
   --address=$HEAD_NODE_IP:$RAY_PORT \\
   --node-ip-address=$WORKER_IP \\
   --object-store-memory=$RAY_OBJECT_STORE_MEMORY
@@ -882,6 +912,7 @@ function renderMultiNodePayload(ss: SessionState): string {
   const maxJobs = 16; // Safe, scalable compiler throttle
   const maxTorch = 32; // Safe, scalable compiler throttle
 
+  // TODO: Fix multinode $LOCALDIR collisions
   // Multi node compilation caching:
   // E.g. Node 1 and Node 2 write to independent, clean compilation caches
   // This is achieved by rewriting $HOME for each worker to $LOCALDIR which is node local

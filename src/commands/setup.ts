@@ -3,19 +3,9 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { loadCredentials, assertConfigured } from '../config.ts';
 import { renderSetupScript } from '../templates/setup.ts';
-import {
-  submitJob,
-  pollJobStatus,
-  getJobLog,
-  getSlurmQueueState,
-} from '../slurm.ts';
-import { checkSSH, makeRemoteOps } from '../remote-ops.ts';
+import { makeRemoteOps } from '../remote-ops.ts';
 import { ProcessState } from '../types.ts';
-import { detachSession } from '../monitors.ts';
 import { makeSimplePaths } from '../job.ts';
-import { makeLocalOps } from '../local-ops.ts';
-
-const POLL_INTERVAL_MS = 60_000; // Isambard policy: do not poll Slurm scheduler more than once per minute
 
 // TODO: --dry-run flag
 
@@ -84,102 +74,65 @@ Examples:
   const { exitCode: venvCheck } = await ops.runRemote(`test -d ${venvDir}/bin`);
   if (venvCheck === 0) {
     console.log(`✓ vLLM ${vllmVersion} already installed at ${venvDir}`);
-    console.log('  Delete the directory first to reinstall.');
-    return;
+    console.log('  Delete the directory first to reinstall vllm.');
+    console.log('  Running setup for other components.');
   }
 
   // Render and copy setup script to LOGIN
   const script = renderSetupScript(sessionState, remoteSetupLog);
-
   const localTmp = join(tmpdir(), 'ivllm-setup.slurm.sh');
   writeFileSync(localTmp, script, 'utf-8');
 
   try {
-    console.log('Copying setup script to login node...');
-    await ops.runRemote(`mkdir -p ${remoteSetupDir})`);
+    console.log(`Copying setup script to ${remoteSetupDir} on login node...`);
+    await ops.runRemote(`mkdir -p ${remoteSetupDir}`, {
+      env: [],
+      silent: false,
+    });
     await ops.copyFile(localTmp, remoteSetupScript);
     console.log('✓ Script copied');
 
     // Submit SLURM job
     console.log('Submitting SLURM setup job...');
 
-    //TODO: This is using old approach and could be refactored using a monitor.
+    const remoteSrun = `srun \\
+    --job-name="install_vllm" \\
+    --nodes=1 \\
+    --ntasks-per-node=1 \\
+    --cpus-per-task=16 \\
+    --gpus-per-node=1 \\
+    --partition=interactive \\
+    --reservation=interactive \\
+    --interactive \\
+    --mem=48G \\
+    --time=01:00:00 \\
+    --export=ALL \\
+    bash "${remoteSetupScript}"
+    `;
 
-    await submitJob(remoteSetupScript, sessionState);
-    const jobId = sessionState.slurmJobId!;
-    console.log(`✓ SLURM job submitted: ${jobId}`);
+    const { exitCode: dlCode } = await ops.runRemote(remoteSrun, {
+      env: [],
+      silent: false,
+    });
 
-    // Truncate the log so we only stream this run's output
-    await ops.runRemote(`truncate -s 0 ${remoteSetupLog} 2>/dev/null || true`);
-
-    // Wait for the job to leave the queue (PENDING → RUNNING)
-    console.log('Waiting for compute node allocation...');
-    while (true) {
-      const queueState = await getSlurmQueueState(ops, jobId);
-      if (!queueState || queueState.state !== 'PENDING') break;
-      await sleep(POLL_INTERVAL_MS);
-    }
-
-    console.log(
-      '✓ Job started — streaming setup log (this may take 10–20 minutes)...',
-    );
-    console.log('─'.repeat(60));
-
-    // Stream the remote log to stdout in real time
-    // Give the job a moment to start writing the log before tailing
-    await sleep(3_000);
-    const tail = ops.tailRemoteLog(remoteSetupLog, '  ');
-
-    // Poll for job completion while log streams in the background
-    let state = await pollJobStatus(ops, jobId);
-    while (state === 'running') {
-      await sleep(POLL_INTERVAL_MS);
-      state = await pollJobStatus(ops, jobId);
-    }
-
-    // Give tail a moment to flush remaining lines before stopping
-    await sleep(2_000);
-    tail.stop();
-    console.log('─'.repeat(60));
-
-    // Fetch log
-    const log = await getJobLog(ops, remoteSetupLog);
-
-    if (state === 'failed') {
+    if (dlCode !== 0) {
       console.error('✗ Setup job failed. Log output:');
-      console.error(log);
-      process.exit(1);
-    }
-
-    if (!log.includes('IVLLM_SETUP_SUCCESS')) {
-      console.error(
-        '✗ Setup job completed but success marker not found. Log output:',
-      );
-      console.error(log);
       process.exit(1);
     }
 
     // Validate venv exists
     const { exitCode: finalCheck } = await ops.runRemote(
-      `test -d ${venvDir}/bin`,
+      `test -d ${paths.remoteProjectVllmVersionDir}/bin`,
     );
     if (finalCheck !== 0) {
-      console.error(`✗ venv not found at ${venvDir} after setup.`);
+      console.error(
+        `✗ venv not found at ${paths.remoteProjectVllmVersionDir} after setup.`,
+      );
       process.exit(1);
     }
 
     console.log(`✓ vLLM ${vllmVersion} installation complete`);
-    const versionLine = log.split('\n').find((l) => l.startsWith('vllm'));
-    if (versionLine) console.log(`  ${versionLine}`);
   } finally {
     if (existsSync(localTmp)) unlinkSync(localTmp);
   }
-}
-
-/**
- *
- * @param ms
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

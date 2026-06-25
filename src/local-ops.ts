@@ -1,10 +1,4 @@
-import type {
-  CloseableEventEmitter,
-  Credentials,
-  LocalOps,
-  InferenceJobOptions,
-  V1ModelsResponse,
-} from './types.ts';
+import type { LocalOps, V1ModelsResponse } from './types.ts';
 
 /**
  * Factory that returns a {@link LocalOps} implementation.
