@@ -8,6 +8,7 @@ import type {
 import { jobConfigPath, parseVllmConfig, saveJobConfig } from './vllm-config';
 import { existsSync } from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 
 /**
  *
@@ -104,13 +105,24 @@ export async function parseStartArgs(
     timeLimit: flags['time'] ?? '8:00:00',
     serverPort: flags['server-port']
       ? parseInt(flags['server-port'], 10)
-      : 8000,
+      : generateRandomHighPort(),
     mock,
     dryRun,
     noLaunch,
     preCache,
     cacheKey,
   };
+}
+
+function generateRandomHighPort(): number {
+  const MIN_PORT = 49152;
+  const MAX_PORT = 65535;
+  const range = MAX_PORT - MIN_PORT + 1;
+
+  // Use crypto.randomInt for cryptographically secure random integers
+  const randomPort = crypto.randomInt(0, range) + MIN_PORT;
+
+  return randomPort;
 }
 
 /**

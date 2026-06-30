@@ -79,7 +79,7 @@ Examples:
   }
 
   // Render and copy setup script to LOGIN
-  const script = renderSetupScript(sessionState, remoteSetupLog);
+  const script = await renderSetupScript(sessionState, remoteSetupLog);
   const localTmp = join(tmpdir(), 'ivllm-setup.slurm.sh');
   writeFileSync(localTmp, script, 'utf-8');
 

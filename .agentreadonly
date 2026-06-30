@@ -9,3 +9,6 @@ Cargo.lock
 pnpm-lock.yaml
 yarn.lock
 mise.toml
+
+$HOME/bin/0.23.0/
+

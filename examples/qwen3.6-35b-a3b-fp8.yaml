@@ -22,15 +22,14 @@ enable-chunked-prefill: true
 
 mm-encoder-tp-mode: data
 
-max-cudagraph-capture-size: 8
-dtype: bfloat16
+max-cudagraph-capture-size: 16
 
 # Reasoning (thinking mode enabled by default; use /no_think in prompt to disable)
 reasoning-parser: qwen3
 
 # Tool calling
 enable-auto-tool-choice: true
-tool-call-parser: qwen3_coder
+tool-call-parser: qwen3_xml
 
 # MoE efficiency (expert parallelism for MoE layers alongside tensor parallelism)
 enable-expert-parallel: true

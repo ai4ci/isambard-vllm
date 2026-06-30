@@ -28,16 +28,51 @@ function renderNVHPCPreamble(ss: SessionState) {
   return `
 module purge
 module load brics/nccl gcc-native
+# brics/nccl sets the correct NCCL for in and between node comms
+# Force NCCL to use the aws-ofi-nccl libfabric plugin:
+# export NCCL_NET="AWS Libfabric"
+# Use the high speed network interface
+# export NCCL_SOCKET_IFNAME="hsn"
+# Print the NCCL version at startup
+# export NCCL_DEBUG="VERSION"
+# Use P2P when GPUs share the same NUMA node
+# export NCCL_NET_GDR_LEVEL="PHB"
+# Allow rings/trees to span multiple NICs
+# export NCCL_CROSS_NIC="1"
+# export NCCL_MIN_NCHANNELS="4"
+# export NCCL_GDRCOPY_ENABLE="1"
+# export NCCL_NET_FORCE_FLUSH="0"
+
+# Libfabric (FI) tuning for Slingshot
+# export FI_CXI_DEFAULT_CQ_SIZE="131072"
+# export FI_CXI_DEFAULT_TX_SIZE="2048"
+# export FI_CXI_DISABLE_NON_INJECT_MSG_IDC="1"
+# export FI_HMEM_CUDA_USE_GDRCOPY="1"
+# export FI_CXI_DISABLE_HOST_REGISTER="1"
+# export FI_MR_CACHE_MONITOR="userfaultfd"
+# export FI_CXI_RDZV_PROTO="alt_read"
+# export FI_CXI_RDZV_THRESHOLD="0"
+# export FI_CXI_RDZV_GET_MIN="0"
+# export FI_CXI_RDZV_EAGER_SIZE="0"
+# export FI_CXI_RX_MATCH_MODE="hybrid"
 
 export NVHPC_ROOT=${ss.paths.nvhpcRoot}
 export CUDA_HOME=$NVHPC_ROOT/cuda/12.9
 export PATH=$CUDA_HOME/bin:$PATH
+
+export GLOO_SOCKET_IFNAME=hsn0
+export NCCL_SOCKET_IFNAME=hsn
+# Force PyTorch's internal TensorPipe layer to follow Gloo to the exact index
+export TP_SOCKET_IFNAME=hsn0
 
 # NVHPC separates math library headers (cuBLAS, cuSPARSE) from the CUDA SDK headers.
 # flashinfer JIT kernels include cublasLt.h which is in math_libs, not cuda/include.
 export CPATH=$NVHPC_ROOT/math_libs/12.9/include:\${CPATH:-}
 export LD_LIBRARY_PATH=$NVHPC_ROOT/cuda/12.9/compat:$NVHPC_ROOT/cuda/12.9/lib64:$NVHPC_ROOT/compilers/lib:$NVHPC_ROOT/comm_libs/12.9/nccl/lib:$NVHPC_ROOT/comm_libs/12.9/nvshmem/lib:$NVHPC_ROOT/math_libs/12.9/lib64:\${LD_LIBRARY_PATH:-}
 export CUDA_VERSION=12.9
+
+export VLLM_ENABLE_CUDA_COMPATIBILITY=1
+export VLLM_CUDA_COMPATIBILITY_PATH=$NVHPC_ROOT/cuda/12.9/compat
 
 # Use gcc from gcc-native module for JIT compilation (flashinfer, torch.compile).
 export CC=gcc
@@ -51,6 +86,12 @@ export OMP_NUM_THREADS=16
 export NCCL_NET_GDR_LEVEL=5          # Enforce full GPUDirect RDMA across nodes
 export FI_PROVIDER="cxi"             # Enforce Cray Cassini fabric provider
 export FI_CXI_DEFAULT_CQ_SIZE=131072 # Expand Completion Queue size to prevent dropped frames
+
+# === Libfabric CXI Buffer Optimisations ===
+# These prevent Slingshot event-queue overflows and flow-control locks
+export FI_CXI_DEFAULT_TX_SIZE=16384
+export FI_CXI_DISABLE_HOST_REGISTER=1
+export FI_CXI_RX_MATCH_MODE=software
 
 # Prevent Slingshot Memory Hooks Deadlocks
 # HPE Slingshot uses 'memhooks' by default, which clashes with vLLM's memory allocation and hangs.
@@ -74,16 +115,25 @@ export NCCL_CUMEM_ENABLE=0
 export NCCL_IB_PCI_RELAXED_ORDERING=1
 
 # VLLM networking and compilation overrides:
-export VLLM_SKIP_CUSTOM_ALL_REDUCE=1        # Force standard NCCL for stability across Slingshot 11
+export VLLM_FLASHINFER_ALLREDUCE_BACKEND=trtllm # Force standard NCCL for stability across Slingshot 11
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=300  # Prevent timeouts during multi-node graph setups
 export VLLM_ALLREDUCE_USE_SYMM_MEM=0        # Disable broken experimental symmetric memory allocator
 
 # This forces the DeepGEMM compiler to bypass dynamic device detection and compile directly for the GH200's native SM90 architecture (in theory):
-export TORCH_CUDA_ARCH_LIST="9.0"
+
 export TRITON_CUDA_ARCH=90
-export NVCC_PREPEND_FLAGS="-arch=sm_90"
 export TRITON_PTXAS_PATH="$NVHPC_ROOT/cuda/12.9/bin/ptxas"
 export DEEPGEMM_TARGET_ARCH="sm_90"
+
+# Update this line from 9.0 to 9.0a
+export TORCH_CUDA_ARCH_LIST="9.0a"
+
+# Force NVCC to use 90a for FlashInfer's template compilation
+export NVCC_APPEND_FLAGS="-arch=sm_90a"
+
+# 4. Limit runtime combinatorics
+export FLASHINFER_HEAD_DIMS="128"
+export FLASHINFER_POS_ENCODING_MODES="0"
 
 `;
 }
@@ -284,8 +334,13 @@ finalize_and_exit() {
 
 on_exit() {
   EXIT_CODE=$?
+  echo "shutdown monitor"
   if [ -n "\${MONITOR_PID:-}" ] && kill -0 "$MONITOR_PID" 2>/dev/null; then
     kill "$MONITOR_PID" 2>/dev/null; wait "$MONITOR_PID" 2>/dev/null
+  fi
+  echo "shutdown vllm..."
+  if [ -n "\${VLLM_PID:-}" ] && kill -0 "$VLLM_PID" 2>/dev/null; then
+    kill "$VLLM_PID" 2>/dev/null; wait "$VLLM_PID" 2>/dev/null
   fi
   trap - EXIT
   collect_exit_diagnostics "EXIT trap"
@@ -576,8 +631,8 @@ function renderMultiNodeScript(ss: SessionState): string {
     // Interactive direct access relies on your local JS script executing the parent allocation:
     // e.g. ssh user@host "srun --nodes=X --gpus-per-node=Y --mem=0 --exclusive bash -s < script.sh"
     return `#!/bin/bash
-exec > >(tee "${paths.remoteJobLogFile}") 2>&1
-echo "=== IVLLM version ${__VERSION__} ==="
+exec > >(tee "${paths.remoteJobLogFile}.$SLURM_NODEID.log") 2>&1
+echo "=== IVLLM version ${__VERSION__}: Node $SLURM_NODEID ==="
 ${renderInteractiveMultiNodePayload(ss)}
 echo "Submitted interactive job $VLLM_PID"
 `;
@@ -630,6 +685,14 @@ function renderCustomEnv(ss: SessionState) {
  */
 function renderLogEnvVars() {
   return `
+echo "=== Python version ==="
+python -c "
+import torch, deep_gemm, os
+print('PyTorch CUDA:', torch.version.cuda)
+print('CUDA_HOME:', os.environ.get('CUDA_HOME'))
+print('DeepGEMM Version:', deep_gemm.__version__)
+print('Device Compute Capability:', torch.cuda.get_device_capability())
+"
 echo "=== Final Environment Variables for vLLM ==="
 env | grep -E "VLLM_|RAY_|NCCL_|FI_|NVHPC|CUDA_|LD_CONFIG|CPATH|PATH|SLURM_|TRITON"
 echo "============================================"
@@ -758,9 +821,9 @@ function renderInteractiveMultiNodePayload(ss: SessionState): string {
   // const cpusPerTask = '256';
   const model = opts.configYaml.model;
   const lcaseModel = model.split('/').pop()!.toLowerCase();
-  const maxFlash = 4; // Safe, scalable compiler throttle
-  const maxJobs = 16; // Safe, scalable compiler throttle
-  const maxTorch = 32; // Safe, scalable compiler throttle
+  const maxFlash = 2; // Safe, scalable compiler throttle
+  const maxJobs = 8; // Safe, scalable compiler throttle
+  const maxTorch = 16; // Safe, scalable compiler throttle
 
   // Slightly confusingly this will be executed for each node in parallel
   return `
@@ -804,14 +867,6 @@ ${renderExitTrap()}
 if [ "$SLURM_NODEID" -eq 0 ]; then
 
   echo "This is the master node."
-  python -c "
-import torch, deep_gemm, os
-print('PyTorch CUDA:', torch.version.cuda)
-print('CUDA_HOME:', os.environ.get('CUDA_HOME'))
-print('DeepGEMM Version:', deep_gemm.__version__)
-print('Device Compute Capability:', torch.cuda.get_device_capability())
-"
-
   echo "=== Node environment: $SLURM_NODEID ===="
   ${renderLogEnvVars()}
 
@@ -828,28 +883,13 @@ print('Device Compute Capability:', torch.cuda.get_device_capability())
     compute_hostname: $compute_hostname, model: $model, server_port: $server_port}' \\
     > "$JOB_DETAILS"
 
-  echo "Starting Ray head node ($HEAD_NODE) - $HEAD_NODE_IP:$RAY_PORT ..."
-
-  VLLM_HOST_IP=$HEAD_NODE_IP ray start \\
-  --block \\
-  --head \\
-  --temp-dir="$LOCALDIR/ray" \\ # ray tempdir is once per cluster
-  --disable-usage-stats \\
-  --include-dashboard=false \\
-  --node-ip-address=$HEAD_NODE_IP \\
-  --port=$RAY_PORT \\
-  --object-store-memory=$RAY_OBJECT_STORE_MEMORY &
-
-  sleep 60
-
-  cd ${paths.remoteJobDir}
-
-  ray status
+  cd "${paths.remoteJobDir}"
 
   VLLM_HOST_IP=$HEAD_NODE_IP vllm serve \\
+  --nnodes ${nodeCount} \\
+  --node-rank $SLURM_NODEID \\
+  --master-addr $HEAD_NODE_IP \\
   --config $VLLM_CONFIG \\
-  --distributed-executor-backend ray \\
-  --host 0.0.0.0 \\
   --port ${opts.serverPort} \\
   --served-model-name "${model}" "${lcaseModel}" "default" "${opts.jobName}" \\
   &
@@ -859,19 +899,23 @@ print('Device Compute Capability:', torch.cuda.get_device_capability())
 
 else
 
-  # Get the current hostname assigned to this specific node ID
   WORKER=$(scontrol show hostnames "$SLURM_NODELIST" | sed -n "$((SLURM_NODEID + 1))p")
-
-  # Resolve it to an IP address
   WORKER_IP=$(dig +short $WORKER)
-  echo "Starting Ray worker node: $WORKER ($WORKER_IP) attached to $HEAD_NODE_IP:$RAY_PORT"
+  echo "Starting worker node: $WORKER ($WORKER_IP) attached to $HEAD_NODE_IP"
 
-  VLLM_HOST_IP=$WORKER_IP ray start \\
-  --block \\
-  --address=$HEAD_NODE_IP:$RAY_PORT \\
-  --node-ip-address=$WORKER_IP \\
-  --object-store-memory=$RAY_OBJECT_STORE_MEMORY
+  VLLM_HOST_IP=$WORKER_IP vllm serve \\
+  --nnodes ${nodeCount} \\
+  --node-rank $SLURM_NODEID \\
+  --headless \\
+  --master-addr $HEAD_NODE_IP \\
+  --config $VLLM_CONFIG \\
+  --served-model-name "${model}" "${lcaseModel}" "default" "${opts.jobName}" \\
+  &
+  VLLM_PID=$!
 
+  # Keep worker alive while vLLM runs
+  wait $VLLM_PID
+  EXIT_CODE=$?
 
 fi
 `;

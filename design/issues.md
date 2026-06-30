@@ -446,6 +446,103 @@ If the Triton compiler backend does not recognize the `'fp8e8m0'` type string in
 - [ ] Confirm if mapping both `'float8_e8m0fnu'` and `'fp8e8m0'` to `'fp8e8m0'` works, or if the `'i8'` fallback is required.
 - [ ] Document the successful solution in this issue once confirmed by the user.
 
+---
+
+## ISSUE-009: DeepGEMM MXFP4 MoE kernel requires Blackwell (SM100) — GH200 (SM90) cannot run
+
+**Status**: Open — fundamental hardware limitation, no workaround
+
+**Severity**: Critical — prevents DeepSeek-V4-Pro from running on GH200/Hopper
+
+**Affected config**: `examples/deepseek-v4-pro.yaml` (when using `moe-backend: deep_gemm` and `linear-backend: deep_gemm`)
+
+### Symptom
+
+vLLM starts, loads model weights, completes memory profiling, then crashes during the dummy forward pass with:
+
+```
+RuntimeError: Assertion error (csrc/apis/../jit_kernels/impls/../heuristics/../../utils/layout.hpp:57): ab.scalar_type() == kPackedFP4 and arch_major == 10
+```
+
+Stack trace:
+```
+vllm/model_executor/layers/fused_moe/experts/deep_gemm_moe.py:507: m_grouped_fp8_fp4_gemm_nt_contiguous(
+    # FC1: FP8 activations x FP4 weights
+vllm/utils/deep_gemm.py:319: m_grouped_fp8_fp4_gemm_nt_contiguous -> _grouped_fp4_impl()
+```
+
+### Root Cause
+
+DeepSeek-V4-Pro uses **MXFP4 quantization** for its MoE expert weights (not FP8). The DeepGEMM kernel `m_grouped_fp8_fp4_gemm_nt_contiguous` implements **FP4 Tensor Core GEMM**, which is a **Blackwell (SM100) only** instruction set.
+
+From the kernel source (`layout.hpp:57`):
+```cpp
+assert(ab.scalar_type() == kPackedFP4 && arch_major == 10);
+```
+
+Your GH200 nodes are **Hopper (SM90)** — they have no FP4 Tensor Cores. The model's linear (non-MoE) layers use standard FP8 and work fine, but the MoE expert layers require FP4 compute.
+
+### Evidence from logs
+
+```
+INFO 06-25 22:34:59 [mxfp4.py:381] Using 'DEEPGEMM_MXFP4' Mxfp4 MoE backend.
+Device Compute Capability: (9, 0)  ← Hopper, not Blackwell
+```
+
+### Why prior patches didn't help
+
+| Patch | Effect | Result |
+|---|---|---|
+| ISSUE-007: Triton `float8_e8m0fnu` → `i8` patch | Fixed Triton JIT for FP8 scaling factors | OK, but this is for the MoE activation quantization, not the weight GEMM |
+| `VLLM_USE_DEEP_GEMM_E8M0=0` | Disabled UE8M0 scaling factors | OK, resolved the prior UE8M0 dtype assertion |
+| Blackwell bypass patch (SM100) | Made vLLM think GH200 is Blackwell | Unintentionally triggered the FP4 path which crashes on SM90 |
+
+### Why non-DeepGEMM backends are not a simple fix
+
+DeepSeek-V4-Pro's MoE weights are **stored in MXFP4 format** on disk. Non-DeepGEMM backends (Triton, Cutlass) would need to either:
+1. Support dequantizing MXFP4 → FP8 on-the-fly during MoE execution, or
+2. Have an FP8-only variant of the model weights (none exists on HuggingFace)
+
+This is a **model-level quantization choice**, not just a kernel implementation detail. The weights are MXFP4 at rest.
+
+### Affected configuration
+
+| Parameter | Value |
+|---|---|
+| `moe-backend` | `deep_gemm` (MXFP4 path) |
+| `linear-backend` | `deep_gemm` |
+| `quantization` | `deepseek_v4_fp8` |
+| `pipeline_parallel_size` | 4 |
+| `tensor_parallel_size` | 4 |
+| `nnodes` | 4 |
+| `world_size` | 16 |
+| Device | GH200 (SM90) — no FP4 Tensor Cores |
+
+### Workarounds
+
+| Approach | Feasibility | Notes |
+|---|---|---|
+| Use Blackwell GPUs | ✅ | Only path to native MXFP4 MoE support |
+| Use FP8-only model variant | ✅ | If available; DeepSeek-V4-Pro ships with MXFP4 |
+| Switch to Triton/Cutlass MoE backend | ❓ | Untested — would require MXFP4 dequantization support |
+| Downgrade to DeepSeek-V3 | ✅ | V3 uses FP8 MoE only, compatible with Hopper |
+| Use cloud/remote API | ✅ | E.g. OpenRouter, Anyscale |
+
+### Upstream tracking
+
+| Item | Status |
+|---|---|
+| DeepGEMM FP4 kernel SM100-only | [github.com/deepseek-ai/DeepGEMM](https://github.com/deepseek-ai/DeepGEMM) — by design |
+| MXFP4 on Hopper | Not supported — FP4 Tensor Cores are a Blackwell-only feature |
+
+### Action items
+
+- [x] Document the issue in this file
+- [ ] Document Triton/Cutlass MoE fallback feasibility on GH200 if relevant
+- [ ] Update `examples/deepseek-v4-pro.yaml` with note about Blackwell requirement
+- [ ] Monitor DeepGEMM for any Hopper-compatible FP4 implementation
+- [ ] Evaluate whether DeepSeek provides an FP8-only MoE variant
+
 ### Update from Run 2
 
 The first patch mapped `'float8_e8m0fnu'` to `'fp8e8m0'`. The run logs show the patch successfully applied across all nodes:

@@ -47,10 +47,10 @@ export interface SetupScriptOptions {
  * @see SetupScriptOptions
  * @see renderInferenceScript
  */
-export function renderSetupScript(
+export async function renderSetupScript(
   ss: ProcessState,
   remoteLogFile: string,
-): string {
+): Promise<string> {
   const paths = ss.paths;
   const vllmVersion = ss.vllmVersion;
   const venvDir = paths.remoteProjectVllmVersionDir;
@@ -65,6 +65,7 @@ export function renderSetupScript(
     `$NVHPC_ROOT/math_libs/12.9/lib64`,
     `\${LD_LIBRARY_PATH:-}`,
   ].join(':');
+  const installDeepGEMM = await renderInstallDeepGEMM(ss);
 
   return `#!/bin/bash
 exec > >(tee -a "${remoteLogFile}") 2>&1
@@ -137,16 +138,45 @@ else
   echo "IVLLM_SETUP_SUCCESS"
 fi
 
-${renderInstallDeepGEMM(ss)}
+FLASHINFER=$(uv pip list --format=json | jq '.[] | select(.name == "flashinfer-python") | .version' -r)
+echo "=== Installing flashinfer-jit-cache ($FLASHINFER) ==="
+uv pip install flashinfer-jit-cache==$FLASHINFER --index-url https://flashinfer.ai/whl/cu129
+echo "flashinfer-jit-cache ($FLASHINFER) install complete."
+
+${installDeepGEMM}
 
 `.trimStart();
 }
 
-function renderInstallDeepGEMM(ss: ProcessState): string {
-  const deepGEMMDir = `${ss.paths.remoteProjectVllmDir}/deepGEMM`;
+async function getDeepGemmRef(
+  vllmVersion: string,
+): Promise<string | undefined> {
+  const url = `https://raw.githubusercontent.com/vllm-project/vllm/refs/heads/releases/v${vllmVersion}/tools/install_deepgemm.sh`;
 
-  // if (semverGte(vllmVersion, '0.23.0')) return '';
-  return `
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+    const text = await response.text();
+
+    // Matches DEEPGEMM_GIT_REF="any_value" or DEEPGEMM_GIT_REF='any_value'
+    const match = text.match(/DEEPGEMM_GIT_REF=["']([^"']+)["']/);
+
+    return match ? match[1]! : undefined;
+  } catch (error) {
+    console.error('Failed to fetch or parse the file:', error);
+    return undefined;
+  }
+}
+
+async function renderInstallDeepGEMM(ss: ProcessState): Promise<string> {
+  const vllmVersion = ss.vllmVersion;
+  const deepGEMMDir = `${ss.paths.remoteProjectVllmDir}/deepGEMM/${vllmVersion}`;
+  const deepGEMMRef = await getDeepGemmRef(vllmVersion);
+
+  if (deepGEMMRef) {
+    // if (semverGte(vllmVersion, '0.23.0')) return '';
+    return `
 source ${ss.paths.remoteProjectVllmVenvActivate}
 
 if [ ! -d ${deepGEMMDir} ]; then
@@ -155,8 +185,7 @@ if [ ! -d ${deepGEMMDir} ]; then
 
   INSTALL_DIR=$(mktemp -d)
   DEEPGEMM_GIT_REPO="https://github.com/deepseek-ai/DeepGEMM.git"
-  # DEEPGEMM_GIT_REF="891d57b4db1071624b5c8fa0d1e51cb317fa709f"
-  DEEPGEMM_GIT_REF="950d31ab03d5d4753f10a6c7e463856f5037bff2"
+  DEEPGEMM_GIT_REF=${deepGEMMRef!}
 
   export CUDA_VERSION="12.9"
 
@@ -189,6 +218,10 @@ fi
 echo "=== Installing precomplied DeepGEMM ==="
 uv pip install ${deepGEMMDir}/*.whl
 echo "DEEPGEMM_SETUP_SUCCESS"
-
 `;
+  } else {
+    return `
+# No DeepGEMM identified for ${vllmVersion}
+`;
+  }
 }

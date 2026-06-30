@@ -174,7 +174,7 @@ export const monitorSession: RemoteMonitor = {
           tests -= 1;
           if (!alive) {
             console.warn(`Dropped a heartbeat. (retries: ${tests})`);
-            await sleep(5_000);
+            await sleep(20_000);
           }
         }
 

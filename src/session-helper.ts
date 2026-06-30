@@ -100,7 +100,7 @@ export async function ensureModelDownloaded(ss: SessionState): Promise<void> {
 --mem=16G \\
 --time=00:30:00 \\
 --export=ALL \\
-hf download "${model}"
+/bin/bash -c "umask 0002 && source ${ss.paths.remoteProjectVllmVenvActivate} && hf download '${model}'"
 `;
       const { exitCode: dlCode } = await ops.runRemote(remoteSrun, {
         env: hfEnv,

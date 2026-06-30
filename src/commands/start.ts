@@ -44,6 +44,7 @@ ivllm start test-job --mock --model Qwen/Qwen2.5-0.5B-Instruct --dry-run
 
   let startArgs;
   try {
+    console.clear();
     startArgs = await parseStartArgs(args, config);
 
     startArgs.isInteractive = false;
