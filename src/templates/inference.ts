@@ -219,9 +219,21 @@ fi
 
 
 export FLASHINFER_JIT_CACHE_DIR="$HOME/.cache/flashinfer"
+
+# try and fix inductor autotuning method
+export VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR="$HOME/.cache/flashinfer_auto"
+
 export DG_JIT_CACHE_DIR="$HOME/.deep_gemm"
 export TRITON_CACHE_DIR="$HOME/.triton"
 export TORCHINDUCTOR_CACHE_DIR="$HOME/.cache/torchinductor"
+
+# try and fix inductor autotuning method
+export VLLM_ENABLE_INDUCTOR_MAX_AUTOTUNE="0"
+export VLLM_COMPILE_CACHE_SAVE_FORMAT="unpacked"
+
+export TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE="0"
+export TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE="0"
+export TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE="0"
 
 export VLLM_CACHE_ROOT="$HOME/.cache/vllm"
 `;

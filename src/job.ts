@@ -186,7 +186,8 @@ export function makePaths(
   const remoteJobVllmPluginsDir = `${remoteJobDir}/plugins`;
   const remoteProjectHfDir = `${base.remoteProjectDir}/hf`;
   const remoteProjectHfModelDir = `${remoteProjectHfDir}/hub/${hfModelKey}`;
-  const remoteProjectJobCacheDir = `${base.remoteProjectVllmDir}/cache/${cacheKey}`;
+  // move cache file to users home to see if we can avoid permissions error.
+  const remoteProjectJobCacheDir = `${remoteJobDir}/cache/${cacheKey}`;
   const remoteProjectJobCacheFile = `${remoteProjectJobCacheDir}/cache.tar.gz`;
   const localCacheDir = join(os.homedir(), '.config', 'ivllm');
   const localCacheVllmConfigFile = join(localCacheDir, `${jobName}.yaml`);
